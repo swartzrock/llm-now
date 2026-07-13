@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>llm-now</id>
+    <version>__PACKAGE_VERSION__</version>
+    <title>llm-now</title>
+    <authors>swartzrock</authors>
+    <projectUrl>https://github.com/swartzrock/llm-now</projectUrl>
+    <license type="expression">MIT</license>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Run one prompt against an available local or cloud LLM.</description>
+    <tags>llm cli ai</tags>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
