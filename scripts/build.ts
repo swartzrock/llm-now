@@ -27,9 +27,10 @@ export function archiveMtime(sourceDateEpoch = process.env.SOURCE_DATE_EPOCH): D
   if (!/^\d+$/.test(sourceDateEpoch)) {
     throw new Error("SOURCE_DATE_EPOCH must be a Unix timestamp in whole seconds");
   }
-  const date = new Date(Number(sourceDateEpoch) * 1_000);
-  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() < 1980 || date.getUTCFullYear() > 2107) {
-    throw new Error("SOURCE_DATE_EPOCH must be representable by the ZIP date range (1980-2107)");
+  const seconds = Number(sourceDateEpoch);
+  const date = new Date(seconds * 1_000);
+  if (!Number.isSafeInteger(seconds) || date.getUTCFullYear() < 1980 || seconds > 0xffff_ffff) {
+    throw new Error("SOURCE_DATE_EPOCH must be representable by the ZIP timestamp range (1980-2106)");
   }
   return date;
 }
@@ -39,8 +40,11 @@ export function createExecutableArchive(
   bytes: Uint8Array,
   mtime: Date,
 ): Uint8Array {
+  const unixMtime = new Uint8Array(5);
+  unixMtime[0] = 1;
+  new DataView(unixMtime.buffer).setUint32(1, Math.floor(mtime.getTime() / 1_000), true);
   return zipSync({
-    [name]: [bytes, { os: 3, attrs: 0o755 << 16 }],
+    [name]: [bytes, { os: 3, attrs: 0o755 << 16, extra: { [0x5455]: unixMtime } }],
   }, { level: 9, mtime });
 }
 
