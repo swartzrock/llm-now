@@ -139,7 +139,7 @@ jobs:
           test "$exit_code" -eq 2
           test ! -s stdout.txt
           grep -q "usage: non-interactive calls require" stderr.txt
-          brew uninstall llm-now
+          brew uninstall --force llm-now
           brew untap swartzrock/llm-now-local
 
   chocolatey:

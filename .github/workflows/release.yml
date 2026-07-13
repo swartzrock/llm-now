@@ -315,7 +315,7 @@ jobs:
           bun scripts/package-render.ts homebrew .release-artifacts/SHA256SUMS "$tap_dir/Formula/llm-now.rb" http://127.0.0.1:8765 "$version"
           brew upgrade llm-now
           test "$(llm-now --version)" = "$version"
-          brew uninstall llm-now
+          brew uninstall --force llm-now
           brew untap swartzrock/llm-now-release-gate
 
   chocolatey-gate:

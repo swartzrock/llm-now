@@ -46,4 +46,12 @@ describe("release workflow policy", () => {
       expect(identity).toBeLessThan(workflow.indexOf("brew tap-new"));
     }
   });
+
+  test("removes every installed test version before untapping Homebrew", () => {
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      expect(workflow).toContain("brew uninstall --force llm-now");
+      expect(workflow.indexOf("brew uninstall --force llm-now"))
+        .toBeLessThan(workflow.indexOf("brew untap"));
+    }
+  });
 });
