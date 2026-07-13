@@ -1,0 +1,1 @@
+# Isolate compile-smoke builds from user-level Bun configuration.
