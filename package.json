@@ -12,10 +12,13 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "runtime:smoke": "bun tests/runtime-compile-smoke.ts",
-    "check": "bun test && bun run typecheck && bun run runtime:smoke"
+    "check": "bun test && bun run typecheck && bun run runtime:smoke",
+    "build:native": "bun scripts/build.ts",
+    "release:validate": "bun scripts/release-validate.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",
+    "fflate": "0.8.2",
     "typescript": "5.9.3"
   },
   "dependencies": {
