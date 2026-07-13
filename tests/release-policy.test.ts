@@ -29,4 +29,13 @@ describe("release workflow policy", () => {
       expect(actions.every((action) => /@[a-f0-9]{40}$/.test(action))).toBe(true);
     }
   });
+
+  test("uses baseline Bun to compile the baseline Windows executable", () => {
+    const baselineUrl =
+      "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-windows-x64-baseline.zip";
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      expect(workflow).toContain("if: matrix.target == 'windows-x64'");
+      expect(workflow).toContain(`bun-download-url: ${baselineUrl}`);
+    }
+  });
 });
