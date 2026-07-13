@@ -8,7 +8,7 @@ import {
   createExecutableArchive,
   createChecksumManifest,
 } from "../scripts/build.ts";
-import { assembleReleaseAssets } from "../scripts/release-validate.ts";
+import { assembleReleaseAssets, runProcess } from "../scripts/release-validate.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -70,5 +70,35 @@ describe("native release build", () => {
     for (const target of RELEASE_TARGETS) {
       expect(await Bun.file(join(output, archiveName("0.1.0", target))).exists()).toBe(true);
     }
+  });
+
+  test("keeps the Bun event loop available while a child calls a local fixture", async () => {
+    const server = Bun.serve({ port: 0, fetch: () => new Response("fixture-ok") });
+    try {
+      const result = await runProcess(
+        process.execPath,
+        ["-e", `process.stdout.write(await (await fetch(${JSON.stringify(server.url.toString())})).text())`],
+        { cwd: process.cwd(), env: process.env, timeoutMs: 2_000 },
+      );
+      expect(result).toEqual({ exitCode: 0, stdout: "fixture-ok", stderr: "" });
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("rejects an archive whose executable does not match its target", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".tmp-build-tests-"));
+    temporaryDirectories.push(root);
+    const input = join(root, "input");
+    for (const target of RELEASE_TARGETS) {
+      await mkdir(join(input, target.id), { recursive: true });
+      await Bun.write(
+        join(input, target.id, archiveName("0.1.0", target)),
+        createExecutableArchive(target.id === "windows-x64" ? "llm-now" : target.executable, Uint8Array.of(1)),
+      );
+    }
+    await expect(assembleReleaseAssets(input, join(root, "output"))).rejects.toThrow(
+      "windows-x64.zip must contain llm-now.exe",
+    );
   });
 });

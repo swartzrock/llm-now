@@ -1,6 +1,6 @@
 import { chmod, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { zipSync } from "fflate";
+import { unzipSync, zipSync } from "fflate";
 import packageMetadata from "../package.json" with { type: "json" };
 
 export interface ReleaseTarget {
@@ -28,17 +28,28 @@ export function createExecutableArchive(name: string, bytes: Uint8Array): Uint8A
   }, { level: 9, mtime: new Date("1980-01-01T00:00:00Z") });
 }
 
+export function extractExecutableArchive(
+  bytes: Uint8Array,
+  label = "archive",
+): { name: "llm-now" | "llm-now.exe"; bytes: Uint8Array } {
+  const entries = unzipSync(bytes);
+  const names = Object.keys(entries);
+  const name = names[0];
+  if (names.length !== 1 || (name !== "llm-now" && name !== "llm-now.exe")) {
+    throw new Error(`${label} must contain exactly one llm-now executable`);
+  }
+  return { name, bytes: entries[name]! };
+}
+
 export async function createChecksumManifest(
   archives: readonly { name: string; bytes: Uint8Array }[],
 ): Promise<string> {
-  const lines = await Promise.all(
-    [...archives]
-      .sort((left, right) => left.name.localeCompare(right.name))
-      .map(async ({ name, bytes }) => {
-        const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
-        return `${digest}  ${name}`;
-      }),
-  );
+  const lines = [...archives]
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map(({ name, bytes }) => {
+      const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+      return `${digest}  ${name}`;
+    });
   return `${lines.join("\n")}\n`;
 }
 

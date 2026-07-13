@@ -19,6 +19,8 @@ permissions:
 jobs:
   validate-ref:
     runs-on: ubuntu-24.04
+    outputs:
+      release-sha: ${{ steps.release-sha.outputs.value }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -31,6 +33,8 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
       - run: git merge-base --is-ancestor HEAD origin/main
+      - id: release-sha
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   native:
     needs: validate-ref
@@ -53,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
@@ -69,12 +73,12 @@ jobs:
 
   unsigned-assets:
     if: ${{ !inputs.publish }}
-    needs: native
+    needs: [native, validate-ref]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
@@ -95,7 +99,7 @@ jobs:
 
   sign-macos:
     if: ${{ inputs.publish }}
-    needs: native
+    needs: [native, validate-ref]
     name: sign-${{ matrix.target }}
     environment: release-signing
     strategy:
@@ -107,17 +111,10 @@ jobs:
           - target: macos-arm64
             runner: macos-15
     runs-on: ${{ matrix.runner }}
-    env:
-      APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
@@ -127,14 +124,19 @@ jobs:
           name: native-${{ matrix.target }}
           path: .release-artifacts
       - shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          for name in APPLE_CERTIFICATE_P12_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+          for name in APPLE_CERTIFICATE_P12_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY; do
             test -n "${!name}" || { echo "Missing required release-signing secret: $name" >&2; exit 1; }
           done
+          trap 'security delete-keychain release-signing.keychain-db 2>/dev/null || true; rm -f certificate.p12' EXIT
           archive="$(find .release-artifacts -name '*.zip' -type f -print -quit)"
           mkdir signed
           unzip -q "$archive" -d signed
-          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > certificate.p12
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 -D > certificate.p12
           security create-keychain -p temporary release-signing.keychain-db
           security default-keychain -s release-signing.keychain-db
           security unlock-keychain -p temporary release-signing.keychain-db
@@ -142,7 +144,18 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temporary release-signing.keychain-db
           codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" signed/llm-now
           codesign --verify --strict --verbose=2 signed/llm-now
-          bun scripts/repack-archive.ts "$archive" signed/llm-now
+      - shell: bash
+        run: bun scripts/repack-archive.ts .release-artifacts/*.zip signed/llm-now
+      - shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          for name in APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            test -n "${!name}" || { echo "Missing required release-signing secret: $name" >&2; exit 1; }
+          done
+          archive="$(find .release-artifacts -name '*.zip' -type f -print -quit)"
           xcrun notarytool submit "$archive" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
           spctl --assess --type execute --verbose=2 signed/llm-now
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -153,16 +166,13 @@ jobs:
 
   sign-windows:
     if: ${{ inputs.publish }}
-    needs: native
+    needs: [native, validate-ref]
     runs-on: windows-2025
     environment: release-signing
-    env:
-      WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
@@ -172,19 +182,27 @@ jobs:
           name: native-windows-x64
           path: .release-artifacts
       - shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           if (-not $env:WINDOWS_CERTIFICATE_PFX_BASE64) { throw 'Missing required release-signing secret: WINDOWS_CERTIFICATE_PFX_BASE64' }
           if (-not $env:WINDOWS_CERTIFICATE_PASSWORD) { throw 'Missing required release-signing secret: WINDOWS_CERTIFICATE_PASSWORD' }
-          $archive = Get-ChildItem .release-artifacts/*.zip | Select-Object -First 1
-          Expand-Archive $archive.FullName -DestinationPath signed
-          [IO.File]::WriteAllBytes('certificate.pfx', [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $signtool) { throw 'SignTool was not found' }
-          & $signtool.FullName sign /f certificate.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 signed/llm-now.exe
-          if ($LASTEXITCODE -ne 0) { throw 'SignTool signing failed' }
-          & $signtool.FullName verify /pa /v signed/llm-now.exe
-          if ($LASTEXITCODE -ne 0) { throw 'Authenticode verification failed' }
-          bun scripts/repack-archive.ts $archive.FullName signed/llm-now.exe
+          try {
+            $archive = Get-ChildItem .release-artifacts/*.zip | Select-Object -First 1
+            Expand-Archive $archive.FullName -DestinationPath signed
+            [IO.File]::WriteAllBytes('certificate.pfx', [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64))
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $signtool) { throw 'SignTool was not found' }
+            & $signtool.FullName sign /f certificate.pfx /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 signed/llm-now.exe
+            if ($LASTEXITCODE -ne 0) { throw 'SignTool signing failed' }
+            & $signtool.FullName verify /pa /v signed/llm-now.exe
+            if ($LASTEXITCODE -ne 0) { throw 'Authenticode verification failed' }
+          } finally {
+            Remove-Item certificate.pfx -Force -ErrorAction SilentlyContinue
+          }
+      - shell: pwsh
+        run: bun scripts/repack-archive.ts (Get-ChildItem .release-artifacts/*.zip | Select-Object -First 1).FullName signed/llm-now.exe
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-windows-x64
@@ -211,12 +229,12 @@ jobs:
 
   signed-assets:
     if: ${{ inputs.publish }}
-    needs: [sign-macos, sign-windows, promote-linux]
+    needs: [sign-macos, sign-windows, promote-linux, validate-ref]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
@@ -237,12 +255,12 @@ jobs:
 
   package-rendering:
     if: ${{ always() && ((inputs.publish && needs.signed-assets.result == 'success') || (!inputs.publish && needs.unsigned-assets.result == 'success')) }}
-    needs: [unsigned-assets, signed-assets]
+    needs: [unsigned-assets, signed-assets, validate-ref]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
@@ -261,12 +279,12 @@ jobs:
 
   homebrew-gate:
     if: ${{ always() && needs.package-rendering.result == 'success' }}
-    needs: [package-rendering]
+    needs: [package-rendering, validate-ref]
     runs-on: macos-15
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
@@ -283,22 +301,23 @@ jobs:
           curl --fail --silent http://127.0.0.1:8765/SHA256SUMS >/dev/null
           brew tap-new swartzrock/llm-now-release-gate
           tap_dir="$(brew --repository swartzrock/llm-now-release-gate)"
-          bun scripts/package-render.ts homebrew .release-artifacts/SHA256SUMS "$tap_dir/Formula/llm-now.rb" http://127.0.0.1:8765 0.0.9
+          version="$(bun -e 'console.log(require("./package.json").version)')"
+          bun scripts/package-render.ts homebrew .release-artifacts/SHA256SUMS "$tap_dir/Formula/llm-now.rb" http://127.0.0.1:8765 0.0.0
           brew install swartzrock/llm-now-release-gate/llm-now
-          bun scripts/package-render.ts homebrew .release-artifacts/SHA256SUMS "$tap_dir/Formula/llm-now.rb" http://127.0.0.1:8765 0.1.0
+          bun scripts/package-render.ts homebrew .release-artifacts/SHA256SUMS "$tap_dir/Formula/llm-now.rb" http://127.0.0.1:8765 "$version"
           brew upgrade llm-now
-          test "$(llm-now --version)" = "0.1.0"
+          test "$(llm-now --version)" = "$version"
           brew uninstall llm-now
           brew untap swartzrock/llm-now-release-gate
 
   chocolatey-gate:
     if: ${{ always() && needs.package-rendering.result == 'success' }}
-    needs: [package-rendering]
+    needs: [package-rendering, validate-ref]
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
@@ -314,24 +333,37 @@ jobs:
             try { Invoke-WebRequest http://127.0.0.1:8765/SHA256SUMS -UseBasicParsing | Out-Null; break } catch { Start-Sleep 1 }
           }
           New-Item -ItemType Directory -Force .choco-source | Out-Null
-          bun scripts/package-render.ts chocolatey .release-artifacts/SHA256SUMS .choco-old http://127.0.0.1:8765 0.0.9
+          $version = bun -e 'console.log(require("./package.json").version)'
+          bun scripts/package-render.ts chocolatey .release-artifacts/SHA256SUMS .choco-old http://127.0.0.1:8765 0.0.0
           choco pack .choco-old/llm-now.nuspec --outputdirectory .choco-source
-          choco install llm-now --version 0.0.9 --source "$PWD/.choco-source" --yes --no-progress
-          bun scripts/package-render.ts chocolatey .release-artifacts/SHA256SUMS .choco-current http://127.0.0.1:8765 0.1.0
+          choco install llm-now --version 0.0.0 --source "$PWD/.choco-source" --yes --no-progress
+          bun scripts/package-render.ts chocolatey .release-artifacts/SHA256SUMS .choco-current http://127.0.0.1:8765 $version
           choco pack .choco-current/llm-now.nuspec --outputdirectory .choco-source
-          choco upgrade llm-now --version 0.1.0 --source "$PWD/.choco-source" --yes --no-progress
-          if ((llm-now --version) -ne '0.1.0') { throw 'installed binary version mismatch' }
+          choco upgrade llm-now --version $version --source "$PWD/.choco-source" --yes --no-progress
+          if ((llm-now --version) -ne $version) { throw 'installed binary version mismatch' }
           choco uninstall llm-now --yes --no-progress
           Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
 
   publish:
     if: ${{ inputs.publish }}
-    needs: [signed-assets, homebrew-gate, chocolatey-gate]
+    needs: [signed-assets, homebrew-gate, chocolatey-gate, validate-ref]
     runs-on: ubuntu-24.04
     environment: release-publication
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
+        run: |
+          git fetch origin "+refs/tags/${TAG}:refs/tags/${TAG}"
+          test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA"
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: release-assets
@@ -339,6 +371,7 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ needs.validate-ref.outputs.release-sha }}
           files: |
             dist/*.zip
             dist/SHA256SUMS

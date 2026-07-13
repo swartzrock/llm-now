@@ -1,11 +1,11 @@
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { delimiter, join } from "node:path";
-import { unzipSync } from "fflate";
+import { basename, delimiter, join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
 import {
   RELEASE_TARGETS,
   archiveName,
   createChecksumManifest,
+  extractExecutableArchive,
 } from "./build.ts";
 
 async function zipFiles(directory: string): Promise<string[]> {
@@ -16,26 +16,27 @@ async function zipFiles(directory: string): Promise<string[]> {
   return names.sort();
 }
 
-function archiveExecutable(path: string, bytes: Uint8Array): { name: string; bytes: Uint8Array } {
-  const entries = unzipSync(bytes);
-  const names = Object.keys(entries);
-  if (names.length !== 1 || !["llm-now", "llm-now.exe"].includes(names[0]!)) {
-    throw new Error(`${path} must contain exactly one llm-now executable`);
-  }
-  return { name: names[0]!, bytes: entries[names[0]!]! };
-}
-
 export async function validateArchives(directory: string): Promise<void> {
   const files = await zipFiles(directory);
   if (files.length === 0) throw new Error(`no release archives found in ${directory}`);
   for (const path of files) {
-    archiveExecutable(path, new Uint8Array(await Bun.file(path).arrayBuffer()));
+    const target = RELEASE_TARGETS.find(
+      (candidate) => archiveName(packageMetadata.version, candidate) === basename(path),
+    );
+    if (!target) throw new Error(`unexpected release archive: ${basename(path)}`);
+    const entry = extractExecutableArchive(
+      new Uint8Array(await Bun.file(path).arrayBuffer()),
+      path,
+    );
+    if (entry.name !== target.executable) {
+      throw new Error(`${basename(path)} must contain ${target.executable}`);
+    }
   }
 }
 
 export async function assembleReleaseAssets(input: string, output: string): Promise<void> {
   const files = await zipFiles(input);
-  const actualNames = files.map((path) => path.split(/[\\/]/).at(-1)!).sort();
+  const actualNames = files.map((path) => basename(path)).sort();
   const expectedNames = RELEASE_TARGETS.map((target) => archiveName(packageMetadata.version, target)).sort();
   if (new Set(actualNames).size !== expectedNames.length || actualNames.join("\n") !== expectedNames.join("\n")) {
     throw new Error(`release archive set mismatch: expected ${expectedNames.join(", ")}; received ${actualNames.join(", ")}`);
@@ -44,9 +45,13 @@ export async function assembleReleaseAssets(input: string, output: string): Prom
   await mkdir(output, { recursive: true });
   const archives = [];
   for (const path of files) {
-    const name = path.split(/[\\/]/).at(-1)!;
+    const name = basename(path);
     const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
-    archiveExecutable(path, bytes);
+    const target = RELEASE_TARGETS.find(
+      (candidate) => archiveName(packageMetadata.version, candidate) === name,
+    )!;
+    const entry = extractExecutableArchive(bytes, path);
+    if (entry.name !== target.executable) throw new Error(`${name} must contain ${target.executable}`);
     await Bun.write(join(output, name), bytes);
     archives.push({ name, bytes });
   }
@@ -61,11 +66,44 @@ function run(executable: string, args: string[], options: { cwd: string; env: Re
   });
 }
 
+export async function runProcess(
+  executable: string,
+  args: string[],
+  options: { cwd: string; env: Record<string, string | undefined>; timeoutMs?: number },
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const child = Bun.spawn([executable, ...args], {
+    cwd: options.cwd,
+    env: options.env,
+    stdin: new Uint8Array(),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdout = new Response(child.stdout).text();
+  const stderr = new Response(child.stderr).text();
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const exitCode = await Promise.race([
+      child.exited,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`native process timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+    return { exitCode, stdout: await stdout, stderr: await stderr };
+  } catch (error) {
+    child.kill();
+    await child.exited;
+    throw error;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 async function smoke(archivePath: string): Promise<void> {
   const temporary = await mkdtemp(join(process.cwd(), ".tmp-release-smoke-"));
   try {
     const archive = new Uint8Array(await Bun.file(archivePath).arrayBuffer());
-    const entry = archiveExecutable(archivePath, archive);
+    const entry = extractExecutableArchive(archive, archivePath);
     const executable = join(temporary, entry.name);
     await Bun.write(executable, entry.bytes);
     if (process.platform !== "win32") await chmod(executable, 0o755);
@@ -95,7 +133,7 @@ async function smoke(archivePath: string): Promise<void> {
     };
     const cases = [
       { args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now --input <text>", stderrIncludes: "" },
-      { args: ["--version"], code: 0, stdout: "0.1.0\n", stderrIncludes: "" },
+      { args: ["--version"], code: 0, stdout: `${packageMetadata.version}\n`, stderrIncludes: "" },
       { args: ["--input", "smoke"], code: 2, stdout: "", stderrIncludes: "usage: non-interactive calls require" },
       { args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:smoke", stderrIncludes: "" },
     ] as const;
@@ -120,12 +158,12 @@ async function smoke(archivePath: string): Promise<void> {
         : Response.json({ models: [{ name: "fake-model" }] }),
     });
     try {
-      const result = run(executable, ["--input", "smoke", "--provider", "ollama", "--model", "fake-model"], {
+      const result = await runProcess(executable, ["--input", "smoke", "--provider", "ollama", "--model", "fake-model"], {
         cwd: temporary,
         env,
       });
-      if (result.exitCode !== 0 || result.stdout.toString() !== "http:smoke" || result.stderr.toString() !== "") {
-        throw new Error(`native HTTP smoke failed: exit=${result.exitCode} stdout=${JSON.stringify(result.stdout.toString())} stderr=${JSON.stringify(result.stderr.toString())}`);
+      if (result.exitCode !== 0 || result.stdout !== "http:smoke" || result.stderr !== "") {
+        throw new Error(`native HTTP smoke failed: exit=${result.exitCode} stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`);
       }
     } finally {
       server.stop(true);

@@ -32,7 +32,7 @@ Release candidates are started manually with the `Release candidate` GitHub Acti
 - `release-signing`: Apple signing identity, base64 PKCS#12 certificate and password, notarization Apple ID/team/app password, plus a base64 Windows PFX certificate and password
 - `release-publication`: final approval to create the GitHub Release after native signing and package lifecycle gates pass
 
-The repository owner must configure those environments with required reviewers. Missing credentials fail the authorized signing job with the missing secret's name; they do not weaken pull-request verification or publish partial assets. Homebrew tap publication and Chocolatey community submission remain separate, explicitly authorized follow-up operations.
+The repository owner must configure those environments with required reviewers and protect release tags from mutation. Every release job checks out the commit SHA established by the initial tag/version/main-ancestry gate, and publication rechecks that the tag still resolves to that SHA. Missing credentials fail the authorized signing job with the missing secret's name; they do not weaken pull-request verification or publish partial assets. Homebrew tap publication and Chocolatey community submission remain separate, explicitly authorized follow-up operations.
 
 ## Usage
 

@@ -118,10 +118,11 @@ jobs:
         run: |
           brew tap-new swartzrock/llm-now-local
           tap_dir="$(brew --repository swartzrock/llm-now-local)"
-          bun scripts/package-render.ts homebrew .release-artifacts/SHA256SUMS "$tap_dir/Formula/llm-now.rb" http://127.0.0.1:8765 0.0.9
+          version="$(bun -e 'console.log(require("./package.json").version)')"
+          bun scripts/package-render.ts homebrew .release-artifacts/SHA256SUMS "$tap_dir/Formula/llm-now.rb" http://127.0.0.1:8765 0.0.0
           brew install swartzrock/llm-now-local/llm-now
-          test "$(llm-now --version)" = "0.1.0"
-          bun scripts/package-render.ts homebrew .release-artifacts/SHA256SUMS "$tap_dir/Formula/llm-now.rb" http://127.0.0.1:8765 0.1.0
+          test "$(llm-now --version)" = "$version"
+          bun scripts/package-render.ts homebrew .release-artifacts/SHA256SUMS "$tap_dir/Formula/llm-now.rb" http://127.0.0.1:8765 "$version"
           brew upgrade llm-now
           set +e
           llm-now --input smoke >stdout.txt 2>stderr.txt
@@ -157,13 +158,14 @@ jobs:
       - shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .choco-source | Out-Null
-          bun scripts/package-render.ts chocolatey .release-artifacts/SHA256SUMS .choco-old http://127.0.0.1:8765 0.0.9
+          $version = bun -e 'console.log(require("./package.json").version)'
+          bun scripts/package-render.ts chocolatey .release-artifacts/SHA256SUMS .choco-old http://127.0.0.1:8765 0.0.0
           choco pack .choco-old/llm-now.nuspec --outputdirectory .choco-source
-          choco install llm-now --version 0.0.9 --source "$PWD/.choco-source" --yes --no-progress
-          if ((llm-now --version) -ne '0.1.0') { throw 'installed binary version mismatch' }
-          bun scripts/package-render.ts chocolatey .release-artifacts/SHA256SUMS .choco-current http://127.0.0.1:8765 0.1.0
+          choco install llm-now --version 0.0.0 --source "$PWD/.choco-source" --yes --no-progress
+          if ((llm-now --version) -ne $version) { throw 'installed binary version mismatch' }
+          bun scripts/package-render.ts chocolatey .release-artifacts/SHA256SUMS .choco-current http://127.0.0.1:8765 $version
           choco pack .choco-current/llm-now.nuspec --outputdirectory .choco-source
-          choco upgrade llm-now --version 0.1.0 --source "$PWD/.choco-source" --yes --no-progress
+          choco upgrade llm-now --version $version --source "$PWD/.choco-source" --yes --no-progress
           llm-now --input smoke > stdout.txt 2> stderr.txt
           if ($LASTEXITCODE -ne 2) { throw 'deterministic failure exit mismatch' }
           if ((Get-Item stdout.txt).Length -ne 0) { throw 'deterministic failure wrote stdout' }
