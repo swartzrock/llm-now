@@ -139,6 +139,8 @@ describe("arguments and input", () => {
     expect(HELP_TEXT).toContain("--alias");
     expect(HELP_TEXT).toContain("--provider");
     expect(HELP_TEXT).toContain("stdin");
+    expect(HELP_TEXT).toContain("XDG_CONFIG_HOME");
+    expect(HELP_TEXT).toContain("Exit codes:");
     expect(() => parseArguments(["--help", "--alias", "daily"])).toThrow(UsageError);
   });
 });

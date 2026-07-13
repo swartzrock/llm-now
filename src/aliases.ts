@@ -6,6 +6,10 @@ import { randomUUID } from "node:crypto";
 const ALIAS_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
 
+export function isValidAliasName(name: string): boolean {
+  return ALIAS_NAME.test(name);
+}
+
 export interface AliasRecord {
   provider: ByokProviderId;
   model: string | null;
@@ -78,7 +82,7 @@ function validateDocument(value: unknown): value is AliasDocument {
   if (value.version !== 1 || !isObject(value.aliases)) return false;
 
   return Object.entries(value.aliases).every(
-    ([name, record]) => ALIAS_NAME.test(name) && validateAliasRecord(record),
+    ([name, record]) => isValidAliasName(name) && validateAliasRecord(record),
   );
 }
 
@@ -100,14 +104,14 @@ export async function loadAliases(path: string): Promise<AliasDocument> {
 }
 
 export async function resolveAlias(path: string, name: string): Promise<AliasRecord> {
-  if (!ALIAS_NAME.test(name)) throw new AliasStoreError(`invalid alias name: ${name}`);
+  if (!isValidAliasName(name)) throw new AliasStoreError(`invalid alias name: ${name}`);
   const record = (await loadAliases(path)).aliases[name];
   if (record === undefined) throw new AliasStoreError(`alias not found: ${name}`);
   return record;
 }
 
 function validateSaveInput(name: string, record: AliasRecord): void {
-  if (!ALIAS_NAME.test(name)) throw new AliasStoreError(`invalid alias name: ${name}`);
+  if (!isValidAliasName(name)) throw new AliasStoreError(`invalid alias name: ${name}`);
   if (!validateAliasRecord({ provider: record.provider, model: record.model })) {
     throw new AliasStoreError(`invalid alias selection: ${name}`);
   }

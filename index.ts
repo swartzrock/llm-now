@@ -1,5 +1,9 @@
 import { isByokProviderId } from "@swartzrock/byok-runtime";
 import { createByokNodeProvider } from "@swartzrock/byok-runtime/node";
+import { homedir } from "node:os";
+import packageMetadata from "./package.json" with { type: "json" };
+import { createApplicationPrompter, runApplication } from "./src/app.ts";
+import { createRuntimeGateway } from "./src/runtime.ts";
 
 async function runRuntimeSmoke(fakeCli: string): Promise<void> {
   if (!isByokProviderId("ollama")) {
@@ -30,4 +34,17 @@ if (Bun.argv[2] === "--runtime-smoke") {
   const fakeCli = Bun.argv[3];
   if (!fakeCli) throw new Error("missing fake CLI path");
   await runRuntimeSmoke(fakeCli);
+} else {
+  process.exitCode = await runApplication({
+    args: Bun.argv.slice(2),
+    stdin: process.stdin,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    runtime: createRuntimeGateway({ env: process.env }),
+    prompter: createApplicationPrompter(process.stdin, process.stderr),
+    env: process.env,
+    platform: process.platform,
+    home: homedir(),
+    version: packageMetadata.version,
+  });
 }

@@ -16,6 +16,19 @@ Selection:
 Input:
   Supply exactly one source: --input or stdin.
 
+Aliases:
+  Saved aliases contain only provider/model selection data.
+  macOS/Linux: $XDG_CONFIG_HOME/llm-now/aliases.json or ~/.config/llm-now/aliases.json.
+  Windows: %APPDATA%\\llm-now\\aliases.json or the roaming directory under %USERPROFILE%.
+
+Output and diagnostics:
+  Successful response text is written byte-for-byte to stdout.
+  Menus and stage-labelled diagnostics are written to stderr.
+
+Exit codes:
+  0 success/help/version, 1 runtime/configuration failure, 2 invalid usage,
+  130 provider/model selection cancelled before generation.
+
 Options:
   --input <text>       Prompt text
   --alias <name>       Saved provider/model selection
