@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: llm-now interactive UX</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0d12;
+      --panel: #11151d;
+      --panel-2: #171c26;
+      --ink: #eef2ff;
+      --muted: #a8b0c3;
+      --line: #293142;
+      --mint: #75e6c4;
+      --mint-soft: #16352f;
+      --mint-text: #b9f8e6;
+      --violet: #b6a4ff;
+      --violet-soft: #292448;
+      --violet-text: #ddd5ff;
+      --amber: #f2c96d;
+      --amber-soft: #3b3017;
+      --amber-text: #ffe6a8;
+      --rose-soft: #3b202b;
+      --rose-text: #ffc8dc;
+      --shadow: 0 18px 50px rgba(0,0,0,.3);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(117,230,196,.08), transparent 28rem),
+        radial-gradient(circle at 90% 10%, rgba(182,164,255,.08), transparent 30rem),
+        var(--bg);
+      color: var(--ink);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+    a { color: var(--mint); text-underline-offset: 3px; }
+    code, .mono {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: .92em;
+    }
+    .shell { width: min(940px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 72px 0 38px; }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--mint);
+      font-size: .76rem;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.18; letter-spacing: -.025em; }
+    h1 { max-width: 760px; margin: 0; font-size: clamp(2.35rem, 7vw, 4.7rem); }
+    h2 { margin: 0 0 18px; font-size: clamp(1.65rem, 4vw, 2.35rem); }
+    h3 { margin: 0; font-size: 1.35rem; }
+    .lede { max-width: 69ch; margin: 18px 0 0; color: var(--muted); font-size: 1.08rem; }
+    .metadata, .stats {
+      display: grid;
+      gap: 10px;
+      margin-top: 28px;
+    }
+    .metadata { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .meta, .stat {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(17,21,29,.82);
+      padding: 14px 16px;
+    }
+    .meta dt, .stat dt, .idea-meta dt {
+      color: var(--muted);
+      font-size: .7rem;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .meta dd, .stat dd, .idea-meta dd { margin: 4px 0 0; }
+    .stat dd { color: var(--mint); font-size: 1.65rem; font-weight: 800; line-height: 1.1; }
+    nav.topnav {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      border-block: 1px solid var(--line);
+      background: rgba(11,13,18,.9);
+      backdrop-filter: blur(14px);
+    }
+    .topnav .shell { display: flex; gap: 20px; overflow-x: auto; padding-block: 12px; }
+    .topnav a { color: var(--muted); font-size: .86rem; font-weight: 700; text-decoration: none; white-space: nowrap; }
+    .topnav a:hover { color: var(--ink); }
+    main { padding: 42px 0 70px; }
+    section { margin-bottom: 64px; scroll-margin-top: 70px; }
+    .prose { max-width: 72ch; }
+    .callout {
+      margin-top: 22px;
+      border: 1px solid #3b4660;
+      border-radius: 16px;
+      background: #171d29;
+      padding: 18px 20px;
+    }
+    .callout .eyebrow { color: var(--amber); margin-bottom: 6px; }
+    .axes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .axis {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+      padding: 18px;
+    }
+    .axis b { display: block; margin-bottom: 4px; color: var(--violet-text); }
+    .axis span { color: var(--muted); }
+    .jump-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: 0 0 22px;
+      padding: 0;
+      list-style: none;
+    }
+    .jump-list a {
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 10px 12px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+    .jump-list a:hover { border-color: var(--mint); }
+    .idea {
+      scroll-margin-top: 76px;
+      margin-bottom: 18px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: linear-gradient(145deg, rgba(23,28,38,.96), rgba(14,18,25,.96));
+      box-shadow: var(--shadow);
+      padding: clamp(20px, 4vw, 30px);
+    }
+    .idea.top { border-color: #416f66; background: linear-gradient(145deg, #17302c, #111821 58%); }
+    .idea-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+    .rank {
+      display: inline-grid;
+      place-items: center;
+      min-width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      background: var(--mint-soft);
+      color: var(--mint-text);
+      font-weight: 900;
+    }
+    .idea-title { display: flex; align-items: center; gap: 12px; }
+    .badge-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+    .badge {
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: .72rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+      white-space: nowrap;
+    }
+    .badge.axis-tag { background: var(--violet-soft); color: var(--violet-text); border-color: #4a4277; }
+    .badge.conf { background: var(--mint-soft); color: var(--mint-text); border-color: #316257; }
+    .badge.cx { background: var(--amber-soft); color: var(--amber-text); border-color: #685424; }
+    .description { max-width: 76ch; margin: 18px 0 0; font-size: 1.03rem; }
+    .idea-meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px 22px;
+      margin: 22px 0 0;
+    }
+    .idea-meta > div { border-top: 1px solid var(--line); padding-top: 13px; }
+    .idea-meta .wide { grid-column: 1 / -1; }
+    .idea-meta dd { color: #d5dbea; }
+    .visual {
+      margin-top: 24px;
+      border: 1px solid #354054;
+      border-radius: 16px;
+      background: #0c1017;
+      padding: 12px;
+      overflow-x: auto;
+    }
+    .visual svg { display: block; width: 100%; min-width: 680px; height: auto; }
+    .terminal-sample {
+      margin-top: 20px;
+      border: 1px solid #316257;
+      border-radius: 14px;
+      background: #0c1413;
+      padding: 16px 18px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: .9rem;
+    }
+    .terminal-sample .prompt-line, .terminal-sample .success-line { color: var(--mint); }
+    .terminal-sample .placeholder-line { margin-top: 4px; color: #7f948e; }
+    .terminal-sample .success-line { margin-top: 14px; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: var(--panel); }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--panel-2); color: var(--muted); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .cut { color: var(--rose-text); font-weight: 700; }
+    footer { border-top: 1px solid var(--line); padding: 24px 0 40px; color: var(--muted); font-size: .82rem; }
+    @media (max-width: 720px) {
+      header { padding-top: 46px; }
+      .metadata, .stats, .axes, .jump-list, .idea-meta { grid-template-columns: 1fr; }
+      .idea-meta .wide { grid-column: auto; }
+      .idea-head { flex-direction: column; }
+      .badge-row { justify-content: flex-start; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <p class="eyebrow">Ideation · CLI experience</p>
+    <h1>Make every run improve the next one.</h1>
+    <p class="lede">A ranked set of directions for making <code>llm-now</code> feel fast when aliases exist, searchable when they do not, and unmistakably finished when model output stops.</p>
+
+    <dl class="metadata">
+      <div class="meta"><dt>Date</dt><dd><time datetime="2026-07-13">2026-07-13</time></dd></div>
+      <div class="meta"><dt>Topic</dt><dd><code>llm-now-interactive-ux</code></dd></div>
+      <div class="meta"><dt>Focus</dt><dd>Alias-first selection, sorted typeahead lists, output separation, and optional alias capture</dd></div>
+      <div class="meta"><dt>Mode</dt><dd><code>repo-grounded</code></dd></div>
+    </dl>
+
+    <dl class="stats">
+      <div class="stat"><dt>Raw ideas</dt><dd>44</dd></div>
+      <div class="stat"><dt>Consolidated</dt><dd>21</dd></div>
+      <div class="stat"><dt>Survivors</dt><dd>7</dd></div>
+      <div class="stat"><dt>Topic axes</dt><dd>4</dd></div>
+    </dl>
+  </header>
+
+  <nav class="topnav" aria-label="Document sections">
+    <div class="shell">
+      <a href="#grounding-context">Grounding Context</a>
+      <a href="#topic-axes">Topic Axes</a>
+      <a href="#ranked-ideas">Ranked Ideas</a>
+      <a href="#rejection-summary">Rejection Summary</a>
+      <a href="#sources">Sources</a>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="grounding-context">
+      <p class="eyebrow">What the repo says</p>
+      <h2>Grounding Context</h2>
+      <div class="prose">
+        <p><strong>Codebase Context.</strong> Interactive calls with an omitted selection currently go straight to provider discovery. The alias store can already return the full validated alias map, but the application only injects resolve/save operations. Provider and model options preserve runtime order, and the numbered menu has two visual owners: diagnostic rendering plus a separate numeric question.</p>
+        <p>Generation writes the response exactly once and byte-for-byte to stdout. Interactive prompts use stderr, but the save prompt begins immediately after generation; when the response lacks a trailing newline, both streams share the same terminal row. The existing finish flow asks for confirmation, then asks for a name, then optionally asks about overwrite.</p>
+        <p>Current tests and documentation protect the valuable parts of the contract: explicit aliases bypass discovery, non-interactive invocations stay deterministic, pre-generation cancellation exits 130, post-success skipping exits 0, overwrites require consent, and even an absent trailing newline is part of exact stdout.</p>
+        <p>External prior art is aligned: Clack autocomplete searches structured option text, hints, and values; AWS auto-prompt and <code>fzf</code> normalize type-to-filter with arrows and Enter; mature LLM CLIs treat aliases as first-class persistent shortcuts. For app-owned ANSI styling around the prompt, <code>picocolors</code> provides a tiny, dependency-free, <code>NO_COLOR</code>-friendly ESM API.</p>
+      </div>
+      <aside class="callout">
+        <p class="eyebrow">Non-negotiable constraint</p>
+        <p>The visible newline belongs to the interactive UI channel. Appending it to stdout would fix the screenshot while breaking a stronger shell contract.</p>
+      </aside>
+    </section>
+
+    <section id="topic-axes">
+      <p class="eyebrow">Surface map</p>
+      <h2>Topic Axes</h2>
+      <div class="axes">
+        <div class="axis"><b>1. Startup routing</b><span>Saved alias versus fresh provider/model discovery.</span></div>
+        <div class="axis"><b>2. Searchable selection</b><span>Provider/model ordering, filtering, identity, and recovery.</span></div>
+        <div class="axis"><b>3. Terminal boundary</b><span>Where exact model output ends and interactive UI begins.</span></div>
+        <div class="axis"><b>4. Finish flow</b><span>Optional alias capture, validation, collision safety, and exit.</span></div>
+      </div>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">The strongest directions</p>
+      <h2>Ranked Ideas</h2>
+      <ol class="jump-list">
+        <li><a href="#idea-1">1. The named execution loop</a></li>
+        <li><a href="#idea-2">2. Alias library as the default home</a></li>
+        <li><a href="#idea-3">3. One typed autocomplete contract</a></li>
+        <li><a href="#idea-4">4. Deterministic recognition order</a></li>
+        <li><a href="#idea-5">5. A deliberate terminal epilogue</a></li>
+        <li><a href="#idea-6">6. One-field save-or-exit</a></li>
+        <li><a href="#idea-7">7. Recovery-aware Clack picker</a></li>
+      </ol>
+
+      <article class="idea top" id="idea-1">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">1</span><h3>The named execution loop</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Cross-axis</span><span class="badge conf">Conf · 92%</span><span class="badge cx">Cx · Medium</span></div>
+        </div>
+        <p class="description">Treat aliases as a reinforcing product loop rather than a detached flag. An omitted-alias interactive run begins with saved names; fresh discovery remains one explicit escape hatch; after a fresh run, one optional field can name that choice. The selected result carries whether it was already named, so existing aliases finish cleanly and only fresh choices invite capture.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> <code>loadAliases()</code> already exposes the complete map; current selection paths already converge on the same provider/model record; current save eligibility cannot represent an alias picked from an interactive screen. <strong>external:</strong> mature CLI profile and alias systems make saved configurations the repeat-use fast path.</dd></div>
+          <div><dt>Rationale</dt><dd>This is the only direction that changes the compounding behavior of the product: each exploratory choice can make every later run faster.</dd></div>
+          <div><dt>Downsides</dt><dd>Touches selection provenance, alias loading, prompt UI, and finish behavior together. It should be defined as one coherent experience before implementation.</dd></div>
+        </dl>
+        <div class="visual" aria-label="Illustrative named execution loop">
+          <svg viewBox="0 0 860 300" role="img" aria-labelledby="loop-title loop-desc">
+            <title id="loop-title">The named execution loop</title>
+            <desc id="loop-desc">An omitted alias opens saved choices. A saved alias goes directly to generation. Fresh discovery goes to generation and can be saved for the next run.</desc>
+            <defs>
+              <marker id="arrow-mint" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#75e6c4"/></marker>
+            </defs>
+            <rect x="25" y="48" width="170" height="70" rx="14" fill="#171c26" stroke="#4a5570"/>
+            <text x="110" y="78" fill="#eef2ff" font-size="17" text-anchor="middle" font-family="ui-sans-serif, sans-serif">No --alias</text>
+            <text x="110" y="101" fill="#a8b0c3" font-size="13" text-anchor="middle" font-family="ui-sans-serif, sans-serif">interactive call</text>
+            <rect x="265" y="48" width="210" height="70" rx="14" fill="#16352f" stroke="#4b927f"/>
+            <text x="370" y="78" fill="#b9f8e6" font-size="17" text-anchor="middle" font-family="ui-sans-serif, sans-serif">Alias library</text>
+            <text x="370" y="101" fill="#b9f8e6" font-size="13" text-anchor="middle" font-family="ui-sans-serif, sans-serif">searchable + hinted</text>
+            <rect x="650" y="48" width="180" height="70" rx="14" fill="#292448" stroke="#655ca3"/>
+            <text x="740" y="89" fill="#ddd5ff" font-size="17" text-anchor="middle" font-family="ui-sans-serif, sans-serif">Generate</text>
+            <line x1="195" y1="83" x2="253" y2="83" stroke="#75e6c4" stroke-width="3" marker-end="url(#arrow-mint)"/>
+            <line x1="475" y1="83" x2="638" y2="83" stroke="#75e6c4" stroke-width="3" marker-end="url(#arrow-mint)"/>
+            <text x="553" y="68" fill="#b9f8e6" font-size="12" text-anchor="middle" font-family="ui-sans-serif, sans-serif">existing alias</text>
+            <rect x="265" y="188" width="210" height="70" rx="14" fill="#171c26" stroke="#4a5570"/>
+            <text x="370" y="218" fill="#eef2ff" font-size="17" text-anchor="middle" font-family="ui-sans-serif, sans-serif">Fresh discovery</text>
+            <text x="370" y="241" fill="#a8b0c3" font-size="13" text-anchor="middle" font-family="ui-sans-serif, sans-serif">provider → model</text>
+            <rect x="650" y="188" width="180" height="70" rx="14" fill="#16352f" stroke="#4b927f"/>
+            <text x="740" y="218" fill="#b9f8e6" font-size="17" text-anchor="middle" font-family="ui-sans-serif, sans-serif">Save as alias</text>
+            <text x="740" y="241" fill="#b9f8e6" font-size="13" text-anchor="middle" font-family="ui-sans-serif, sans-serif">or Enter to exit</text>
+            <line x1="370" y1="118" x2="370" y2="176" stroke="#75e6c4" stroke-width="3" marker-end="url(#arrow-mint)"/>
+            <text x="389" y="151" fill="#b9f8e6" font-size="12" text-anchor="start" font-family="ui-sans-serif, sans-serif">choose different…</text>
+            <line x1="475" y1="223" x2="638" y2="223" stroke="#75e6c4" stroke-width="3" marker-end="url(#arrow-mint)"/>
+            <text x="555" y="208" fill="#b9f8e6" font-size="12" text-anchor="middle" font-family="ui-sans-serif, sans-serif">after generation</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="idea" id="idea-2">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">2</span><h3>Alias library as the default home</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Startup routing</span><span class="badge conf">Conf · 96%</span><span class="badge cx">Cx · Medium</span></div>
+        </div>
+        <p class="description">When aliases exist, show one searchable alias picker before discovery. Each row uses the alias as its label and <code>provider · raw model</code> as a hint, with a final “Choose a provider and model…” option. With no aliases, skip the screen entirely and open the provider picker.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> The alias document is already loadable and missing storage already means an empty map, not an error. Explicit aliases already bypass discovery. <strong>external:</strong> AWS profiles, navigation saved destinations, and command palettes all privilege repeat destinations while preserving an escape hatch.</dd></div>
+          <div><dt>Rationale</dt><dd>Users stop memorizing alias spellings, and repeat runs avoid provider discovery without penalizing first-run users.</dd></div>
+          <div><dt>Downsides</dt><dd>Alias records do not store friendly model labels. Showing those would require discovery and defeat the fast path, so hints should use stored provider and raw model identity.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-3">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">3</span><h3>One typed autocomplete contract</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Searchable selection</span><span class="badge conf">Conf · 94%</span><span class="badge cx">Cx · Medium</span></div>
+        </div>
+        <p class="description">Use one structured option shape—<code>{ value, label, hint }</code>—and one Clack autocomplete adapter for aliases, providers, and models. Let the prompt own rendering, filtering, arrows, Enter, and cancellation; remove the separately printed numbered menu. Model rows show the friendly label and expose raw ID as hint/search text so filtering never weakens identity.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> The current menu is printed once through diagnostics and controlled again through numeric input; model identity is recovered by indexing the original array. <strong>external:</strong> Clack autocomplete supports structured, searchable options and cancellation.</dd></div>
+          <div><dt>Rationale</dt><dd>One interaction language fulfills the typeahead request and removes the wrong-model risk that comes from sorting labels separately from values.</dd></div>
+          <div><dt>Downsides</dt><dd>The adapter must be tested against native compiled binaries and must direct Clack UI to stderr. Cancellation needs explicit mapping to current exit behavior. Let Clack own list styling; reserve <code>picocolors</code> for app-owned context and success text.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-4">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">4</span><h3>Deterministic recognition order</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Searchable selection</span><span class="badge conf">Conf · 98%</span><span class="badge cx">Cx · Low</span></div>
+        </div>
+        <p class="description">Sort copied alias, provider, and model option arrays case-insensitively by visible label, with the raw value or ID as a deterministic tie-breaker. Filtering helps recall after typing; stable order helps recognition before typing. Both behaviors should be public UX promises.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> Provider and model arrays currently pass runtime order straight into the UI, while BYOK explicitly leaves UI-specific model sorting to host applications.</dd></div>
+          <div><dt>Rationale</dt><dd>Identical choices become predictable across runs and machines, while typed values preserve the correct runtime identity after sorting.</dd></div>
+          <div><dt>Downsides</dt><dd>Alphabetical order intentionally discards any upstream ranking. The comparator must specify case and duplicate-label tie behavior.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-5">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">5</span><h3>A deliberate terminal epilogue</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Terminal boundary</span><span class="badge conf">Conf · 95%</span><span class="badge cx">Cx · Low</span></div>
+        </div>
+        <p class="description">After writing the exact model response to stdout, open post-generation UI on stderr with a small, deliberate vertical gutter. Use the response’s trailing-newline state to choose the minimum ordinary-text separator, but frame the promise as “the Clack prompt starts on a clean line,” not as a brittle byte recipe.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> The app writes the full response and immediately prompts; exact stdout explicitly includes an absent trailing newline; interactive UI already belongs to stderr.</dd></div>
+          <div><dt>Rationale</dt><dd>This fixes the observed collision without contaminating pipes, redirected output, or byte-level tests.</dd></div>
+          <div><dt>Downsides</dt><dd>Carriage returns, terminal control sequences, and stream interleaving complicate a universal visual guarantee. The downstream design should test real terminal cases instead of assuming newline detection covers all output.</dd></div>
+        </dl>
+        <div class="visual" aria-label="Before and after terminal output boundary">
+          <svg viewBox="0 0 860 240" role="img" aria-labelledby="seam-title seam-desc">
+            <title id="seam-title">Before and after the terminal epilogue</title>
+            <desc id="seam-desc">Before, the alias prompt touches the final model word. After, stdout remains unchanged while stderr starts the prompt on a separate line with a visual gutter.</desc>
+            <rect x="24" y="24" width="382" height="188" rx="16" fill="#171c26" stroke="#6b3c4d"/>
+            <rect x="454" y="24" width="382" height="188" rx="16" fill="#171c26" stroke="#397263"/>
+            <rect x="44" y="43" width="74" height="28" rx="14" fill="#3b202b"/><text x="81" y="62" fill="#ffc8dc" font-size="12" font-weight="700" text-anchor="middle" font-family="ui-sans-serif, sans-serif">BEFORE</text>
+            <rect x="474" y="43" width="68" height="28" rx="14" fill="#16352f"/><text x="508" y="62" fill="#b9f8e6" font-size="12" font-weight="700" text-anchor="middle" font-family="ui-sans-serif, sans-serif">AFTER</text>
+            <text x="48" y="112" fill="#eef2ff" font-size="16" font-family="ui-monospace, monospace">The answer ends here.Save as alias?</text>
+            <text x="478" y="105" fill="#eef2ff" font-size="16" font-family="ui-monospace, monospace">The answer ends here.</text>
+            <text x="478" y="142" fill="#75e6c4" font-size="14" font-family="ui-monospace, monospace">◇ Enter an alias name for OpenAI · gpt-3.5</text>
+            <text x="478" y="165" fill="#a8b0c3" font-size="13" font-family="ui-monospace, monospace">  Enter to exit · e.g. fast</text>
+            <text x="48" y="188" fill="#ffc8dc" font-size="12" font-family="ui-sans-serif, sans-serif">stdout and UI share one row</text>
+            <text x="478" y="196" fill="#b9f8e6" font-size="12" font-family="ui-sans-serif, sans-serif">stdout unchanged · UI begins on stderr</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="idea" id="idea-6">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">6</span><h3>One-field save-or-exit with contextual collisions</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Finish flow</span><span class="badge conf">Conf · 91%</span><span class="badge cx">Cx · Medium</span></div>
+        </div>
+        <p class="description">After fresh discovery only, ask exactly what to type and what will be named: “Enter an alias name for OpenAI · gpt-3.5 (Enter to exit),” with a dim example such as “e.g. fast.” Empty or cancel exits successfully; a name validates and saves. If the name already maps to the same target, report “Already saved”; if it maps elsewhere, show old and new targets before asking to overwrite.</p>
+        <div class="terminal-sample" aria-label="Illustrative alias prompt and success message">
+          <div class="prompt-line">◇ Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)</div>
+          <div class="placeholder-line">&nbsp;&nbsp;e.g. fast</div>
+          <div class="success-line">◆ Saved alias fast → OpenAI · gpt-3.5</div>
+        </div>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> The current flow asks permission before asking for the name; skipped post-success saving already exits 0; the alias store already exposes the current record during collision handling. <strong>external:</strong> <code>picocolors</code> supplies green/dim ANSI formatting while honoring unsupported-color and <code>NO_COLOR</code> environments.</dd></div>
+          <div><dt>Rationale</dt><dd>Both common outcomes become one action—Enter to finish or type a name—without sacrificing overwrite safety. Use <code>picocolors</code> green for the prompt and saved confirmation, and dim styling for the example.</dd></div>
+          <div><dt>Downsides</dt><dd>Inline validation and retaining attempted input depend on Clack text-prompt behavior. Equality handling must remain race-safe inside the store’s locked save path.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-7">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">7</span><h3>Recovery-aware Clack picker</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Searchable selection</span><span class="badge conf">Conf · 88%</span><span class="badge cx">Cx · Medium</span></div>
+        </div>
+        <p class="description">Port the existing model-list recovery behavior into the searchable UI instead of losing it during the prompt-library swap. A failed provider gets a concise stage-labelled message, disappears for the current run, and the remaining sorted provider picker redraws. Ctrl-C during selection still exits 130 before generation; blank completion after output remains exit 0.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> The current loop filters a failed provider and continues, and manual tests require remaining choices to be offered. Existing exit codes already distinguish cancellation before generation from successful completion without saving.</dd></div>
+          <div><dt>Rationale</dt><dd>The UX migration preserves one of the current CLI’s strongest resilience behaviors while making the recovery feel like one coherent interaction.</dd></div>
+          <div><dt>Downsides</dt><dd>Clack may not preserve an in-progress search query across redraws. A fresh redraw is acceptable, but the error must remain visible without duplicating the whole menu.</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <p class="eyebrow">What did not earn a card</p>
+      <h2>Rejection Summary</h2>
+      <table>
+        <thead><tr><th>#</th><th>Considered idea</th><th>Reason rejected</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="cut">Mixed alias/provider palette</td><td>Combines heterogeneous choices and conflicts with the clearer alias-first escape-hatch flow.</td></tr>
+          <tr><td>2</td><td class="cut">Search aliases by friendly model label</td><td>Alias records store raw model IDs, not labels; fetching labels would require model listing and break the alias fast path.</td></tr>
+          <tr><td>3</td><td class="cut">Selection provenance as a standalone idea</td><td>Sound but not independently valuable; folded into the named loop, alias home, and finish flow.</td></tr>
+          <tr><td>4</td><td class="cut">Lazy insertion as a standalone idea</td><td>An acceptance constraint for startup routing, not a separate product direction.</td></tr>
+          <tr><td>5</td><td class="cut">Identity-safe autocomplete primitive</td><td>Duplicate of the stronger typed autocomplete contract, which also preserves progressive screens.</td></tr>
+          <tr><td>6</td><td class="cut">Model identity as a separate card</td><td>Important option-design detail folded into the typed autocomplete contract.</td></tr>
+          <tr><td>7</td><td class="cut">Cancellation semantics as a separate card</td><td>Required lifecycle behavior folded into the recovery-aware picker.</td></tr>
+          <tr><td>8</td><td class="cut">Terminal completion frame alone</td><td>Combined with response-aware separation into the more complete terminal epilogue.</td></tr>
+          <tr><td>9</td><td class="cut">Exact one-bit separator recipe</td><td>Ordinary-text basis is sound, but it overpromises around carriage returns, control output, and stream interleaving; retained as a tactic, not the idea.</td></tr>
+          <tr><td>10</td><td class="cut">Reusable boundary primitive</td><td>Speculative abstraction justified by hypothetical future post-output actions.</td></tr>
+          <tr><td>11</td><td class="cut">Contextual collision completion alone</td><td>Strong but inseparable from the one-field save flow; merged there.</td></tr>
+          <tr><td>12</td><td class="cut">Four-state finish machine</td><td>Implementation scaffolding below the meeting-test floor.</td></tr>
+          <tr><td>13</td><td class="cut">Search and sorting as separate promises</td><td>A useful principle that restates the typed options and deterministic-order cards.</td></tr>
+          <tr><td>14</td><td class="cut">Context-rich safety duplicate</td><td>Near-exact duplicate of contextual collision completion; merged into the finish-flow survivor.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="sources">
+      <p class="eyebrow">Evidence index</p>
+      <h2>Sources &amp; References</h2>
+      <table>
+        <thead><tr><th>Source</th><th>Contribution</th></tr></thead>
+        <tbody>
+          <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/app.ts"><code>src/app.ts</code></a></td><td>Selection routing, exact response write, finish eligibility, and alias-save prompts.</td></tr>
+          <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/prompts.ts"><code>src/prompts.ts</code></a></td><td>Numbered menu ownership, runtime order, cancellation, and provider recovery.</td></tr>
+          <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/aliases.ts"><code>src/aliases.ts</code></a></td><td>Complete alias loading, validation, locked collision handling, and stored record shape.</td></tr>
+          <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/docs/manual-testing.md"><code>docs/manual-testing.md</code></a></td><td>Byte-faithful stdout, channel separation, cancellation, overwrite, and exit contracts.</td></tr>
+          <tr><td><a href="https://github.com/bombshell-dev/clack/blob/main/packages/prompts/README.md">Clack prompts README</a></td><td>Autocomplete option structure, filtering, keyboard interaction, and cancellation.</td></tr>
+          <tr><td><a href="https://github.com/alexeyraspopov/picocolors">Picocolors</a></td><td>Dependency-free ANSI color helpers, ESM/TypeScript support, color detection, and <code>NO_COLOR</code>-friendly output.</td></tr>
+          <tr><td><a href="https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-parameters-prompting.html">AWS CLI auto-prompt</a></td><td>Saved-profile completion, searchable choices, and partial interactive selection.</td></tr>
+          <tr><td><a href="https://github.com/junegunn/fzf/blob/master/README.md"><code>fzf</code> README</a></td><td>Established terminal type-to-filter interaction grammar.</td></tr>
+          <tr><td><a href="https://clig.dev/">Command Line Interface Guidelines</a></td><td>Stdout for primary data and stderr for human-facing messaging.</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer class="composition-signal">
+    <div class="shell">Composed <time datetime="2026-07-13T21:58:41Z">2026-07-13T21:58:41Z</time> by <code>ce-ideate</code> from the user’s interactive-UX prompt and repository evidence.</div>
+  </footer>
+</body>
+</html>

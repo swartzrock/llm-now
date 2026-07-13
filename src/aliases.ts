@@ -27,7 +27,7 @@ export interface AliasPathOptions {
 }
 
 export interface SaveAliasOptions {
-  confirmOverwrite?: (name: string, current: AliasRecord) => Promise<boolean>;
+  confirmOverwrite?: (name: string, current: AliasRecord | undefined) => Promise<boolean>;
   lockTimeoutMs?: number;
   retryDelayMs?: number;
   staleLockMs?: number;
@@ -36,6 +36,8 @@ export interface SaveAliasOptions {
 export interface AliasStoreDependencies {
   rename?: typeof rename;
 }
+
+export type SaveAliasResult = "saved" | "already-saved" | "declined";
 
 export class AliasStoreError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -182,7 +184,7 @@ export async function saveAlias(
   record: AliasRecord,
   options: SaveAliasOptions = {},
   dependencies: AliasStoreDependencies = {},
-): Promise<"saved" | "unchanged"> {
+): Promise<SaveAliasResult> {
   validateSaveInput(name, record);
   const directory = dirname(path);
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -194,32 +196,56 @@ export async function saveAlias(
     retryDelayMs: options.retryDelayMs ?? 20,
     staleLockMs: options.staleLockMs ?? 30_000,
   };
-  await acquireLock(lockPath, lockOptions);
 
-  let temporaryPath: string | undefined;
-  try {
-    const document = await loadAliases(path);
-    const current = Object.hasOwn(document.aliases, name) ? document.aliases[name] : undefined;
-    if (current !== undefined) {
-      if (options.confirmOverwrite === undefined) throw new AliasCollisionError(name);
-      if (!(await options.confirmOverwrite(name, current))) return "unchanged";
-    }
-
-    const next: AliasDocument = {
-      version: 1,
-      aliases: {
-        ...document.aliases,
-        [name]: { provider: record.provider, model: record.model },
-      },
-    };
-    temporaryPath = join(directory, `.aliases-${process.pid}-${randomUUID()}.tmp`);
-    await Bun.write(temporaryPath, `${JSON.stringify(next, null, 2)}\n`);
-    if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
-    await (dependencies.rename ?? rename)(temporaryPath, path);
-    temporaryPath = undefined;
-    return "saved";
-  } finally {
-    if (temporaryPath !== undefined) await unlink(temporaryPath).catch(() => undefined);
-    await unlink(lockPath).catch(() => undefined);
+  let hasExpectedCurrent = false;
+  let expectedCurrent: AliasRecord | undefined;
+  while (true) {
+    const result = await attemptSave(hasExpectedCurrent, expectedCurrent);
+    if (result === "saved" || result === "already-saved") return result;
+    if (options.confirmOverwrite === undefined) throw new AliasCollisionError(name);
+    if (!(await options.confirmOverwrite(name, result.current))) return "declined";
+    hasExpectedCurrent = true;
+    expectedCurrent = result.current;
   }
+
+  async function attemptSave(
+    hasExpected: boolean,
+    expected: AliasRecord | undefined,
+  ): Promise<"saved" | "already-saved" | { current: AliasRecord | undefined }> {
+    await acquireLock(lockPath, lockOptions);
+    let temporaryPath: string | undefined;
+    try {
+      const document = await loadAliases(path);
+      const current = Object.hasOwn(document.aliases, name) ? document.aliases[name] : undefined;
+      if (current !== undefined && sameAliasRecord(current, record)) return "already-saved";
+      const matchesExpected = expected === undefined
+        ? current === undefined
+        : current !== undefined && sameAliasRecord(current, expected);
+      if (hasExpected && !matchesExpected) return { current };
+      if (current !== undefined) {
+        if (!hasExpected) return { current };
+      }
+
+      const next: AliasDocument = {
+        version: 1,
+        aliases: {
+          ...document.aliases,
+          [name]: { provider: record.provider, model: record.model },
+        },
+      };
+      temporaryPath = join(directory, `.aliases-${process.pid}-${randomUUID()}.tmp`);
+      await Bun.write(temporaryPath, `${JSON.stringify(next, null, 2)}\n`);
+      if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
+      await (dependencies.rename ?? rename)(temporaryPath, path);
+      temporaryPath = undefined;
+      return "saved";
+    } finally {
+      if (temporaryPath !== undefined) await unlink(temporaryPath).catch(() => undefined);
+      await unlink(lockPath).catch(() => undefined);
+    }
+  }
+}
+
+function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
+  return left.provider === right.provider && left.model === right.model;
 }

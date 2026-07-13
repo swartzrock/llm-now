@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { ByokModelOption, ByokProviderId } from "@swartzrock/byok-runtime";
+import { PassThrough } from "node:stream";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import {
+  createSearchablePrompter,
+  createTerminalColors,
   NO_PROVIDER_DIAGNOSTIC,
   selectProviderAndModel,
-  type NumberedPrompter,
+  type PromptOption,
+  type PromptValue,
+  type SearchablePrompter,
 } from "../src/prompts.ts";
 
 function gateway(options: {
@@ -25,12 +30,23 @@ function gateway(options: {
   return { value, listed };
 }
 
-function choices(...answers: Array<number | null>): NumberedPrompter {
+function choices(
+  ...answers: Array<PromptValue | null>
+): SearchablePrompter & { seen: PromptOption[][] } {
+  const seen: PromptOption[][] = [];
   return {
-    choose: async () => {
+    seen,
+    select: async (_message, options) => {
+      seen.push([...options]);
       const answer = answers.shift();
       if (answer === undefined) throw new Error("unexpected prompt");
       return answer;
+    },
+    input: async () => {
+      throw new Error("unexpected input prompt");
+    },
+    confirm: async () => {
+      throw new Error("unexpected confirmation prompt");
     },
   };
 }
@@ -42,10 +58,11 @@ describe("terminal provider and model selection", () => {
       models: { "claude-cli": [{ id: "sonnet", label: "Claude Sonnet" }] },
     });
     const diagnostics: string[] = [];
+    const prompter = choices("claude-cli", "sonnet");
 
     const result = await selectProviderAndModel({
       runtime: runtime.value,
-      prompter: choices(1, 0),
+      prompter,
       diagnostic: (text) => diagnostics.push(text),
     });
 
@@ -55,8 +72,11 @@ describe("terminal provider and model selection", () => {
       model: "sonnet",
     });
     expect(runtime.listed).toEqual(["claude-cli"]);
-    expect(diagnostics.join("\n")).toContain("Choose a provider");
-    expect(diagnostics.join("\n")).toContain("Choose a model");
+    expect(prompter.seen.map((options) => options.map((option) => option.label))).toEqual([
+      ["Claude CLI", "Ollama"],
+      ["Claude Sonnet"],
+    ]);
+    expect(diagnostics).toEqual([]);
   });
 
   test("empty discovery emits every required checked state and next step", async () => {
@@ -93,7 +113,7 @@ describe("terminal provider and model selection", () => {
     expect(
       await selectProviderAndModel({
         runtime: runtime.value,
-        prompter: choices(0, null),
+        prompter: choices("ollama", null),
         diagnostic: () => {},
       }),
     ).toEqual({ kind: "cancelled", exitCode: 130 });
@@ -111,7 +131,7 @@ describe("terminal provider and model selection", () => {
 
     const result = await selectProviderAndModel({
       runtime: runtime.value,
-      prompter: choices(0, 0, 0),
+      prompter: choices("ollama", "openai", "gpt-5"),
       diagnostic: (text) => diagnostics.push(text),
     });
 
@@ -123,7 +143,7 @@ describe("terminal provider and model selection", () => {
   test("offers provider default only for supported CLI providers", async () => {
     const cli = await selectProviderAndModel({
       runtime: gateway({ providers: ["codex-cli"] }).value,
-      prompter: choices(0, 0),
+      prompter: choices("codex-cli", false),
       diagnostic: () => {},
     });
     expect(cli).toEqual({ kind: "selected", provider: "codex-cli", model: null });
@@ -131,10 +151,89 @@ describe("terminal provider and model selection", () => {
     const diagnostics: string[] = [];
     const requiredModel = await selectProviderAndModel({
       runtime: gateway({ providers: ["ollama"] }).value,
-      prompter: choices(0),
+      prompter: choices("ollama"),
       diagnostic: (text) => diagnostics.push(text),
     });
     expect(requiredModel).toEqual({ kind: "failed", exitCode: 1, stage: "model-list" });
     expect(diagnostics.join("\n")).toContain("returned no models");
+  });
+
+  test("sorts copied provider/model options and preserves canonical model identity", async () => {
+    const runtime = gateway({
+      providers: ["openai", "anthropic"],
+      models: {
+        openai: [
+          { id: "z-model", label: "Same" },
+          { id: "a-model", label: "same" },
+        ],
+      },
+    });
+    const prompter = choices("openai", "z-model");
+
+    expect(
+      await selectProviderAndModel({
+        runtime: runtime.value,
+        prompter,
+        diagnostic: () => {},
+      }),
+    ).toEqual({ kind: "selected", provider: "openai", model: "z-model" });
+
+    expect(prompter.seen[0]?.map((option) => option.label)).toEqual(["Anthropic", "OpenAI"]);
+    expect(prompter.seen[1]?.map((option) => option.value)).toEqual(["a-model", "z-model"]);
+  });
+
+  test("removes terminal controls from runtime-owned option text", async () => {
+    const prompter = choices("openai", "gpt");
+    await selectProviderAndModel({
+      runtime: gateway({
+        providers: ["openai"],
+        models: { openai: [{ id: "gpt", label: "\u001b[31mGPT\u0000" }] },
+      }).value,
+      prompter,
+      diagnostic: () => {},
+    });
+
+    expect(prompter.seen[1]?.[0]?.label).toBe("GPT");
+  });
+
+  test("real Clack adapter filters by typing and renders only to its output stream", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let rendered = "";
+    output.on("data", (chunk) => rendered += chunk.toString());
+
+    const selected = createSearchablePrompter(input, output).select("Pick a model", [
+      { value: "alpha", label: "Alpha" },
+      { value: "beta", label: "Beta", hint: "b-model" },
+    ]);
+    setTimeout(() => input.write("b\r"), 1);
+
+    expect(await selected).toBe("beta");
+    expect(rendered).toContain("Pick a model");
+    expect(rendered).toContain("Beta");
+  });
+
+  test("real Clack adapter normalizes cancellation", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const selected = createSearchablePrompter(input, output).select("Pick", [
+      { value: "alpha", label: "Alpha" },
+    ]);
+    setTimeout(() => input.write("\u0003"), 1);
+    expect(await selected).toBeNull();
+  });
+
+  test("real Clack text input returns blank Enter as the exit value", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const entered = createSearchablePrompter(input, output).input("Alias name");
+    setTimeout(() => input.write("\r"), 1);
+    expect(await entered).toBe("");
+  });
+
+  test("Picocolors follows stderr capability and NO_COLOR", () => {
+    expect(createTerminalColors({ isTTY: true }, {}).green("saved")).toContain("\u001b[");
+    expect(createTerminalColors({ isTTY: true }, { NO_COLOR: "1" }).green("saved")).toBe("saved");
+    expect(createTerminalColors({ isTTY: false }, {}).dim("hint")).toBe("hint");
   });
 });

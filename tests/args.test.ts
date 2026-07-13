@@ -150,6 +150,10 @@ describe("arguments and input", () => {
     expect(HELP_TEXT).toContain("--alias");
     expect(HELP_TEXT).toContain("--provider");
     expect(HELP_TEXT).toContain("stdin");
+    expect(HELP_TEXT).toContain("offer saved aliases first");
+    expect(HELP_TEXT).toContain("filter its sorted choices");
+    expect(HELP_TEXT).toContain("press Enter to exit");
+    expect(HELP_TEXT).toContain("alias/provider/model selection cancelled");
     expect(HELP_TEXT).toContain("XDG_CONFIG_HOME");
     expect(HELP_TEXT).toContain("Exit codes:");
     expect(() => parseArguments(["--help", "--alias", "daily"])).toThrow(UsageError);

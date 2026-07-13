@@ -22,6 +22,8 @@
     "typescript": "5.9.3"
   },
   "dependencies": {
-    "@swartzrock/byok-runtime": "1.1.0"
+    "@clack/prompts": "1.7.0",
+    "@swartzrock/byok-runtime": "1.1.0",
+    "picocolors": "1.1.1"
   }
 }

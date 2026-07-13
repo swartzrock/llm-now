@@ -220,18 +220,20 @@ Make at least two providers available, then run:
 
 Keep stderr attached to the terminal. Confirm that:
 
-- discovered providers appear as a numbered menu on stderr;
-- selecting a provider displays its models;
-- invalid menu entries reprompt without exiting;
+- with no saved aliases, the provider picker opens directly on stderr;
+- providers and models are sorted deterministically, and typing filters each list without changing the selected raw identifier;
+- selecting a provider displays its filtered model picker;
+- arrow keys and Enter select the highlighted option, while Ctrl-C cancels;
 - the final response appears only in `stdout.txt`;
-- the alias-save question appears after success; and
+- the response is followed by a clean terminal boundary on stderr even when it has no trailing newline or leaves SGR styling active;
+- the green contextual alias field names the selected provider and raw model, shows dim `e.g. fast`, and explains that Enter exits; and
 - machine-controlled work completes within approximately 60 seconds, excluding human menu time.
 
 ## Alias lifecycle
 
 ### MT-11: Save an alias
 
-After an interactive success, answer `y` to save and enter `daily`. Inspect the isolated alias file. It must have this shape:
+After an unnamed interactive success, enter `daily` in the contextual alias field. Confirm the green success message names `daily` and the exact provider/model target, then inspect the isolated alias file. It must have this shape:
 
 ```json
 {
@@ -249,6 +251,8 @@ The model value is `null` when a supported CLI provider uses its default. Confir
 
 ### MT-12: Use an alias from another directory
 
+First run an interactive call with no explicit selection. Confirm that the sorted alias picker appears before discovery, typing `dai` filters to `daily`, and selecting it bypasses provider/model discovery and does not show another alias field. Then verify deterministic non-interactive reuse from another directory:
+
 ```bash
 cd /
 printf 'Summarize the idea of gravity.' |
@@ -259,20 +263,20 @@ The command must exit `0`, resolve the alias independently of the working direct
 
 ### MT-13: Decline alias saving
 
-Complete an interactive generation and answer `n`. The command must exit `0` without creating or modifying the alias file.
+Complete an unnamed interactive generation and press Enter without typing a name. Repeat and cancel the field with Ctrl-C. Both commands must exit `0` without creating or modifying the alias file.
 
 ### MT-14: Validate alias names
 
 Try these names through the save prompt:
 
 - valid: `daily`, `Daily`, and `work_model-2`;
-- invalid: ` bad`, `with space`, `a/b`, an empty name, and a name longer than 64 characters.
+- invalid: ` bad`, `with space`, `a/b`, and a name longer than 64 characters.
 
-Invalid names must produce a `config:` diagnostic and reprompt. Names are case-sensitive, so `daily` and `Daily` may coexist.
+Invalid names must show Clack's alias-name validation guidance and reprompt. An empty field exits without saving. Names are case-sensitive, so `daily` and `Daily` may coexist.
 
 ### MT-15: Handle alias collisions
 
-Save `daily`, complete a call with another provider/model, and try to save `daily` again. First decline the overwrite: the command must exit `0` and leave the record unchanged. Repeat and accept the overwrite: only `daily` should change, with every other alias preserved.
+Save `daily`, then complete another unnamed call with the same provider/model and enter `daily`. The CLI must report that the target is already saved without asking to overwrite it. Next complete a call with another provider/model and enter `daily`. Confirm the prompt shows the old and new targets and defaults to No. First decline the overwrite: the command must exit `0` and leave the record unchanged. Repeat and accept the overwrite: only `daily` should change, with every other alias preserved.
 
 ### MT-16: Fail closed on missing or stale aliases
 
@@ -311,7 +315,7 @@ The command must exit `1`, leave stdout empty, list every checked provider categ
 
 ### MT-20: Cancel provider or model selection
 
-Enter `q` at the provider menu. The command must exit `130`, leave stdout empty, and perform no generation or alias save. Repeat after choosing a provider and enter `q` at its model menu.
+Press Ctrl-C at the alias picker. The command must exit `130`, leave stdout empty, and perform no generation or alias save. Repeat at the provider picker, then again at the model picker after choosing a provider. If the isolated store has no aliases, skip the alias-picker case.
 
 ### MT-21: Recover from a model-list failure
 
@@ -362,6 +366,9 @@ Keep the Bun test suite as the authority for behavior that is difficult or unrel
 
 - exact 5/10/45-second timeout boundaries;
 - byte-for-byte output fidelity, including an absent trailing newline;
+- exact stderr boundary behavior for responses with and without trailing newlines;
+- sorted, canonical alias/provider/model option identity and Clack type-ahead behavior;
+- Picocolors output under TTY, `NO_COLOR`, and non-TTY conditions;
 - ANSI and control-sequence stripping;
 - diagnostic truncation at 1,024 characters;
 - concurrent alias writers and stale-lock recovery; and
