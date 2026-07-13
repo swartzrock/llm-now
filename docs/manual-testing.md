@@ -65,6 +65,14 @@ Extract the matching executable to `$BIN`, then make it executable:
 chmod +x "$BIN"
 ```
 
+The default CI and `publish: false` artifacts are not Developer ID signed or notarized. On macOS, first verify the checksum, then remove the browser-applied quarantine attribute from that trusted test binary:
+
+```bash
+xattr -d com.apple.quarantine "$BIN"
+```
+
+Do not use this workaround for a `publish: true` public release. A signed and notarized release must pass Gatekeeper with its quarantine attribute intact.
+
 ### Windows PowerShell
 
 ```powershell
@@ -104,7 +112,9 @@ Expected results:
 
 - every archive matches the manifest;
 - there is one archive for each supported target; and
-- each archive contains only the expected `llm-now` or `llm-now.exe` executable.
+- each archive contains only the expected `llm-now` or `llm-now.exe` executable;
+- each archive entry has the source commit time, within ZIP's two-second timestamp precision, rather than January 1, 1980; and
+- each macOS executable passes `codesign --verify --strict --verbose=2 "$BIN"` before it is run.
 
 ### MT-02: Run without Bun or Node.js
 
@@ -333,6 +343,8 @@ These tests are maintainer-only and occur after the implementation branches merg
 4. Download `release-assets` and repeat the checksum and native smoke tests.
 
 The workflow must validate the tag/version/main ancestry, build all five targets, generate `SHA256SUMS`, and publish no GitHub Release or signed artifact.
+
+The macOS executable must have a valid ad-hoc signature, but it is not trusted by Gatekeeper as a public download. After checksum verification, use the quarantine-removal step in the preparation section for this unsigned test artifact.
 
 ### MT-25: Signed public release
 

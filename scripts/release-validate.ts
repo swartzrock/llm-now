@@ -107,6 +107,15 @@ async function smoke(archivePath: string): Promise<void> {
     const executable = join(temporary, entry.name);
     await Bun.write(executable, entry.bytes);
     if (process.platform !== "win32") await chmod(executable, 0o755);
+    if (process.platform === "darwin") {
+      const signature = run("codesign", ["--verify", "--strict", "--verbose=2", executable], {
+        cwd: temporary,
+        env: process.env,
+      });
+      if (signature.exitCode !== 0) {
+        throw new Error(`native macOS signature validation failed: ${signature.stderr.toString().trim()}`);
+      }
+    }
 
     const fakeCli = join(temporary, process.platform === "win32" ? "codex.exe" : "codex");
     const fakeBuild = await Bun.build({

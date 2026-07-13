@@ -22,10 +22,26 @@ export function archiveName(version: string, target: ReleaseTarget): string {
   return `llm-now-v${version}-${target.id}.zip`;
 }
 
-export function createExecutableArchive(name: string, bytes: Uint8Array): Uint8Array {
+export function archiveMtime(sourceDateEpoch = process.env.SOURCE_DATE_EPOCH): Date {
+  if (sourceDateEpoch === undefined) return new Date();
+  if (!/^\d+$/.test(sourceDateEpoch)) {
+    throw new Error("SOURCE_DATE_EPOCH must be a Unix timestamp in whole seconds");
+  }
+  const date = new Date(Number(sourceDateEpoch) * 1_000);
+  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() < 1980 || date.getUTCFullYear() > 2107) {
+    throw new Error("SOURCE_DATE_EPOCH must be representable by the ZIP date range (1980-2107)");
+  }
+  return date;
+}
+
+export function createExecutableArchive(
+  name: string,
+  bytes: Uint8Array,
+  mtime: Date,
+): Uint8Array {
   return zipSync({
     [name]: [bytes, { os: 3, attrs: 0o755 << 16 }],
-  }, { level: 9, mtime: new Date("1980-01-01T00:00:00Z") });
+  }, { level: 9, mtime });
 }
 
 export function extractExecutableArchive(
@@ -53,7 +69,27 @@ export async function createChecksumManifest(
   return `${lines.join("\n")}\n`;
 }
 
-async function buildTarget(target: ReleaseTarget, outdir: string): Promise<string> {
+function runCodesign(args: string[], label: string): void {
+  const result = Bun.spawnSync(["codesign", ...args], {
+    stdin: new Uint8Array(),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`${label}: ${result.stderr.toString().trim()}`);
+  }
+}
+
+function repairMacosSignature(target: ReleaseTarget, executable: string): void {
+  if (!target.id.startsWith("macos-")) return;
+  if (process.platform !== "darwin") {
+    throw new Error(`${target.id} must be built on macOS so its code signature can be repaired`);
+  }
+  runCodesign(["--force", "--sign", "-", executable], `failed to sign ${target.id}`);
+  runCodesign(["--verify", "--strict", "--verbose=2", executable], `invalid signature for ${target.id}`);
+}
+
+async function buildTarget(target: ReleaseTarget, outdir: string, mtime: Date): Promise<string> {
   const workdir = join(outdir, `.work-${target.id}`);
   const executable = join(workdir, target.executable);
   await mkdir(workdir, { recursive: true });
@@ -71,11 +107,16 @@ async function buildTarget(target: ReleaseTarget, outdir: string): Promise<strin
     });
     if (!build.success) throw new AggregateError(build.logs, `failed to build ${target.id}`);
     if (target.executable !== "llm-now.exe") await chmod(executable, 0o755);
+    repairMacosSignature(target, executable);
 
     const name = archiveName(packageMetadata.version, target);
     await Bun.write(
       join(outdir, name),
-      createExecutableArchive(target.executable, new Uint8Array(await Bun.file(executable).arrayBuffer())),
+      createExecutableArchive(
+        target.executable,
+        new Uint8Array(await Bun.file(executable).arrayBuffer()),
+        mtime,
+      ),
     );
     return name;
   } finally {
@@ -97,8 +138,9 @@ async function main(): Promise<void> {
   if (targets.length === 0) throw new Error(`unknown release target: ${targetId}`);
 
   await mkdir(outdir, { recursive: true });
+  const mtime = archiveMtime();
   const names: string[] = [];
-  for (const target of targets) names.push(await buildTarget(target, outdir));
+  for (const target of targets) names.push(await buildTarget(target, outdir, mtime));
   const archives = await Promise.all(names.map(async (name) => ({
     name,
     bytes: new Uint8Array(await Bun.file(join(outdir, name)).arrayBuffer()),

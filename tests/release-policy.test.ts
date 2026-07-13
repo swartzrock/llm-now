@@ -46,6 +46,12 @@ describe("release workflow policy", () => {
     }
   });
 
+  test("stamps native and repacked archives with the source commit time", () => {
+    const sourceDateStep = 'echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)"';
+    expect(ciWorkflow.split(sourceDateStep)).toHaveLength(2);
+    expect(releaseWorkflow.split(sourceDateStep)).toHaveLength(4);
+  });
+
   test("defers package-manager integration outside GitHub Actions", () => {
     for (const workflow of [ciWorkflow, releaseWorkflow]) {
       expect(workflow.toLowerCase()).not.toContain("homebrew");

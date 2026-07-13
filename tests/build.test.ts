@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   RELEASE_TARGETS,
+  archiveMtime,
   archiveName,
   createExecutableArchive,
   createChecksumManifest,
@@ -11,6 +12,7 @@ import {
 import { assembleReleaseAssets, runProcess } from "../scripts/release-validate.ts";
 
 const temporaryDirectories: string[] = [];
+const testArchiveMtime = new Date("2026-07-13T12:34:56Z");
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -35,10 +37,15 @@ describe("native release build", () => {
 
   test("creates a deterministic archive containing one executable", () => {
     const bytes = Uint8Array.from([1, 2, 3, 4]);
-    const first = createExecutableArchive("llm-now", bytes);
-    const second = createExecutableArchive("llm-now", bytes);
+    const first = createExecutableArchive("llm-now", bytes, testArchiveMtime);
+    const second = createExecutableArchive("llm-now", bytes, testArchiveMtime);
     expect(first).toEqual(second);
     expect(unzipSync(first)).toEqual({ "llm-now": bytes });
+  });
+
+  test("uses SOURCE_DATE_EPOCH for a meaningful reproducible archive date", () => {
+    expect(archiveMtime("1783946096")).toEqual(testArchiveMtime);
+    expect(() => archiveMtime("not-a-timestamp")).toThrow("SOURCE_DATE_EPOCH");
   });
 
   test("creates one sorted SHA-256 manifest", async () => {
@@ -60,7 +67,7 @@ describe("native release build", () => {
       await mkdir(join(input, target.id), { recursive: true });
       await Bun.write(
         join(input, target.id, archiveName("0.1.0", target)),
-        createExecutableArchive(target.executable, Uint8Array.from([target.id.length])),
+        createExecutableArchive(target.executable, Uint8Array.from([target.id.length]), testArchiveMtime),
       );
     }
 
@@ -94,7 +101,11 @@ describe("native release build", () => {
       await mkdir(join(input, target.id), { recursive: true });
       await Bun.write(
         join(input, target.id, archiveName("0.1.0", target)),
-        createExecutableArchive(target.id === "windows-x64" ? "llm-now" : target.executable, Uint8Array.of(1)),
+        createExecutableArchive(
+          target.id === "windows-x64" ? "llm-now" : target.executable,
+          Uint8Array.of(1),
+          testArchiveMtime,
+        ),
       );
     }
     await expect(assembleReleaseAssets(input, join(root, "output"))).rejects.toThrow(
