@@ -7,10 +7,15 @@ const spike = join(
   directory,
   process.platform === "win32" ? "llm-now-spike.exe" : "llm-now-spike",
 );
+const runtimeSmoke = join(
+  directory,
+  process.platform === "win32" ? "runtime-smoke.exe" : "runtime-smoke",
+);
 
 try {
   const builds: Array<[string, string]> = [
     [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
+    [join(import.meta.dir, "fixtures/runtime-smoke-entry.ts"), runtimeSmoke],
     [join(import.meta.dir, "../index.ts"), spike],
   ];
   for (const [entrypoint, outfile] of builds) {
@@ -32,13 +37,15 @@ try {
   const cases = [
     {
       name: "runtime boundary",
-      args: ["--runtime-smoke", fakeCli],
+      executable: runtimeSmoke,
+      args: [fakeCli],
       exitCode: 0,
       stdout: "http-ok\nfake:smoke\n",
       stderrIncludes: "",
     },
     {
       name: "help",
+      executable: spike,
       args: ["--help"],
       exitCode: 0,
       stdoutIncludes: "Usage:\n  llm-now --input <text>",
@@ -46,6 +53,7 @@ try {
     },
     {
       name: "version",
+      executable: spike,
       args: ["--version"],
       exitCode: 0,
       stdout: "0.1.0\n",
@@ -53,6 +61,7 @@ try {
     },
     {
       name: "deterministic usage failure",
+      executable: spike,
       args: ["--input", "smoke"],
       exitCode: 2,
       stdout: "",
@@ -60,6 +69,7 @@ try {
     },
     {
       name: "fake CLI generation",
+      executable: spike,
       args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"],
       exitCode: 0,
       stdout: "fake:smoke",
@@ -68,7 +78,7 @@ try {
   ] as const;
 
   for (const smoke of cases) {
-    const result = Bun.spawnSync([spike, ...smoke.args], {
+    const result = Bun.spawnSync([smoke.executable, ...smoke.args], {
       env,
       stdin: new Uint8Array(),
     });

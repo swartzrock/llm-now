@@ -32,6 +32,14 @@ describe("global aliases", () => {
       .toBe("D:\\Roaming\\llm-now\\aliases.json");
     expect(resolveAliasPath({ platform: "win32", home: "C:\\Users\\test", env: {} }))
       .toBe("C:\\Users\\test\\AppData\\Roaming\\llm-now\\aliases.json");
+    expect(resolveAliasPath({ platform: "linux", home: "/home/test", env: { XDG_CONFIG_HOME: "" } }))
+      .toBe("/home/test/.config/llm-now/aliases.json");
+    expect(resolveAliasPath({ platform: "linux", home: "/home/test", env: { XDG_CONFIG_HOME: "relative" } }))
+      .toBe("/home/test/.config/llm-now/aliases.json");
+    expect(resolveAliasPath({ platform: "win32", home: "C:\\Users\\test", env: { APPDATA: "" } }))
+      .toBe("C:\\Users\\test\\AppData\\Roaming\\llm-now\\aliases.json");
+    expect(resolveAliasPath({ platform: "win32", home: "C:\\Users\\test", env: { APPDATA: "relative" } }))
+      .toBe("C:\\Users\\test\\AppData\\Roaming\\llm-now\\aliases.json");
   });
 
   test("loads the versioned fixture and resolves nullable models", async () => {
@@ -80,6 +88,20 @@ describe("global aliases", () => {
       expect((await stat(join(directory, "config"))).mode & 0o777).toBe(0o700);
       expect((await stat(path)).mode & 0o777).toBe(0o600);
     }
+  });
+
+  test("treats inherited object names as absent until explicitly saved", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+
+    await expect(resolveAlias(path, "toString")).rejects.toThrow("alias not found");
+    await expect(resolveAlias(path, "constructor")).rejects.toThrow("alias not found");
+    await expect(saveAlias(path, "toString", { provider: "ollama", model: "model" }))
+      .resolves.toBe("saved");
+    await expect(resolveAlias(path, "toString")).resolves.toEqual({
+      provider: "ollama",
+      model: "model",
+    });
   });
 
   test("preserves the prior file when atomic replacement fails", async () => {

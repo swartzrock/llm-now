@@ -66,7 +66,7 @@ function recognizedCredentialValues(env: ByokEnvironment): string[] {
   )].sort((left, right) => right.length - left.length);
 }
 
-export function sanitizeDiagnostic(text: string, env: ByokEnvironment): string {
+function sanitizeDiagnostic(text: string, env: ByokEnvironment): string {
   let sanitized = text.replace(/\r\n?|\u2028|\u2029/g, "\n");
   sanitized = sanitized.replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "");
   sanitized = sanitized.replace(/\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
@@ -84,6 +84,14 @@ function diagnosticWriter(deps: ApplicationDependencies): (text: string) => void
     const sanitized = sanitizeDiagnostic(text, deps.env);
     deps.stderr.write(`${sanitized}${sanitized.endsWith("\n") ? "" : "\n"}`);
   };
+}
+
+function applicationAliasPath(deps: ApplicationDependencies): string {
+  return deps.aliasPath ?? resolveAliasPath({
+    platform: deps.platform,
+    home: deps.home,
+    env: deps.env,
+  });
 }
 
 async function generateWithTimeout(
@@ -141,12 +149,10 @@ async function resolveSelection(
 ): Promise<AliasRecord | number> {
   const deterministic = requireDeterministicSelection(selection, interactive);
   if (deterministic.kind === "alias") {
-    const path = deps.aliasPath ?? resolveAliasPath({
-      platform: deps.platform,
-      home: deps.home,
-      env: deps.env,
-    });
-    return await (deps.resolveAlias ?? resolveStoredAlias)(path, deterministic.alias);
+    return await (deps.resolveAlias ?? resolveStoredAlias)(
+      applicationAliasPath(deps),
+      deterministic.alias,
+    );
   }
   if (deterministic.kind === "explicit") {
     return { provider: deterministic.provider, model: deterministic.model };
@@ -180,31 +186,26 @@ async function offerAliasSave(
   deps: ApplicationDependencies,
   selection: AliasRecord,
   diagnostic: (text: string) => void,
-): Promise<void> {
-  if ((await deps.prompter.confirm("Save this provider and model as an alias?")) !== true) return;
-  const path = deps.aliasPath ?? resolveAliasPath({
-    platform: deps.platform,
-    home: deps.home,
-    env: deps.env,
-  });
+): Promise<boolean> {
+  if ((await deps.prompter.confirm("Save this provider and model as an alias?")) !== true) return true;
   const save = deps.saveAlias ?? saveStoredAlias;
 
   while (true) {
     const name = await deps.prompter.input("Alias name (cancel to skip):");
-    if (name === null) return;
+    if (name === null) return true;
     if (!isValidAliasName(name)) {
       diagnostic("config: invalid alias name; use 1-64 ASCII letters, numbers, hyphens, or underscores.");
       continue;
     }
     try {
-      await save(path, name, selection, {
+      await save(applicationAliasPath(deps), name, selection, {
         confirmOverwrite: async () =>
           (await deps.prompter.confirm(`Alias ${name} exists. Overwrite it?`)) === true,
       });
-      return;
+      return true;
     } catch (error) {
       diagnostic(`config: ${error instanceof Error ? error.message : String(error)}`);
-      return;
+      return false;
     }
   }
 }
@@ -236,7 +237,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     deps.stdout.write(response);
 
     if (interactive && parsed.selection.kind !== "alias") {
-      await offerAliasSave(deps, selection, diagnostic);
+      if (!(await offerAliasSave(deps, selection, diagnostic))) return 1;
     }
     return 0;
   } catch (error) {

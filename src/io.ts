@@ -15,23 +15,18 @@ export function isInteractive(stdin: TtyState, stderr: TtyState): boolean {
 }
 
 async function readUtf8(input: PromptInput): Promise<string> {
-  const chunks: Uint8Array[] = [];
-  let length = 0;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let text = "";
   for await (const chunk of input) {
     const bytes = typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk;
-    chunks.push(bytes);
-    length += bytes.byteLength;
+    try {
+      text += decoder.decode(bytes, { stream: true });
+    } catch {
+      throw new UsageError("stdin must contain valid UTF-8 text.");
+    }
   }
-
-  const bytes = new Uint8Array(length);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return text + decoder.decode();
   } catch {
     throw new UsageError("stdin must contain valid UTF-8 text.");
   }

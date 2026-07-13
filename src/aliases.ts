@@ -1,6 +1,6 @@
 import { isByokProviderId, type ByokEnvironment, type ByokProviderId } from "@swartzrock/byok-runtime";
 import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
-import { dirname, join, win32 } from "node:path";
+import { dirname, isAbsolute, join, win32 } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const ALIAS_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -53,11 +53,15 @@ export class AliasCollisionError extends AliasStoreError {
 
 export function resolveAliasPath(options: AliasPathOptions): string {
   if (options.platform === "win32") {
-    const roaming = options.env.APPDATA ?? win32.join(options.home, "AppData", "Roaming");
+    const roaming = options.env.APPDATA && win32.isAbsolute(options.env.APPDATA)
+      ? options.env.APPDATA
+      : win32.join(options.home, "AppData", "Roaming");
     return win32.join(roaming, "llm-now", "aliases.json");
   }
 
-  const config = options.env.XDG_CONFIG_HOME ?? join(options.home, ".config");
+  const config = options.env.XDG_CONFIG_HOME && isAbsolute(options.env.XDG_CONFIG_HOME)
+    ? options.env.XDG_CONFIG_HOME
+    : join(options.home, ".config");
   return join(config, "llm-now", "aliases.json");
 }
 
@@ -67,7 +71,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function hasExactlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
-  return actual.length === keys.length && actual.every((key, index) => key === [...keys].sort()[index]);
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
 }
 
 function validateAliasRecord(value: unknown): value is AliasRecord {
@@ -91,21 +100,21 @@ function emptyDocument(): AliasDocument {
 }
 
 export async function loadAliases(path: string): Promise<AliasDocument> {
-  const file = Bun.file(path);
-  if (!(await file.exists())) return emptyDocument();
-
   try {
-    const parsed: unknown = JSON.parse(await file.text());
+    const parsed: unknown = JSON.parse(await Bun.file(path).text());
     if (!validateDocument(parsed)) throw new Error("invalid alias document schema");
     return parsed;
   } catch (error) {
+    if (hasErrorCode(error, "ENOENT")) return emptyDocument();
     throw new AliasStoreError(`failed to load alias store: ${path}`, { cause: error });
   }
 }
 
 export async function resolveAlias(path: string, name: string): Promise<AliasRecord> {
   if (!isValidAliasName(name)) throw new AliasStoreError(`invalid alias name: ${name}`);
-  const record = (await loadAliases(path)).aliases[name];
+  const aliases = (await loadAliases(path)).aliases;
+  if (!Object.hasOwn(aliases, name)) throw new AliasStoreError(`alias not found: ${name}`);
+  const record = aliases[name];
   if (record === undefined) throw new AliasStoreError(`alias not found: ${name}`);
   return record;
 }
@@ -130,24 +139,30 @@ async function acquireLock(
   while (true) {
     try {
       const handle = await open(lockPath, "wx", 0o600);
-      await handle.writeFile(`${process.pid}\n`);
-      await handle.close();
+      try {
+        await handle.writeFile(`${process.pid}\n`);
+      } catch (error) {
+        await unlink(lockPath).catch(() => undefined);
+        throw error;
+      } finally {
+        await handle.close();
+      }
       return;
     } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+      if (!hasErrorCode(error, "EEXIST")) throw error;
 
       let lock;
       try {
         lock = await lstat(lockPath);
       } catch (statError) {
-        if (statError instanceof Error && "code" in statError && statError.code === "ENOENT") continue;
+        if (hasErrorCode(statError, "ENOENT")) continue;
         throw statError;
       }
       if (!lock.isFile()) throw new AliasStoreError(`invalid alias lock: ${lockPath}`);
 
       if (Date.now() - lock.mtimeMs > options.staleLockMs) {
         await unlink(lockPath).catch((unlinkError: unknown) => {
-          if (!(unlinkError instanceof Error && "code" in unlinkError && unlinkError.code === "ENOENT")) {
+          if (!hasErrorCode(unlinkError, "ENOENT")) {
             throw unlinkError;
           }
         });
@@ -184,7 +199,7 @@ export async function saveAlias(
   let temporaryPath: string | undefined;
   try {
     const document = await loadAliases(path);
-    const current = document.aliases[name];
+    const current = Object.hasOwn(document.aliases, name) ? document.aliases[name] : undefined;
     if (current !== undefined) {
       if (options.confirmOverwrite === undefined) throw new AliasCollisionError(name);
       if (!(await options.confirmOverwrite(name, current))) return "unchanged";

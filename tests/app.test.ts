@@ -268,4 +268,21 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).toContain("config: invalid alias name");
     expect(app.runtime.calls.generate).toBe(1);
   });
+
+  test("returns an operational failure when alias persistence fails after generation", async () => {
+    const app = dependencies({
+      args: ["--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({ choices: [0, 0], confirms: [true], names: ["daily"] }),
+      saveAlias: async () => {
+        throw new Error("disk full");
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stdout.text()).toBe("response");
+    expect(app.stderr.text()).toContain("config: disk full");
+    expect(app.runtime.calls.generate).toBe(1);
+  });
 });

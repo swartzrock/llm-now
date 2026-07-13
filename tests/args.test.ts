@@ -62,6 +62,17 @@ describe("arguments and input", () => {
     await expect(resolvePrompt(undefined, stdin)).rejects.toThrow("valid UTF-8");
   });
 
+  test("preserves stdin I/O errors as operational failures", async () => {
+    const failure = new Error("stdin read failed");
+    const stdin = {
+      isTTY: false,
+      async *[Symbol.asyncIterator]() {
+        throw failure;
+      },
+    };
+    await expect(resolvePrompt(undefined, stdin)).rejects.toBe(failure);
+  });
+
   test("rejects alias and explicit selection ambiguity", () => {
     expect(() =>
       parseArguments([
@@ -142,5 +153,9 @@ describe("arguments and input", () => {
     expect(HELP_TEXT).toContain("XDG_CONFIG_HOME");
     expect(HELP_TEXT).toContain("Exit codes:");
     expect(() => parseArguments(["--help", "--alias", "daily"])).toThrow(UsageError);
+  });
+
+  test("rejects test-only runtime smoke arguments", () => {
+    expect(() => parseArguments(["--runtime-smoke", "/tmp/program"])).toThrow(UsageError);
   });
 });
