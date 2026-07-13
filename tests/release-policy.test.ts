@@ -38,4 +38,12 @@ describe("release workflow policy", () => {
       expect(workflow).toContain(`bun-download-url: ${baselineUrl}`);
     }
   });
+
+  test("configures a Git identity before Homebrew creates test taps", () => {
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      const identity = workflow.indexOf('git config --global user.name "llm-now CI"');
+      expect(identity).toBeGreaterThan(-1);
+      expect(identity).toBeLessThan(workflow.indexOf("brew tap-new"));
+    }
+  });
 });

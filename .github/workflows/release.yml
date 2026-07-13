@@ -305,6 +305,8 @@ jobs:
           bun scripts/serve-release-assets.ts .release-artifacts 8765 > .release-artifacts/server.log 2>&1 &
           for attempt in {1..20}; do curl --fail --silent http://127.0.0.1:8765/SHA256SUMS >/dev/null && break; sleep 1; done
           curl --fail --silent http://127.0.0.1:8765/SHA256SUMS >/dev/null
+          git config --global user.name "llm-now CI"
+          git config --global user.email "ci@llm-now.invalid"
           brew tap-new swartzrock/llm-now-release-gate
           tap_dir="$(brew --repository swartzrock/llm-now-release-gate)"
           version="$(bun -e 'console.log(require("./package.json").version)')"

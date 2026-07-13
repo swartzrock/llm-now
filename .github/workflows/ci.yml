@@ -122,6 +122,8 @@ jobs:
           curl --fail --silent http://127.0.0.1:8765/SHA256SUMS >/dev/null
       - shell: bash
         run: |
+          git config --global user.name "llm-now CI"
+          git config --global user.email "ci@llm-now.invalid"
           brew tap-new swartzrock/llm-now-local
           tap_dir="$(brew --repository swartzrock/llm-now-local)"
           version="$(bun -e 'console.log(require("./package.json").version)')"
