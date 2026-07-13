@@ -1,6 +1,6 @@
 # Manual testing guide
 
-Use this guide to validate an `llm-now` release candidate from the native archives through provider calls, aliases, package-manager installation, and the release workflow. Test the combined distribution branch or a tag reachable from `main`; do not treat source execution as a substitute for testing the packaged executables.
+Use this guide to validate an `llm-now` release candidate from the native archives through provider calls, aliases, and the release workflow. Test the combined distribution branch or a tag reachable from `main`; do not treat source execution as a substitute for testing the packaged executables.
 
 ## Release criteria
 
@@ -10,10 +10,9 @@ A candidate is ready when:
 - help, version, prompt input, provider selection, aliases, output separation, diagnostics, and exit codes match the documented CLI contract;
 - each supported provider completes at least one successful generation on a reference platform;
 - no credential appears in stdout, stderr, alias files, or captured shell logs;
-- Homebrew and Chocolatey complete their install, upgrade, behavioral-smoke, and uninstall lifecycles; and
 - no unexplained release-blocking manual failure remains.
 
-Public Homebrew and Chocolatey installation is not a release criterion until those repositories contain an authorized release.
+Homebrew and Chocolatey are intentionally outside the current release scope. Do not test or publish package-manager integration unless a future version explicitly reintroduces it.
 
 ## Coverage matrix
 
@@ -21,11 +20,11 @@ Public Homebrew and Chocolatey installation is not a release criterion until tho
 
 | Target | Required coverage |
 | --- | --- |
-| macOS ARM64 | Full functional pass and Homebrew lifecycle |
-| macOS x64 | Native smoke and Homebrew lifecycle |
-| Linux x64 glibc | Full functional pass and Homebrew lifecycle |
-| Linux ARM64 glibc | Native smoke and Homebrew lifecycle |
-| Windows x64 baseline | Full functional pass and Chocolatey lifecycle |
+| macOS ARM64 | Full functional pass |
+| macOS x64 | Native smoke |
+| Linux x64 glibc | Full functional pass |
+| Linux ARM64 glibc | Native smoke |
+| Windows x64 baseline | Full functional pass |
 
 A native smoke consists of checksum verification, extraction, `--help`, `--version`, invalid-usage behavior, one real generation, and operation without Bun or Node.js.
 
@@ -322,41 +321,11 @@ export OPENAI_API_KEY="LLM_NOW_SECRET_SENTINEL_93842"
 
 Force an OpenAI failure and capture stderr. The sentinel must not appear in stdout or stderr; if an underlying message contains it, the diagnostic must show `[REDACTED]`.
 
-## Package-manager lifecycle
-
-The public package commands remain intentionally inactive. For prerelease testing, reproduce the local artifact-server and package-rendering sequence in [the CI workflow](../.github/workflows/ci.yml).
-
-### MT-24: Homebrew
-
-Run on both macOS architectures and both Linux architectures:
-
-1. Serve the downloaded release assets locally.
-2. Create a temporary tap.
-3. Render a `0.0.0` formula against the local artifacts.
-4. Install `llm-now` and verify its version.
-5. Render the current-version formula and run `brew upgrade llm-now`.
-6. Verify that nondeterministic noninteractive input exits `2`, leaves stdout empty, and writes the usage diagnostic to stderr.
-7. Uninstall the package, untap the temporary tap, and stop the artifact server.
-
-The installed executable must not require Bun or Node.js at runtime.
-
-### MT-25: Chocolatey
-
-Run on Windows x64:
-
-1. Serve the downloaded release assets locally.
-2. Render and pack a temporary `0.0.0` package.
-3. Install it from a local Chocolatey source and verify its version.
-4. Render and pack the current-version package, then upgrade from the local source.
-5. Verify deterministic invalid-usage output and exit status.
-6. Uninstall and confirm that the executable and Chocolatey shim are removed.
-7. Stop the artifact server.
-
 ## Release workflow
 
 These tests are maintainer-only and occur after the implementation branches merge in order.
 
-### MT-26: Unsigned release candidate
+### MT-24: Unsigned release candidate
 
 1. Confirm the package version.
 2. Create an existing `vX.Y.Z` tag reachable from `main`.
@@ -365,7 +334,7 @@ These tests are maintainer-only and occur after the implementation branches merg
 
 The workflow must validate the tag/version/main ancestry, build all five targets, generate `SHA256SUMS`, and publish no GitHub Release or signed artifact.
 
-### MT-27: Signed public release
+### MT-25: Signed public release
 
 Run only when publication is explicitly authorized. Confirm that:
 
@@ -373,7 +342,7 @@ Run only when publication is explicitly authorized. Confirm that:
 - Windows reports a valid Authenticode signature;
 - GitHub Release assets match `SHA256SUMS`;
 - browser-downloaded macOS artifacts pass Gatekeeper without manual quarantine removal; and
-- public Homebrew and Chocolatey install, upgrade, and uninstall work on clean machines.
+- each downloaded executable passes `--help` and `--version` on a clean target machine.
 
 ## Automation-backed coverage
 

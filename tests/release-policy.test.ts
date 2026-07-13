@@ -46,19 +46,12 @@ describe("release workflow policy", () => {
     }
   });
 
-  test("configures a Git identity before Homebrew creates test taps", () => {
+  test("defers package-manager integration outside GitHub Actions", () => {
     for (const workflow of [ciWorkflow, releaseWorkflow]) {
-      const identity = workflow.indexOf('git config --global user.name "llm-now CI"');
-      expect(identity).toBeGreaterThan(-1);
-      expect(identity).toBeLessThan(workflow.indexOf("brew tap-new"));
+      expect(workflow.toLowerCase()).not.toContain("homebrew");
+      expect(workflow.toLowerCase()).not.toContain("chocolatey");
+      expect(workflow).not.toContain("scripts/package-render.ts");
     }
-  });
-
-  test("removes every installed test version before untapping Homebrew", () => {
-    for (const workflow of [ciWorkflow, releaseWorkflow]) {
-      expect(workflow).toContain("brew uninstall --force llm-now");
-      expect(workflow.indexOf("brew uninstall --force llm-now"))
-        .toBeLessThan(workflow.indexOf("brew untap"));
-    }
+    expect(releaseWorkflow).toContain("needs: [signed-assets, validate-ref]");
   });
 });

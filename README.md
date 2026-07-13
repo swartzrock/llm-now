@@ -11,30 +11,22 @@ bun test
 bun run typecheck
 ```
 
-Native binaries and Homebrew/Chocolatey packages are planned but are not published yet. Source development currently requires Bun 1.3.14.
+Native binaries are built for the supported platforms but are not published yet. Source development currently requires Bun 1.3.14.
 
-Use the [manual testing guide](docs/manual-testing.md) to validate native artifacts, provider integrations, aliases, package lifecycles, and release candidates.
+Use the [manual testing guide](docs/manual-testing.md) to validate native artifacts, provider integrations, aliases, and release candidates.
 
 ## Distribution status
 
-The repository builds and tests self-contained archives for macOS x64/ARM64, glibc Linux x64/ARM64, and Windows x64. Each archive contains one executable and is covered by the release checksum manifest. The package definitions are also validated through local Homebrew and Chocolatey install, upgrade, behavioral-smoke, and uninstall lifecycles.
+The repository builds and tests self-contained archives for macOS x64/ARM64, glibc Linux x64/ARM64, and Windows x64. Each archive contains one executable and is covered by the release checksum manifest.
 
-These public installation commands are intentionally inactive until their repositories contain an authorized release:
+Homebrew and Chocolatey integration is intentionally deferred. A custom Homebrew tap and a Chocolatey package may be added in a future version if adoption justifies their ongoing maintenance; neither package manager is part of the current CI or release workflow.
 
-```bash
-# Future project tap
-brew install swartzrock/tap/llm-now
-
-# Future Chocolatey community package
-choco install llm-now
-```
-
-Release candidates are started manually with the `Release candidate` GitHub Actions workflow and an existing `v<package-version>` tag reachable from `main`. Its default `publish: false` path builds unsigned artifacts and exercises package rendering without publishing anything. The `publish: true` path additionally requires reviewer approval for both protected environments:
+Release candidates are started manually with the `Release candidate` GitHub Actions workflow and an existing `v<package-version>` tag reachable from `main`. Its default `publish: false` path builds unsigned artifacts without publishing anything. The `publish: true` path additionally requires reviewer approval for both protected environments:
 
 - `release-signing`: Apple signing identity, base64 PKCS#12 certificate and password, notarization Apple ID/team/app password, plus a base64 Windows PFX certificate and password
-- `release-publication`: final approval to create the GitHub Release after native signing and package lifecycle gates pass
+- `release-publication`: final approval to create the GitHub Release after native signing and asset validation pass
 
-The repository owner must configure those environments with required reviewers and protect release tags from mutation. Every release job checks out the commit SHA established by the initial tag/version/main-ancestry gate, and publication rechecks that the tag still resolves to that SHA. Missing credentials fail the authorized signing job with the missing secret's name; they do not weaken pull-request verification or publish partial assets. Homebrew tap publication and Chocolatey community submission remain separate, explicitly authorized follow-up operations.
+The repository owner must configure those environments with required reviewers and protect release tags from mutation. Every release job checks out the commit SHA established by the initial tag/version/main-ancestry gate, and publication rechecks that the tag still resolves to that SHA. Missing credentials fail the authorized signing job with the missing secret's name; they do not weaken pull-request verification or publish partial assets.
 
 ## Usage
 
