@@ -13,6 +13,8 @@ bun run typecheck
 
 Native binaries and Homebrew/Chocolatey packages are planned but are not published yet. Source development currently requires Bun 1.3.14.
 
+Use the [manual testing guide](docs/manual-testing.md) to validate native artifacts, provider integrations, aliases, package lifecycles, and release candidates.
+
 ## Distribution status
 
 The repository builds and tests self-contained archives for macOS x64/ARM64, glibc Linux x64/ARM64, and Windows x64. Each archive contains one executable and is covered by the release checksum manifest. The package definitions are also validated through local Homebrew and Chocolatey install, upgrade, behavioral-smoke, and uninstall lifecycles.

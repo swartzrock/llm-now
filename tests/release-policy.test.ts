@@ -22,11 +22,18 @@ describe("release workflow policy", () => {
     }
   });
 
-  test("pins every third-party action to a full commit SHA", () => {
+  test("uses current release tags for GitHub actions and pins third-party actions", () => {
+    const githubActions = new Set([
+      "actions/checkout@v7.0.0",
+      "actions/download-artifact@v8.0.1",
+      "actions/upload-artifact@v7.0.1",
+    ]);
     for (const workflow of [ciWorkflow, releaseWorkflow]) {
       const actions = [...workflow.matchAll(/^\s+- uses:\s+([^\s#]+)/gm)].map((match) => match[1]!);
       expect(actions.length).toBeGreaterThan(0);
-      expect(actions.every((action) => /@[a-f0-9]{40}$/.test(action))).toBe(true);
+      expect(actions.every((action) => action.startsWith("actions/")
+        ? githubActions.has(action)
+        : /@[a-f0-9]{40}$/.test(action))).toBe(true);
     }
   });
 
