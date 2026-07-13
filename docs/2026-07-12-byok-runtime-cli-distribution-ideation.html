@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: BYOK Runtime CLI Distribution</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f1e8;
+      --surface: #fffdf7;
+      --surface-2: #ece8dc;
+      --ink: #1b2430;
+      --muted: #5e6670;
+      --line: #cbc6b9;
+      --accent: #0c6d66;
+      --accent-soft: #d8efe9;
+      --accent-text: #084f4a;
+      --blue-soft: #dfeaf5;
+      --blue-text: #244d73;
+      --warn-soft: #f4e7c2;
+      --warn-text: #6e5010;
+      --danger-soft: #f4dcda;
+      --danger-text: #7a302a;
+      --shadow: 0 18px 42px rgba(35, 42, 47, 0.08);
+      --radius: 18px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121716;
+        --surface: #1a211f;
+        --surface-2: #242d2a;
+        --ink: #edf2ed;
+        --muted: #b7c0ba;
+        --line: #3b4944;
+        --accent: #72d4c6;
+        --accent-soft: #173b36;
+        --accent-text: #a9eee4;
+        --blue-soft: #1f3448;
+        --blue-text: #b9d8f5;
+        --warn-soft: #453816;
+        --warn-text: #f4d981;
+        --danger-soft: #482724;
+        --danger-text: #f0b6b0;
+        --shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+    }
+    a { color: var(--accent); text-underline-offset: 0.18em; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--surface-2);
+      padding: 0.12em 0.36em;
+      border-radius: 6px;
+    }
+    .page { width: min(94vw, 940px); margin: 0 auto; padding: 3.2rem 0 4rem; }
+    header {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: clamp(1.5rem, 4vw, 3rem);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin: 0 0 0.5rem;
+      color: var(--accent-text);
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.17; letter-spacing: -0.025em; }
+    h1 { margin: 0; font-size: clamp(2.05rem, 5vw, 3.55rem); max-width: 17ch; }
+    h2 { margin: 0 0 1rem; font-size: clamp(1.55rem, 3vw, 2.15rem); }
+    h3 { margin: 0; font-size: 1.28rem; }
+    p { max-width: 72ch; }
+    .dek { font-size: 1.12rem; color: var(--muted); max-width: 67ch; margin: 1rem 0 0; }
+    .meta, .stats, .chips { display: flex; flex-wrap: wrap; gap: 0.55rem; }
+    .meta { margin-top: 1.5rem; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 2rem;
+      padding: 0.35rem 0.72rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--ink);
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .pill.accent { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
+    .pill.blue { background: var(--blue-soft); color: var(--blue-text); border-color: transparent; }
+    .pill.warn { background: var(--warn-soft); color: var(--warn-text); border-color: transparent; }
+    nav {
+      margin: 1.2rem 0 2.8rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+    }
+    nav a {
+      color: var(--ink);
+      text-decoration: none;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.42rem 0.78rem;
+      font-size: 0.86rem;
+      font-weight: 700;
+    }
+    section { margin-top: 3.7rem; scroll-margin-top: 1.2rem; }
+    .section-intro { color: var(--muted); margin-top: -0.3rem; }
+    .callout {
+      margin: 1.35rem 0;
+      padding: 1.15rem 1.3rem;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+    }
+    .callout p { margin: 0; }
+    .stats { margin-top: 1.3rem; }
+    .stat {
+      flex: 1 1 150px;
+      padding: 1rem;
+      background: var(--surface-2);
+      border-radius: 14px;
+    }
+    .stat strong { display: block; font-size: 1.45rem; line-height: 1.1; }
+    .stat span { color: var(--muted); font-size: 0.82rem; }
+    .axis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; }
+    .axis {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 1rem;
+      font-weight: 750;
+    }
+    .decision-map {
+      margin: 1.5rem 0 0;
+      padding: 1rem;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow-x: auto;
+    }
+    .decision-map svg { display: block; min-width: 720px; width: 100%; height: auto; }
+    .decision-map figcaption { color: var(--muted); font-size: 0.86rem; margin: 0.7rem 0.35rem 0; }
+    .jump-list {
+      margin: 1.2rem 0 1.6rem;
+      padding: 1rem 1.1rem 1rem 2.2rem;
+      background: var(--surface-2);
+      border-radius: 14px;
+      columns: 2;
+    }
+    .jump-list li { break-inside: avoid; padding: 0.15rem 0; }
+    .idea {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: clamp(1.25rem, 3vw, 2rem);
+      margin: 1rem 0;
+      box-shadow: var(--shadow);
+      scroll-margin-top: 1rem;
+    }
+    .idea-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+    .rank {
+      display: inline-grid;
+      place-items: center;
+      width: 2.2rem;
+      height: 2.2rem;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      font-weight: 850;
+    }
+    .idea-title { display: flex; align-items: center; gap: 0.8rem; }
+    .idea dl {
+      display: grid;
+      grid-template-columns: 7.5rem 1fr;
+      gap: 0.55rem 1rem;
+      margin: 1.25rem 0 0;
+    }
+    .idea dt { font-size: 0.76rem; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .idea dd { margin: 0; }
+    .choice-note {
+      margin-top: 1.25rem;
+      padding: 0.9rem 1rem;
+      border-radius: 12px;
+      background: var(--blue-soft);
+      color: var(--blue-text);
+    }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { padding: 0.78rem 0.9rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    th { background: var(--surface-2); font-size: 0.76rem; letter-spacing: 0.07em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .sources { display: grid; gap: 0.65rem; padding: 0; list-style: none; }
+    .sources li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 0.8rem 1rem; }
+    footer { margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.82rem; }
+    @media (max-width: 700px) {
+      .page { width: min(92vw, 940px); padding-top: 1.5rem; }
+      .axis-grid { grid-template-columns: 1fr; }
+      .jump-list { columns: 1; }
+      .idea-head { display: block; }
+      .idea dl { grid-template-columns: 1fr; }
+      .idea dt { margin-top: 0.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <p class="eyebrow">Ideation · repo-grounded</p>
+      <h1>BYOK Runtime CLI Distribution</h1>
+      <p class="dek">Should the provider-smoke example become a standard <code>npx</code>/<code>bunx</code> interface—and if so, where should the product boundary sit?</p>
+      <div class="meta" aria-label="Document metadata">
+        <span class="pill">Date · <time datetime="2026-07-12">2026-07-12</time></span>
+        <span class="pill">Topic · byok-runtime-cli-distribution</span>
+        <span class="pill">Mode · repo-grounded</span>
+        <span class="pill accent">Focus · library + command-line access</span>
+      </div>
+      <div class="stats" aria-label="Ideation statistics">
+        <div class="stat"><strong>33</strong><span>consolidated candidates</span></div>
+        <div class="stat"><strong>6</strong><span>ranked survivors</span></div>
+        <div class="stat"><strong>4</strong><span>topic axes covered</span></div>
+        <div class="stat"><strong>1</strong><span>recommended product shape</span></div>
+      </div>
+    </header>
+
+    <nav aria-label="Document navigation">
+      <a href="#grounding-context">Grounding Context</a>
+      <a href="#topic-axes">Topic Axes</a>
+      <a href="#ranked-ideas">Ranked Ideas</a>
+      <a href="#rejection-summary">Rejection Summary</a>
+      <a href="#sources">Sources</a>
+    </nav>
+
+    <section id="grounding-context">
+      <p class="eyebrow">What the evidence says</p>
+      <h2>Grounding Context</h2>
+      <p><strong>Codebase Context.</strong> <code>@swartzrock/byok-runtime</code> is currently a library-only ESM package for Node 20+. It publishes <code>.</code> and <code>./node</code>, has no <code>bin</code>, and excludes examples from the tarball. The smoke CLI imports repository-private source paths, so it cannot be promoted unchanged.</p>
+      <p>The reusable Node surface is already emerging: <code>findAvailableProviders</code> detects local endpoints, installed Codex/Claude commands, and configured API-key environment variables. But those signals are not equivalent—reachable, installed, configured, authenticated, and generation-ready are different states. The current <code>ByokProviderId[]</code> result loses that distinction.</p>
+      <p>Externally, npm and Bun make a package binary the standard zero-install contract. Diagnostic tools often ship separately from their SDKs, while same-package binaries work when the executable and library are one cohesive lifecycle. Mature general LLM CLIs also show the scope trap: general generation quickly pulls in key storage, history, plugins, configuration, and model management.</p>
+      <div class="callout">
+        <p><strong>Decision signal:</strong> command-line access is worth offering, but the differentiated product is environment readiness and proof—not another interactive AI shell.</p>
+      </div>
+      <figure class="decision-map">
+        <svg viewBox="0 0 860 250" role="img" aria-labelledby="map-title map-desc">
+          <title id="map-title">Recommended library and CLI relationship</title>
+          <desc id="map-desc">A shared structured readiness API powers TypeScript hosts and a separate doctor CLI. Paid or process-executing proof is explicitly invoked after passive inspection.</desc>
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#0c6d66"></path>
+            </marker>
+          </defs>
+          <rect x="24" y="72" width="215" height="104" rx="16" fill="#dfeaf5" stroke="#6f91b1"></rect>
+          <text x="132" y="111" text-anchor="middle" font-size="18" font-weight="700" fill="#244d73">Node library</text>
+          <text x="132" y="140" text-anchor="middle" font-size="14" fill="#244d73">structured readiness report</text>
+          <rect x="331" y="26" width="220" height="82" rx="16" fill="#d8efe9" stroke="#65a99f"></rect>
+          <text x="441" y="61" text-anchor="middle" font-size="18" font-weight="700" fill="#084f4a">JS / TS hosts</text>
+          <text x="441" y="86" text-anchor="middle" font-size="14" fill="#084f4a">import the same evidence</text>
+          <rect x="331" y="146" width="220" height="82" rx="16" fill="#d8efe9" stroke="#65a99f"></rect>
+          <text x="441" y="181" text-anchor="middle" font-size="18" font-weight="700" fill="#084f4a">Doctor CLI</text>
+          <text x="441" y="206" text-anchor="middle" font-size="14" fill="#084f4a">render human + JSON views</text>
+          <rect x="645" y="146" width="190" height="82" rx="16" fill="#f4e7c2" stroke="#b89d50"></rect>
+          <text x="740" y="181" text-anchor="middle" font-size="18" font-weight="700" fill="#6e5010">Explicit prove</text>
+          <text x="740" y="206" text-anchor="middle" font-size="14" fill="#6e5010">models / generation</text>
+          <path d="M239 105 L321 73" fill="none" stroke="#0c6d66" stroke-width="3" marker-end="url(#arrow)"></path>
+          <path d="M239 145 L321 181" fill="none" stroke="#0c6d66" stroke-width="3" marker-end="url(#arrow)"></path>
+          <path d="M551 187 L635 187" fill="none" stroke="#0c6d66" stroke-width="3" marker-end="url(#arrow)"></path>
+        </svg>
+        <figcaption>Directional overview: one evidence model, two user surfaces, and an explicit boundary before consequential verification.</figcaption>
+      </figure>
+    </section>
+
+    <section id="topic-axes">
+      <p class="eyebrow">Surface map</p>
+      <h2>Topic Axes</h2>
+      <div class="axis-grid">
+        <div class="axis">1. Distribution and package boundary</div>
+        <div class="axis">2. Command and product scope</div>
+        <div class="axis">3. Automation and security contract</div>
+        <div class="axis">4. Shared core and maintenance</div>
+      </div>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">Six directions survived</p>
+      <h2>Ranked Ideas</h2>
+      <ol class="jump-list">
+        <li><a href="#idea-1">Public readiness API + companion doctor</a></li>
+        <li><a href="#idea-2">Structured readiness report</a></li>
+        <li><a href="#idea-3">Inspect → list → prove ladder</a></li>
+        <li><a href="#idea-4">Secret-free automation receipts</a></li>
+        <li><a href="#idea-5">Optional armed <code>run --auto</code></a></li>
+        <li><a href="#idea-6">Same-package thin binary</a></li>
+      </ol>
+
+      <article class="idea" id="idea-1">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">1.</span><h3>Two-surface product: public readiness API + companion doctor CLI</h3></div>
+          <div class="chips"><span class="pill accent">Confidence 90%</span><span class="pill blue">Complexity Medium</span></div>
+        </div>
+        <dl>
+          <dt>Description</dt><dd>Publish a focused companion such as <code>@swartzrock/byok-runtime-cli</code> or <code>@swartzrock/byok-runtime-doctor</code>, runnable through <code>npx</code> and <code>bunx</code>. Its identity is diagnostic: show what the host can use, where readiness stops, and optionally prove a selected provider. It consumes only public Node-library APIs.</dd>
+          <dt>Axis</dt><dd>Distribution and package boundary</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> the core package publishes only <code>dist</code> and two library exports, while the current CLI is private and source-relative. <strong>external:</strong> AI SDK DevTools and MCP Inspector use companion diagnostic packages rather than adding operational tooling to their core SDK surfaces.</dd>
+          <dt>Rationale</dt><dd>This gives users the useful zero-install path without coupling every library installation and release to a growing command interface. The package boundary also communicates that environment inspection and local process execution are explicit tooling choices.</dd>
+          <dt>Downsides</dt><dd>A second package adds naming, version coordination, release automation, and discoverability work. For only three tiny commands it may initially feel heavier than a same-package binary.</dd>
+        </dl>
+        <div class="choice-note"><strong>Top pick.</strong> It best preserves the runtime's app-agnostic identity while giving the CLI enough room to become a genuinely good diagnostics product.</div>
+      </article>
+
+      <article class="idea" id="idea-2">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">2.</span><h3>Structured provider readiness report in the Node library</h3></div>
+          <div class="chips"><span class="pill accent">Confidence 92%</span><span class="pill blue">Complexity Medium</span></div>
+        </div>
+        <dl>
+          <dt>Description</dt><dd>Add a Node-library capability that returns structured evidence for every provider: discovery signal, readiness state, safe failure category, and available next check. TypeScript hosts, Electron settings screens, CI, and the CLI would all consume the same report.</dd>
+          <dt>Axis</dt><dd>Shared core and maintenance</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> <code>findAvailableProviders</code> already performs three distinct checks but reduces them to <code>ByokProviderId[]</code>. The example then reconstructs configuration and command mappings outside the published boundary.</dd>
+          <dt>Rationale</dt><dd>The CLI question reveals a missing reusable abstraction. Moving evidence—not argument parsing—into the library prevents semantic drift and makes readiness useful even for callers that never install the executable.</dd>
+          <dt>Downsides</dt><dd>Readiness states become a public contract that must remain stable as providers evolve. The API must avoid implying authentication or generation success when only ambient configuration was detected.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-3">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">3.</span><h3>A visible readiness ladder: inspect → list → prove</h3></div>
+          <div class="chips"><span class="pill accent">Confidence 91%</span><span class="pill blue">Complexity Medium</span></div>
+        </div>
+        <dl>
+          <dt>Description</dt><dd>Design the command surface around escalating effects. <code>inspect</code> is passive and secret-safe; <code>models</code> may authenticate or execute a local CLI; <code>prove</code> performs a minimal generation and may spend tokens. Human and JSON output both identify the level reached.</dd>
+          <dt>Axis</dt><dd>Command and product scope</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> provider discovery currently checks endpoints, executable presence, and env-var presence without launching installed AI CLIs. Model listing and generation cross materially different authentication, process-execution, and cost boundaries.</dd>
+          <dt>Rationale</dt><dd>The ladder turns the vague word “available” into a useful diagnosis and makes consent visible before consequential actions. It is a stronger product model than exposing library method names one-for-one.</dd>
+          <dt>Downsides</dt><dd>More states and verbs require careful naming. Some providers blur the ladder because model listing itself may be unavailable or as consequential as a minimal request.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-4">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">4.</span><h3>Secret-free receipts and a machine-first I/O contract</h3></div>
+          <div class="chips"><span class="pill accent">Confidence 88%</span><span class="pill blue">Complexity Medium</span></div>
+        </div>
+        <dl>
+          <dt>Description</dt><dd>Make every diagnostic operation available as stable JSON, with provider evidence, readiness state, timestamps, runtime version, and sanitized failure classes. Preserve stdout for data, stderr for diagnostics, stdin for prompts, and documented exit categories; report credential variable names/presence, never values.</dd>
+          <dt>Axis</dt><dd>Automation and security contract</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> the current CLI already keeps values on stdout and errors on stderr, but collapses all failures to exit code <code>1</code> and discards why a provider was discovered. The runtime promises not to persist or log credential values.</dd>
+          <dt>Rationale</dt><dd>A secret-free receipt becomes useful in CI, desktop setup screens, installers, support bundles, and bug reports. That cross-surface reuse is more durable than terminal prose.</dd>
+          <dt>Downsides</dt><dd>JSON schemas and exit semantics create compatibility commitments. Detailed failures must be carefully sanitized across third-party API and CLI output.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-5">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">5.</span><h3>Optional, explicitly armed <code>run --auto</code> smoke path</h3></div>
+          <div class="chips"><span class="pill warn">Confidence 74%</span><span class="pill blue">Complexity Medium</span></div>
+        </div>
+        <dl>
+          <dt>Description</dt><dd>Keep one-shot generation as a proof primitive, not the CLI's identity. An explicit command discovers candidates, lists models, attempts generation with documented fallback, emits selected provider/model and failures on stderr or JSON, and leaves response text alone on stdout.</dd>
+          <dt>Axis</dt><dd>Command and product scope</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> <code>examples/first-available-llm.sh</code> and its tests already demonstrate discovery, model selection, fallback, and response-only stdout. <strong>reasoned:</strong> generation is the only definitive proof of readiness, but does not require interactive chat, history, or key storage.</dd>
+          <dt>Rationale</dt><dd>This provides the memorable “use whatever already works” demo while keeping the diagnostics-first boundary intact. It also replaces brittle shell orchestration with one supported operation.</dd>
+          <dt>Downsides</dt><dd>Automatic provider/model policy may conflict with the project's host-owned-policy stance; random selection is unsuitable as a default public contract. It may incur cost or execute local authenticated tools, so consent and deterministic policy are essential.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-6">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">6.</span><h3>Same-package thin binary as the simpler alternative</h3></div>
+          <div class="chips"><span class="pill warn">Confidence 68%</span><span class="pill blue">Complexity Low–Medium</span></div>
+        </div>
+        <dl>
+          <dt>Description</dt><dd>Add a <code>bin</code> to <code>@swartzrock/byok-runtime</code> so the obvious package name works for imports, <code>npx</code>, and <code>bunx</code>. Keep the executable dependency-light, semver-aligned, and limited to parsing/formatting over public Node APIs.</dd>
+          <dt>Axis</dt><dd>Distribution and package boundary</dd>
+          <dt>Basis</dt><dd><strong>external:</strong> npm and Bun directly support package-declared binaries; Playwright demonstrates that a same-package library and executable can be coherent when they share one lifecycle. <strong>direct:</strong> the runtime already has a Node-only public boundary suitable for the executable.</dd>
+          <dt>Rationale</dt><dd>This is the shortest route to “library or command line” and avoids a second package name. It is attractive if the CLI remains permanently small and releases should always move in lockstep.</dd>
+          <dt>Downsides</dt><dd>Every library consumer receives the binary and its support promise. CLI UX changes force core releases, and a future expansion would make separation harder after users depend on the package name.</dd>
+        </dl>
+        <div class="choice-note"><strong>Decision rule:</strong> choose this only if the permanent CLI promise fits on one screen of help and remains a projection of the core runtime—not an independently growing product.</div>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <p class="eyebrow">What was cut</p>
+      <h2>Rejection Summary</h2>
+      <p class="section-intro">Every consolidated candidate was checked for basis strength, scope, overlap, and meeting value. Strong components merged into the six survivors are recorded rather than silently disappearing.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Considered idea</th><th>Reason rejected or merged</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>Separate diagnostic package</td><td>Merged into idea 1.</td></tr>
+            <tr><td>2</td><td>Same-package narrow binary</td><td>Promoted and sharpened as idea 6.</td></tr>
+            <tr><td>3</td><td>No binary; embeddable runner only</td><td>Public command-runner demand is unproven and overlaps candidate 25.</td></tr>
+            <tr><td>4</td><td>Keep the example only</td><td>Credible control, but leaves demonstrated zero-install diagnostic value unavailable.</td></tr>
+            <tr><td>5</td><td>Package boundary as authority boundary</td><td>Duplicates idea 1; separation signals authority but does not enforce isolation.</td></tr>
+            <tr><td>6</td><td>Doctor-first CLI</td><td>Merged into idea 1.</td></tr>
+            <tr><td>7</td><td>Readiness ladder</td><td>Merged into idea 3.</td></tr>
+            <tr><td>8</td><td>Passive detect vs explicit prove</td><td>Merged into idea 3.</td></tr>
+            <tr><td>9</td><td><code>run --auto</code> capability broker</td><td>Narrowed into idea 5.</td></tr>
+            <tr><td>10</td><td>No generation command</td><td>Too rigid; explicitly armed generation can prove readiness without becoming chat.</td></tr>
+            <tr><td>11</td><td>Environment-to-code compiler</td><td>No evidence of demand and creates another provider-specific output surface.</td></tr>
+            <tr><td>12</td><td>Runtime receipt</td><td>Merged into idea 4.</td></tr>
+            <tr><td>13</td><td>Security preflight</td><td>Overlaps ideas 3 and 4; much static information is already documented.</td></tr>
+            <tr><td>14</td><td>Capability negotiation</td><td>Premature centralization of host-owned provider/model policy.</td></tr>
+            <tr><td>15</td><td>Executable conformance oracle</td><td>Existing tests are mocked dispatch contracts, not live provider conformance.</td></tr>
+            <tr><td>16</td><td>General interactive AI CLI</td><td>Basis refuted by scope: conflicts with the app-agnostic, no-persistence boundary.</td></tr>
+            <tr><td>17</td><td>Machine-first I/O constitution</td><td>Merged into idea 4.</td></tr>
+            <tr><td>18</td><td>Redacted capability evidence</td><td>Merged into idea 4.</td></tr>
+            <tr><td>19</td><td>Default-deny authority flags</td><td>Flags do not sandbox an already-running package; effect consent is clearer in idea 3.</td></tr>
+            <tr><td>20</td><td>Flight-check levels</td><td>Merged into idea 3.</td></tr>
+            <tr><td>21</td><td>JSON-lines RPC protocol</td><td>Refuted as unsupported cross-language abstraction; structured output is sufficient.</td></tr>
+            <tr><td>22</td><td>Unix auto filter</td><td>Merged into ideas 4 and 5.</td></tr>
+            <tr><td>23</td><td>Structured public inspection API</td><td>Promoted as idea 2.</td></tr>
+            <tr><td>24</td><td>No CLI-only provider logic</td><td>Kept as a constraint inside ideas 1, 2, and 6; too absolute as a standalone direction.</td></tr>
+            <tr><td>25</td><td>Embeddable command adapter</td><td>Feasible, but no host demand justifies stabilizing argument semantics as a library API.</td></tr>
+            <tr><td>26</td><td>Public-API conformance example</td><td>Useful maintenance detail, below the ambition floor as a standalone direction.</td></tr>
+            <tr><td>27</td><td>Packed-binary release contract</td><td>Necessary if a binary ships, but an implementation obligation rather than a product direction.</td></tr>
+            <tr><td>28</td><td>Shared fallback/model selection</td><td>Refuted: one shell example does not justify moving host-owned random/fallback policy into the library.</td></tr>
+            <tr><td>29</td><td>Doctor companion + readiness API</td><td>Promoted as idea 1.</td></tr>
+            <tr><td>30</td><td>Safe proof path</td><td>Promoted as idea 5.</td></tr>
+            <tr><td>31</td><td>One package, two faces</td><td>Promoted as idea 6.</td></tr>
+            <tr><td>32</td><td>Support receipt</td><td>Promoted as idea 4.</td></tr>
+            <tr><td>33</td><td>API-first gate for every CLI feature</td><td>Refuted as unnecessarily exposing CLI-only UX semantics in the library API.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="sources">
+      <p class="eyebrow">Primary references consulted</p>
+      <h2>Sources</h2>
+      <ul class="sources">
+        <li><a href="https://docs.npmjs.com/files/package.json/">npm package.json reference</a> — package binary and publishing semantics.</li>
+        <li><a href="https://docs.npmjs.com/cli/v11/commands/npm-exec/">npm exec reference</a> — zero-install execution behavior and prompts.</li>
+        <li><a href="https://bun.sh/docs/pm/bunx">Bun bunx reference</a> — executable resolution and runtime behavior.</li>
+        <li><a href="https://ai-sdk.dev/docs/ai-sdk-core/devtools">AI SDK DevTools</a> and <a href="https://modelcontextprotocol.io/docs/tools/inspector">MCP Inspector</a> — companion diagnostic-tool precedents.</li>
+        <li><a href="https://docs.ollama.com/cli">Ollama CLI</a>, <a href="https://lmstudio.ai/docs/cli">LM Studio CLI</a>, and <a href="https://github.com/simonw/LLM">LLM</a> — evidence of general-purpose CLI scope.</li>
+        <li><a href="https://nodejs.org/api/child_process.html">Node child_process reference</a> — environment inheritance and shell/process safety.</li>
+      </ul>
+    </section>
+
+    <footer class="composition-signal">Composed 2026-07-12T16:52Z by ce-ideate from the user prompt and the <code>byok-runtime</code> repository.</footer>
+  </main>
+</body>
+</html>
