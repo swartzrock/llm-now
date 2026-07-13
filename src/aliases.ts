@@ -1,6 +1,6 @@
 import { isByokProviderId, type ByokEnvironment, type ByokProviderId } from "@swartzrock/byok-runtime";
 import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
-import { dirname, isAbsolute, join, win32 } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const ALIAS_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -59,10 +59,10 @@ export function resolveAliasPath(options: AliasPathOptions): string {
     return win32.join(roaming, "llm-now", "aliases.json");
   }
 
-  const config = options.env.XDG_CONFIG_HOME && isAbsolute(options.env.XDG_CONFIG_HOME)
+  const config = options.env.XDG_CONFIG_HOME && posix.isAbsolute(options.env.XDG_CONFIG_HOME)
     ? options.env.XDG_CONFIG_HOME
-    : join(options.home, ".config");
-  return join(config, "llm-now", "aliases.json");
+    : posix.join(options.home, ".config");
+  return posix.join(config, "llm-now", "aliases.json");
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
