@@ -7,7 +7,7 @@ export interface TtyState {
 export interface PromptInput extends TtyState, AsyncIterable<string | Uint8Array> {}
 
 export interface TextOutput extends TtyState {
-  write(text: string): unknown;
+  write(text: string, callback?: (error?: Error | null) => void): unknown;
 }
 
 export function isInteractive(stdin: TtyState, stderr: TtyState): boolean {

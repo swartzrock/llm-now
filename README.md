@@ -38,6 +38,8 @@ Choose a discovered provider and model interactively:
 llm-now --input "Write a two-line poem about rain"
 ```
 
+If you have saved aliases, an interactive call offers those first. Choose “Select a new provider and model…” for a fresh selection. Alias, provider, and model lists are sorted and filter as you type.
+
 Use a saved global alias:
 
 ```bash
@@ -52,16 +54,16 @@ llm-now --input "Hello" --provider ollama --model llama3
 printf 'Hello' | llm-now --provider claude-cli --model default
 ```
 
-Exactly one prompt source is required: `--input` or stdin. Non-interactive calls require `--alias` or both `--provider` and `--model`. Successful generation writes the model response, byte-for-byte, to stdout. Menus and diagnostics use stderr.
+Exactly one prompt source is required: `--input` or stdin. Non-interactive calls require `--alias` or both `--provider` and `--model`. Successful generation writes the model response, byte-for-byte, to stdout. Interactive UI and diagnostics use stderr, so the response remains safe to redirect or pipe. After an interactive response, stderr resets terminal styling and adds a clean visual boundary without changing stdout.
 
 ## Aliases and configuration
 
-After a successful interactive call, `llm-now` offers to save the provider/model selection. Aliases contain no credentials and are available from every working directory.
+After a successful unnamed interactive call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`, with the provider and model emphasized. Type a name to save that exact provider/model pair, or press Enter to exit. If the selected provider/model is already saved, it reports the existing alias and suggests `--alias <name>` for next time instead of asking for a duplicate. A call that selected an existing alias does not ask again. Aliases contain no credentials and are available from every working directory.
 
 - macOS/Linux: `$XDG_CONFIG_HOME/llm-now/aliases.json`, otherwise `~/.config/llm-now/aliases.json`
 - Windows: `%APPDATA%\\llm-now\\aliases.json`, otherwise `%USERPROFILE%\\AppData\\Roaming\\llm-now\\aliases.json`
 
-Existing aliases require overwrite confirmation. A stale alias fails without selecting a replacement.
+Saving the same name and target reports that it is already saved. Reusing a name for a different target requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.
 
 ## Discovery and diagnostics
 
@@ -74,4 +76,4 @@ Exit codes:
 - `0`: successful generation, help, or version (including declined/cancelled post-success alias saving)
 - `1`: discovery, model-list, generation, or configuration failure
 - `2`: invalid usage
-- `130`: interactive provider/model selection cancelled before generation
+- `130`: interactive alias/provider/model selection cancelled before generation

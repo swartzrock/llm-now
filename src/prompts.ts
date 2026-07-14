@@ -1,6 +1,16 @@
-import type { ByokProviderId } from "@swartzrock/byok-runtime";
-import { createInterface } from "node:readline/promises";
+import {
+  byokProviderDefinition,
+  type ByokProviderId,
+} from "@swartzrock/byok-runtime";
+import {
+  autocomplete,
+  confirm as clackConfirm,
+  isCancel,
+  text as clackText,
+} from "@clack/prompts";
+import pc from "picocolors";
 import type { Readable, Writable } from "node:stream";
+import type { AliasRecord } from "./aliases.ts";
 import type { RuntimeGateway } from "./runtime.ts";
 
 export const NO_PROVIDER_DIAGNOSTIC = `llm-now: discovery: no available provider found.
@@ -8,8 +18,27 @@ Local servers: checked Ollama on 127.0.0.1:11434 and LM Studio on 127.0.0.1:1234
 Authenticated AI CLIs: checked codex and claude on PATH. Install and authenticate a supported CLI separately, then retry.
 Environment-backed cloud providers: checked recognized Anthropic, OpenAI, Google, xAI, and OpenRouter key variables without printing values. Export a supported provider key in the shell, then retry.`;
 
-export interface NumberedPrompter {
-  choose(message: string, choices: readonly string[]): Promise<number | null>;
+export type PromptValue = string | number | boolean;
+
+export interface PromptOption {
+  value: PromptValue;
+  label: string;
+  hint?: string;
+}
+
+export interface TextPromptOptions {
+  placeholder?: string;
+  validate?: (value: string | undefined) => string | undefined;
+}
+
+export interface ConfirmPromptOptions {
+  initialValue?: boolean;
+}
+
+export interface SearchablePrompter {
+  select(message: string, options: readonly PromptOption[]): Promise<PromptValue | null>;
+  input(message: string, options?: TextPromptOptions): Promise<string | null>;
+  confirm(message: string, options?: ConfirmPromptOptions): Promise<boolean | null>;
 }
 
 export type InteractiveSelectionResult =
@@ -17,9 +46,14 @@ export type InteractiveSelectionResult =
   | { kind: "cancelled"; exitCode: 130 }
   | { kind: "failed"; exitCode: 1; stage: "discovery" | "model-list" };
 
+export type InteractiveAliasResult =
+  | { kind: "selected"; selection: AliasRecord }
+  | { kind: "fresh" }
+  | { kind: "cancelled"; exitCode: 130 };
+
 export interface SelectionDependencies {
   runtime: RuntimeGateway;
-  prompter: NumberedPrompter;
+  prompter: SearchablePrompter;
   diagnostic(text: string): void;
 }
 
@@ -27,16 +61,87 @@ function supportsDefault(provider: ByokProviderId): boolean {
   return provider === "codex-cli" || provider === "claude-cli";
 }
 
-function renderMenu(
-  diagnostic: (text: string) => void,
-  title: string,
-  choices: readonly string[],
-): void {
-  diagnostic(`${title}\n${choices.map((choice, index) => `  ${index + 1}. ${choice}`).join("\n")}`);
+function compareFoldedText(left: string, right: string): number {
+  const foldedLeft = left.toLowerCase();
+  const foldedRight = right.toLowerCase();
+  if (foldedLeft < foldedRight) return -1;
+  if (foldedLeft > foldedRight) return 1;
+  return 0;
 }
 
-function validChoice(choice: number | null, length: number): choice is number {
-  return choice !== null && Number.isInteger(choice) && choice >= 0 && choice < length;
+function compareRawText(left: string, right: string): number {
+  const foldedOrder = compareFoldedText(left, right);
+  if (foldedOrder !== 0) return foldedOrder;
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export function sortPromptOptions(options: readonly PromptOption[]): PromptOption[] {
+  return [...options].sort((left, right) => {
+    const labelOrder = compareFoldedText(left.label, right.label);
+    return labelOrder !== 0
+      ? labelOrder
+      : compareRawText(String(left.value), String(right.value));
+  });
+}
+
+export function stripTerminalSequences(text: string): string {
+  return text
+    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "")
+    .replace(/\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+}
+
+export function sanitizePromptText(text: string): string {
+  return stripTerminalSequences(text)
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+    .trim();
+}
+
+export function formatSelection(selection: AliasRecord): string {
+  const provider = sanitizePromptText(
+    byokProviderDefinition(selection.provider).shortLabel,
+  );
+  const model = selection.model === null
+    ? "provider default"
+    : sanitizePromptText(selection.model);
+  return `${provider} · ${model}`;
+}
+
+export async function selectAliasOrFresh(
+  aliases: Readonly<Record<string, AliasRecord>>,
+  prompter: SearchablePrompter,
+): Promise<InteractiveAliasResult> {
+  const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => {
+    return {
+      value: alias,
+      label: sanitizePromptText(alias),
+      hint: formatSelection(selection),
+    };
+  }));
+  const options: PromptOption[] = [
+    ...aliasOptions,
+    { value: false, label: "Select a new provider and model…" },
+  ];
+  const value = await prompter.select("Choose an alias", options);
+  if (value === null) return { kind: "cancelled", exitCode: 130 };
+  if (value === false) return { kind: "fresh" };
+  if (typeof value !== "string" || !Object.hasOwn(aliases, value)) {
+    throw new RangeError("Prompter returned an invalid alias choice.");
+  }
+  const selection = aliases[value];
+  if (selection === undefined) throw new RangeError("Alias choice was unavailable.");
+  return { kind: "selected", selection };
+}
+
+function selectedString(
+  value: PromptValue | null,
+  options: readonly PromptOption[],
+  kind: "provider" | "model",
+): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || !options.some((option) => option.value === value)) {
+    throw new RangeError(`Prompter returned an invalid ${kind} choice.`);
+  }
+  return value;
 }
 
 export async function selectProviderAndModel(
@@ -56,15 +161,17 @@ export async function selectProviderAndModel(
   }
 
   while (providers.length > 0) {
-    const providerLabels = providers.map((provider) => provider);
-    renderMenu(deps.diagnostic, "Choose a provider:", providerLabels);
-    const providerChoice = await deps.prompter.choose("Choose a provider:", providerLabels);
-    if (providerChoice === null) return { kind: "cancelled", exitCode: 130 };
-    if (!validChoice(providerChoice, providers.length)) {
-      throw new RangeError("Prompter returned an invalid provider choice.");
-    }
-
-    const provider = providers[providerChoice];
+    const providerOptions = sortPromptOptions(providers.map((provider) => ({
+      value: provider,
+      label: sanitizePromptText(byokProviderDefinition(provider).shortLabel),
+    })));
+    const providerValue = selectedString(
+      await deps.prompter.select("Choose a provider", providerOptions),
+      providerOptions,
+      "provider",
+    );
+    if (providerValue === null) return { kind: "cancelled", exitCode: 130 };
+    const provider = providers.find((candidate) => candidate === providerValue);
     if (provider === undefined) throw new RangeError("Provider choice was unavailable.");
 
     let models;
@@ -89,53 +196,76 @@ export async function selectProviderAndModel(
         continue;
       }
 
-      const defaultChoices = ["provider default"];
-      renderMenu(deps.diagnostic, "Choose a model:", defaultChoices);
-      const defaultChoice = await deps.prompter.choose("Choose a model:", defaultChoices);
+      const defaultOptions: PromptOption[] = [{ value: false, label: "provider default" }];
+      const defaultChoice = await deps.prompter.select("Choose a model", defaultOptions);
       if (defaultChoice === null) return { kind: "cancelled", exitCode: 130 };
-      if (!validChoice(defaultChoice, defaultChoices.length)) {
-        throw new RangeError("Prompter returned an invalid model choice.");
-      }
+      if (defaultChoice !== false) throw new RangeError("Prompter returned an invalid model choice.");
       return { kind: "selected", provider, model: null };
     }
 
-    const modelLabels = models.map((model) => model.label);
-    renderMenu(deps.diagnostic, "Choose a model:", modelLabels);
-    const modelChoice = await deps.prompter.choose("Choose a model:", modelLabels);
-    if (modelChoice === null) return { kind: "cancelled", exitCode: 130 };
-    if (!validChoice(modelChoice, models.length)) {
-      throw new RangeError("Prompter returned an invalid model choice.");
-    }
-    const model = models[modelChoice];
-    if (model === undefined) throw new RangeError("Model choice was unavailable.");
-    return { kind: "selected", provider, model: model.id };
+    const modelOptions = sortPromptOptions(models.map((model) => {
+      const id = sanitizePromptText(model.id);
+      const label = sanitizePromptText(model.label) || id;
+      return {
+        value: model.id,
+        label,
+        ...(id !== "" && compareFoldedText(label, id) !== 0 ? { hint: id } : {}),
+      };
+    }));
+    const modelValue = selectedString(
+      await deps.prompter.select("Choose a model", modelOptions),
+      modelOptions,
+      "model",
+    );
+    if (modelValue === null) return { kind: "cancelled", exitCode: 130 };
+    return { kind: "selected", provider, model: modelValue };
   }
 
   return { kind: "failed", exitCode: 1, stage: "model-list" };
 }
 
-export function createNumberedPrompter(input: Readable, output: Writable): NumberedPrompter {
+export function createSearchablePrompter(
+  input: Readable,
+  output: Writable,
+): SearchablePrompter {
   return {
-    async choose(_message, choices) {
-      const readline = createInterface({ input, output });
-      try {
-        while (true) {
-          let answer: string;
-          try {
-            answer = (await readline.question("Selection (q to cancel): ")).trim();
-          } catch {
-            return null;
-          }
-          if (answer === "q" || answer === "quit") return null;
-          const selected = Number(answer);
-          if (Number.isInteger(selected) && selected >= 1 && selected <= choices.length) {
-            return selected - 1;
-          }
-          output.write(`Choose a number from 1 to ${choices.length}, or q to cancel.\n`);
-        }
-      } finally {
-        readline.close();
-      }
+    async select(message, options) {
+      const result = await autocomplete<PromptValue>({
+        message,
+        options: [...options],
+        placeholder: "Type to search…",
+        input,
+        output,
+      });
+      return isCancel(result) ? null : result;
+    },
+    async input(message, options = {}) {
+      const result = await clackText({
+        message,
+        placeholder: options.placeholder,
+        validate: options.validate,
+        input,
+        output,
+      });
+      return isCancel(result) ? null : result;
+    },
+    async confirm(message, options = {}) {
+      const result = await clackConfirm({
+        message,
+        initialValue: options.initialValue ?? false,
+        input,
+        output,
+      });
+      return isCancel(result) ? null : result;
     },
   };
+}
+
+export function createTerminalColors(
+  output: { isTTY?: boolean },
+  env: Readonly<Record<string, string | undefined>>,
+): ReturnType<typeof pc.createColors> {
+  const disabled = Boolean(env.NO_COLOR) || env.TERM === "dumb";
+  const forced = Boolean(env.FORCE_COLOR);
+  return pc.createColors(!disabled && (forced || output.isTTY === true));
 }

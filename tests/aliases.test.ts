@@ -120,7 +120,7 @@ describe("global aliases", () => {
     });
   });
 
-  test("rejects collisions unless the overwrite seam confirms", async () => {
+  test("distinguishes same-target, declined, and saved collision outcomes", async () => {
     const directory = await temporaryDirectory();
     const path = join(directory, "aliases.json");
     await saveAlias(path, "daily", { provider: "ollama", model: "old" });
@@ -128,14 +128,99 @@ describe("global aliases", () => {
     await expect(saveAlias(path, "daily", { provider: "ollama", model: "new" })).rejects.toBeInstanceOf(
       AliasCollisionError,
     );
+    let sameTargetConfirmed = false;
+    expect(await saveAlias(path, "daily", { provider: "ollama", model: "old" }, {
+      confirmOverwrite: async () => {
+        sameTargetConfirmed = true;
+        return true;
+      },
+    })).toBe("already-saved");
+    expect(sameTargetConfirmed).toBe(false);
     expect(await saveAlias(path, "daily", { provider: "ollama", model: "new" }, {
       confirmOverwrite: async () => false,
-    })).toBe("unchanged");
+    })).toBe("declined");
     expect((await loadAliases(path)).aliases.daily?.model).toBe("old");
     expect(await saveAlias(path, "daily", { provider: "ollama", model: "new" }, {
       confirmOverwrite: async () => true,
     })).toBe("saved");
     expect((await loadAliases(path)).aliases.daily?.model).toBe("new");
+  });
+
+  test("does not hold the alias lock while waiting for overwrite confirmation", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    await saveAlias(path, "daily", { provider: "ollama", model: "old" });
+    let releaseConfirmation!: () => void;
+    const confirmationReleased = new Promise<void>((resolve) => releaseConfirmation = resolve);
+    let confirmationStarted!: () => void;
+    const started = new Promise<void>((resolve) => confirmationStarted = resolve);
+
+    const overwrite = saveAlias(path, "daily", { provider: "ollama", model: "new" }, {
+      confirmOverwrite: async () => {
+        confirmationStarted();
+        await confirmationReleased;
+        return true;
+      },
+    });
+    await started;
+    let concurrentError: unknown;
+    try {
+      const result = await saveAlias(path, "other", { provider: "ollama", model: "other" }, {
+        lockTimeoutMs: 20,
+        retryDelayMs: 1,
+      });
+      expect(result).toBe("saved");
+    } catch (error) {
+      concurrentError = error;
+    } finally {
+      releaseConfirmation();
+    }
+    await expect(overwrite).resolves.toBe("saved");
+    if (concurrentError !== undefined) throw concurrentError;
+    expect(Object.keys((await loadAliases(path)).aliases).sort()).toEqual(["daily", "other"]);
+  });
+
+  test("reconfirms when the target changes after approval", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    await saveAlias(path, "daily", { provider: "ollama", model: "old" });
+    const observed: string[] = [];
+
+    expect(await saveAlias(path, "daily", { provider: "ollama", model: "new" }, {
+      confirmOverwrite: async (_name, current) => {
+        observed.push(current?.model ?? "missing");
+        if (observed.length === 1) {
+          await saveAlias(path, "daily", { provider: "ollama", model: "third" }, {
+            confirmOverwrite: async () => true,
+            lockTimeoutMs: 20,
+            retryDelayMs: 1,
+          });
+        }
+        return true;
+      },
+    })).toBe("saved");
+    expect(observed).toEqual(["old", "third"]);
+    expect((await loadAliases(path)).aliases.daily?.model).toBe("new");
+  });
+
+  test("reconfirms when the alias is deleted after approval", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    await saveAlias(path, "daily", { provider: "ollama", model: "old" });
+    const observed: Array<string | null | undefined> = [];
+
+    expect(await saveAlias(path, "daily", { provider: "ollama", model: "new" }, {
+      confirmOverwrite: async (_name, current) => {
+        observed.push(current?.model);
+        if (observed.length === 1) {
+          await Bun.write(path, `${JSON.stringify({ version: 1, aliases: {} }, null, 2)}\n`);
+          return true;
+        }
+        return false;
+      },
+    })).toBe("declined");
+    expect(observed).toEqual(["old", undefined]);
+    expect((await loadAliases(path)).aliases.daily).toBeUndefined();
   });
 
   test("serializes concurrent save processes and preserves both aliases", async () => {

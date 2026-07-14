@@ -9,7 +9,8 @@ export const HELP_TEXT = `Usage:
   printf <text> | llm-now --provider <provider> --model <model|default>
 
 Selection:
-  Interactive calls choose a provider and model from numbered menus.
+  Interactive calls offer saved aliases first, then provider and model choices.
+  Type in any interactive list to filter its sorted choices.
   Non-interactive calls require --alias or both --provider and --model.
   --model default is supported only by codex-cli and claude-cli.
 
@@ -18,16 +19,17 @@ Input:
 
 Aliases:
   Saved aliases contain only provider/model selection data.
+  After an unnamed interactive call, enter an alias name or press Enter to exit.
   macOS/Linux: $XDG_CONFIG_HOME/llm-now/aliases.json or ~/.config/llm-now/aliases.json.
   Windows: %APPDATA%\\llm-now\\aliases.json or the roaming directory under %USERPROFILE%.
 
 Output and diagnostics:
   Successful response text is written byte-for-byte to stdout.
-  Menus and stage-labelled diagnostics are written to stderr.
+  Interactive UI, output separation, and stage-labelled diagnostics use stderr.
 
 Exit codes:
   0 success/help/version, 1 runtime/configuration failure, 2 invalid usage,
-  130 provider/model selection cancelled before generation.
+  130 alias/provider/model selection cancelled before generation.
 
 Options:
   --input <text>       Prompt text

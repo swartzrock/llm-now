@@ -3,12 +3,12 @@ import {
   type ByokEnvironment,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
-import { createInterface } from "node:readline/promises";
 import type { Readable, Writable } from "node:stream";
 import {
   type AliasRecord,
   AliasStoreError,
   isValidAliasName,
+  loadAliases as loadStoredAliases,
   resolveAlias as resolveStoredAlias,
   resolveAliasPath,
   saveAlias as saveStoredAlias,
@@ -22,9 +22,14 @@ import {
 } from "./args.ts";
 import { isInteractive, resolvePrompt, type PromptInput, type TextOutput } from "./io.ts";
 import {
-  createNumberedPrompter,
+  createSearchablePrompter,
+  createTerminalColors,
+  formatSelection,
+  selectAliasOrFresh,
   selectProviderAndModel,
-  type NumberedPrompter,
+  sortPromptOptions,
+  stripTerminalSequences,
+  type SearchablePrompter,
 } from "./prompts.ts";
 import { RuntimeStageError, type RuntimeGateway } from "./runtime.ts";
 
@@ -33,10 +38,7 @@ const DEFAULT_DISCOVERY_TIMEOUT_MS = 5_000;
 const DEFAULT_MODEL_LIST_TIMEOUT_MS = 10_000;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
 
-export interface ApplicationPrompter extends NumberedPrompter {
-  confirm(message: string): Promise<boolean | null>;
-  input(message: string): Promise<string | null>;
-}
+export type ApplicationPrompter = SearchablePrompter;
 
 export interface ApplicationDependencies {
   args: string[];
@@ -50,11 +52,18 @@ export interface ApplicationDependencies {
   home: string;
   version: string;
   aliasPath?: string;
+  loadAliases?: typeof loadStoredAliases;
   resolveAlias?: typeof resolveStoredAlias;
   saveAlias?: typeof saveStoredAlias;
   generationTimeoutMs?: number;
   discoveryTimeoutMs?: number;
   modelListTimeoutMs?: number;
+}
+
+interface ResolvedSelection {
+  selection: AliasRecord;
+  named: boolean;
+  existingAlias?: string;
 }
 
 function recognizedCredentialValues(env: ByokEnvironment): string[] {
@@ -67,9 +76,7 @@ function recognizedCredentialValues(env: ByokEnvironment): string[] {
 }
 
 function sanitizeDiagnostic(text: string, env: ByokEnvironment): string {
-  let sanitized = text.replace(/\r\n?|\u2028|\u2029/g, "\n");
-  sanitized = sanitized.replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "");
-  sanitized = sanitized.replace(/\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
+  let sanitized = stripTerminalSequences(text.replace(/\r\n?|\u2028|\u2029/g, "\n"));
   sanitized = sanitized.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
   for (const value of recognizedCredentialValues(env)) {
     sanitized = sanitized.replaceAll(value, "[REDACTED]");
@@ -146,16 +153,36 @@ async function resolveSelection(
   selection: Selection,
   interactive: boolean,
   diagnostic: (text: string) => void,
-): Promise<AliasRecord | number> {
+): Promise<ResolvedSelection | number> {
   const deterministic = requireDeterministicSelection(selection, interactive);
   if (deterministic.kind === "alias") {
-    return await (deps.resolveAlias ?? resolveStoredAlias)(
-      applicationAliasPath(deps),
-      deterministic.alias,
-    );
+    return {
+      selection: await (deps.resolveAlias ?? resolveStoredAlias)(
+        applicationAliasPath(deps),
+        deterministic.alias,
+      ),
+      named: true,
+    };
   }
   if (deterministic.kind === "explicit") {
-    return { provider: deterministic.provider, model: deterministic.model };
+    return {
+      selection: { provider: deterministic.provider, model: deterministic.model },
+      named: false,
+    };
+  }
+
+  const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
+    applicationAliasPath(deps),
+  )).aliases;
+  if (Object.keys(aliases).length > 0) {
+    const aliasResult = await selectAliasOrFresh(aliases, deps.prompter);
+    if (aliasResult.kind === "cancelled") return aliasResult.exitCode;
+    if (aliasResult.kind === "selected") {
+      return {
+        selection: aliasResult.selection,
+        named: true,
+      };
+    }
   }
 
   const result = await selectProviderAndModel({
@@ -177,9 +204,19 @@ async function resolveSelection(
     prompter: deps.prompter,
     diagnostic,
   });
-  return result.kind === "selected"
-    ? { provider: result.provider, model: result.model }
-    : result.exitCode;
+  if (result.kind !== "selected") return result.exitCode;
+
+  const resolved = { provider: result.provider, model: result.model };
+  const existingAlias = sortPromptOptions(Object.entries(aliases)
+    .filter(([, candidate]) =>
+      candidate.provider === resolved.provider && candidate.model === resolved.model
+    )
+    .map(([alias]) => ({ value: alias, label: alias })))[0]?.value;
+  return {
+    selection: resolved,
+    named: false,
+    existingAlias: typeof existingAlias === "string" ? existingAlias : undefined,
+  };
 }
 
 async function offerAliasSave(
@@ -187,27 +224,53 @@ async function offerAliasSave(
   selection: AliasRecord,
   diagnostic: (text: string) => void,
 ): Promise<boolean> {
-  if ((await deps.prompter.confirm("Save this provider and model as an alias?")) !== true) return true;
   const save = deps.saveAlias ?? saveStoredAlias;
+  const colors = createTerminalColors(deps.stderr, deps.env);
+  const target = formatSelection(selection);
 
   while (true) {
-    const name = await deps.prompter.input("Alias name (cancel to skip):");
-    if (name === null) return true;
+    const name = await deps.prompter.input(
+      `${colors.green("Enter an alias name for ")}${colors.bold(target)}${colors.green(" (Enter to exit)")}`,
+      {
+        validate: (value) => value === undefined || value === "" || isValidAliasName(value)
+          ? undefined
+          : "Use 1-64 ASCII letters, numbers, hyphens, or underscores.",
+      },
+    );
+    if (name === null || name === "") return true;
     if (!isValidAliasName(name)) {
       diagnostic("config: invalid alias name; use 1-64 ASCII letters, numbers, hyphens, or underscores.");
       continue;
     }
     try {
-      await save(applicationAliasPath(deps), name, selection, {
-        confirmOverwrite: async () =>
-          (await deps.prompter.confirm(`Alias ${name} exists. Overwrite it?`)) === true,
+      const result = await save(applicationAliasPath(deps), name, selection, {
+        confirmOverwrite: async (_alias, current) =>
+          (await deps.prompter.confirm(
+            `Overwrite alias ${name}?\nOld: ${current === undefined ? "(not present)" : formatSelection(current)}\nNew: ${target}`,
+            { initialValue: false },
+          )) === true,
       });
+      if (result === "saved") {
+        deps.stderr.write(`${colors.green(`◆ Saved alias ${name} → ${target}`)}\n`);
+      } else if (result === "already-saved") {
+        deps.stderr.write(`${colors.green(`◆ Already saved ${name} → ${target}`)}\n`);
+      }
       return true;
     } catch (error) {
       diagnostic(`config: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
+}
+
+function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
+  stderr.write(`\u001b[0m${response.endsWith("\n") ? "\n" : "\n\n"}`);
+}
+
+function writeResponse(stdout: TextOutput, response: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    stdout.write(response, (error) => error ? reject(error) : resolve());
+  });
 }
 
 export async function runApplication(deps: ApplicationDependencies): Promise<number> {
@@ -230,14 +293,22 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
 
     const response = await generateWithTimeout(
       deps,
-      selection.provider,
-      selection.model,
+      selection.selection.provider,
+      selection.selection.model,
       prompt,
     );
-    deps.stdout.write(response);
+    await writeResponse(deps.stdout, response);
 
-    if (interactive && parsed.selection.kind !== "alias") {
-      if (!(await offerAliasSave(deps, selection, diagnostic))) return 1;
+    if (interactive) writeInteractiveBoundary(deps.stderr, response);
+    if (interactive && selection.existingAlias !== undefined) {
+      const colors = createTerminalColors(deps.stderr, deps.env);
+      const target = formatSelection(selection.selection);
+      deps.stderr.write(colors.green(
+        `◆ ${target} is already saved as alias ${selection.existingAlias}\n`
+        + `  Next time, use --alias ${selection.existingAlias}\n`,
+      ));
+    } else if (interactive && !selection.named) {
+      if (!(await offerAliasSave(deps, selection.selection, diagnostic))) return 1;
     }
     return 0;
   } catch (error) {
@@ -258,31 +329,5 @@ export function createApplicationPrompter(
   input: Readable,
   output: Writable,
 ): ApplicationPrompter {
-  const numbered = createNumberedPrompter(input, output);
-
-  async function ask(message: string): Promise<string | null> {
-    const readline = createInterface({ input, output });
-    try {
-      return await readline.question(`${message} `);
-    } catch {
-      return null;
-    } finally {
-      readline.close();
-    }
-  }
-
-  return {
-    choose: numbered.choose,
-    input: ask,
-    async confirm(message) {
-      while (true) {
-        const answer = await ask(`${message} [y/N]`);
-        if (answer === null) return null;
-        const normalized = answer.trim().toLowerCase();
-        if (normalized === "y" || normalized === "yes") return true;
-        if (normalized === "" || normalized === "n" || normalized === "no") return false;
-        output.write("Enter y or n.\n");
-      }
-    },
-  };
+  return createSearchablePrompter(input, output);
 }
