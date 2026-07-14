@@ -253,7 +253,8 @@ describe("one-shot application", () => {
     expect(inputMessages).toEqual([]);
     expect(saves).toBe(0);
     expect(app.stderr.text()).toContain(
-      "◆ Ollama · qwen is already saved as alias Daily\n  Next time, use --alias Daily\n",
+      "◆ Ollama · qwen is already saved as alias Daily\n"
+      + "  Next time, use llm-now Daily --input \"<prompt>\"\n",
     );
   });
 
@@ -289,7 +290,7 @@ describe("one-shot application", () => {
     expect(saves).toBe(0);
     expect(app.stderr.text()).toContain(
       "◆ Claude CLI · provider default is already saved as alias quick\n"
-      + "  Next time, use --alias quick\n",
+      + "  Next time, use llm-now quick --input \"<prompt>\"\n",
     );
   });
 
@@ -373,6 +374,135 @@ describe("one-shot application", () => {
     expect(app.stdout.text()).toBe("alias-result");
     expect(app.stderr.text()).toBe("");
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
+  });
+
+  test("positional and long-form aliases have exact application parity", async () => {
+    const results = [];
+    for (const args of [
+      ["Daily", "--input", "hello"],
+      ["--input", "hello", "--alias", "Daily"],
+    ]) {
+      const calls: string[] = [];
+      const app = dependencies({
+        args,
+        runtime: runtime({
+          generate: async (provider, model, prompt) => {
+            calls.push(`${provider}:${model}:${prompt}`);
+            return "alias-result";
+          },
+        }),
+        resolveAlias: async (_path, name) => {
+          calls.push(`resolve:${name}`);
+          return { provider: "claude-cli", model: null };
+        },
+      });
+
+      results.push({
+        exitCode: await runApplication(app.value),
+        stdout: app.stdout.text(),
+        stderr: app.stderr.text(),
+        runtimeCalls: app.runtime.calls,
+        calls,
+      });
+    }
+
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0]).toEqual({
+      exitCode: 0,
+      stdout: "alias-result",
+      stderr: "",
+      runtimeCalls: { discover: 0, list: 0, generate: 1 },
+      calls: ["resolve:Daily", "claude-cli:null:hello"],
+    });
+  });
+
+  test("piped input works with a positional alias", async () => {
+    const app = dependencies({
+      args: ["Daily"],
+      stdin: input("piped prompt"),
+      runtime: runtime({
+        generate: async (_provider, _model, prompt) => {
+          expect(prompt).toBe("piped prompt");
+          return "alias-result";
+        },
+      }),
+      resolveAlias: async (_path, name) => {
+        expect(name).toBe("Daily");
+        return { provider: "claude-cli", model: null };
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("alias-result");
+    expect(app.stderr.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
+  });
+
+  test("positional aliases preserve exact fail-closed parity with long form", async () => {
+    const scenarios = [
+      { kind: "store", alias: "missing", message: "alias not found: missing" },
+      { kind: "store", alias: "bad name", message: "invalid alias name: bad name" },
+      { kind: "store", alias: "corrupt", message: "failed to load alias store: corrupt JSON" },
+      { kind: "stale", alias: "stale", message: "generation (ollama): unavailable" },
+    ] as const;
+
+    async function runAliasFailure(
+      args: string[],
+      scenario: (typeof scenarios)[number],
+    ) {
+      const calls: string[] = [];
+      const app = dependencies({
+        args,
+        runtime: runtime({
+          generate: async (provider, model, prompt) => {
+            calls.push(`generate:${provider}:${model}:${prompt}`);
+            throw new RuntimeStageError("generation", provider, "unavailable");
+          },
+        }),
+        resolveAlias: async (path, name) => {
+          calls.push(`resolve:${path}:${name}`);
+          if (scenario.kind === "store") throw new AliasStoreError(scenario.message);
+          return { provider: "ollama", model: "missing" };
+        },
+      });
+
+      return {
+        exitCode: await runApplication(app.value),
+        stdout: app.stdout.text(),
+        stderr: app.stderr.text(),
+        runtimeCalls: app.runtime.calls,
+        calls,
+      };
+    }
+
+    for (const scenario of scenarios) {
+      const positional = await runAliasFailure(
+        [scenario.alias, "--input", "hello"],
+        scenario,
+      );
+      const longForm = await runAliasFailure(
+        ["--input", "hello", "--alias", scenario.alias],
+        scenario,
+      );
+
+      expect(positional).toEqual(longForm);
+      expect(positional).toEqual({
+        exitCode: 1,
+        stdout: "",
+        stderr: `${scenario.kind === "store" ? "config: " : ""}${scenario.message}\n`,
+        runtimeCalls: {
+          discover: 0,
+          list: 0,
+          generate: scenario.kind === "stale" ? 1 : 0,
+        },
+        calls: scenario.kind === "stale"
+          ? [
+            `resolve:/config/aliases.json:${scenario.alias}`,
+            "generate:ollama:missing:hello",
+          ]
+          : [`resolve:/config/aliases.json:${scenario.alias}`],
+      });
+    }
   });
 
   test("fails a stale alias without selecting a replacement", async () => {

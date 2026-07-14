@@ -1,5 +1,6 @@
 import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { delimiter, join } from "node:path";
+import { resolveAliasPath, saveAlias } from "../src/aliases";
 
 const directory = await mkdtemp(join(process.cwd(), ".tmp-runtime-"));
 const fakeCli = join(directory, process.platform === "win32" ? "codex.exe" : "codex");
@@ -13,6 +14,17 @@ const runtimeSmoke = join(
 );
 
 try {
+  const configHome = join(directory, "config");
+  const aliasEnvironment = process.platform === "win32"
+    ? { APPDATA: configHome }
+    : { XDG_CONFIG_HOME: configHome };
+  const aliasPath = resolveAliasPath({
+    platform: process.platform,
+    home: directory,
+    env: aliasEnvironment,
+  });
+  await saveAlias(aliasPath, "Daily", { provider: "codex-cli", model: null });
+
   const builds: Array<[string, string]> = [
     [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
     [join(import.meta.dir, "fixtures/runtime-smoke-entry.ts"), runtimeSmoke],
@@ -33,7 +45,10 @@ try {
     if (process.platform !== "win32") await chmod(outfile, 0o755);
   }
 
-  const env = { PATH: [directory, process.env.PATH].filter(Boolean).join(delimiter) };
+  const env = {
+    PATH: [directory, process.env.PATH].filter(Boolean).join(delimiter),
+    ...aliasEnvironment,
+  };
   const cases = [
     {
       name: "runtime boundary",
@@ -41,7 +56,7 @@ try {
       args: [fakeCli],
       exitCode: 0,
       stdout: "http-ok\nfake:smoke\n",
-      stderrIncludes: "",
+      stderr: "",
     },
     {
       name: "help",
@@ -49,7 +64,7 @@ try {
       args: ["--help"],
       exitCode: 0,
       stdoutIncludes: "Usage:\n  llm-now --input <text>",
-      stderrIncludes: "",
+      stderr: "",
     },
     {
       name: "version",
@@ -57,7 +72,7 @@ try {
       args: ["--version"],
       exitCode: 0,
       stdout: "0.1.0\n",
-      stderrIncludes: "",
+      stderr: "",
     },
     {
       name: "deterministic usage failure",
@@ -73,7 +88,15 @@ try {
       args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"],
       exitCode: 0,
       stdout: "fake:smoke",
-      stderrIncludes: "",
+      stderr: "",
+    },
+    {
+      name: "fake CLI generation through positional alias",
+      executable: spike,
+      args: ["Daily", "--input", "smoke"],
+      exitCode: 0,
+      stdout: "fake:smoke",
+      stderr: "",
     },
   ] as const;
 
@@ -87,10 +110,13 @@ try {
     const stdoutMatches = "stdout" in smoke
       ? stdout === smoke.stdout
       : stdout.includes(smoke.stdoutIncludes);
+    const stderrMatches = "stderr" in smoke
+      ? stderr === smoke.stderr
+      : stderr.includes(smoke.stderrIncludes);
     if (
       result.exitCode !== smoke.exitCode
       || !stdoutMatches
-      || !stderr.includes(smoke.stderrIncludes)
+      || !stderrMatches
     ) {
       throw new Error(
         `${smoke.name} smoke failed: exit=${result.exitCode} stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`,
