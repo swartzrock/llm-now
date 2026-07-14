@@ -251,7 +251,13 @@ async function offerAliasSave(
           )) === true,
       });
       if (result === "saved") {
-        deps.stderr.write(`${colors.green(`◆ Saved alias ${name} → ${target}`)}\n`);
+        deps.stderr.write(
+          colors.green("◆ Saved alias ")
+          + colors.white(name)
+          + colors.green(` → ${target}\n  Next time, use `)
+          + colors.white(`llm-now ${name} --input "<prompt>"`)
+          + "\n",
+        );
       } else if (result === "already-saved") {
         deps.stderr.write(`${colors.green(`◆ Already saved ${name} → ${target}`)}\n`);
       }
