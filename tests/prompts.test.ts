@@ -182,6 +182,28 @@ describe("terminal provider and model selection", () => {
     expect(prompter.seen[1]?.map((option) => option.value)).toEqual(["a-model", "z-model"]);
   });
 
+  test("shows a model id as a hint only when it adds information", async () => {
+    const prompter = choices("ollama", "qwen3.5:9b");
+    await selectProviderAndModel({
+      runtime: gateway({
+        providers: ["ollama"],
+        models: {
+          ollama: [
+            { id: "qwen3.5:9b", label: "QWEN3.5:9B" },
+            { id: "deepcoder:1.5b", label: "DeepCoder" },
+          ],
+        },
+      }).value,
+      prompter,
+      diagnostic: () => {},
+    });
+
+    expect(prompter.seen[1]).toEqual([
+      { value: "deepcoder:1.5b", label: "DeepCoder", hint: "deepcoder:1.5b" },
+      { value: "qwen3.5:9b", label: "QWEN3.5:9B" },
+    ]);
+  });
+
   test("removes terminal controls from runtime-owned option text", async () => {
     const prompter = choices("openai", "gpt");
     await selectProviderAndModel({

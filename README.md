@@ -38,7 +38,7 @@ Choose a discovered provider and model interactively:
 llm-now --input "Write a two-line poem about rain"
 ```
 
-If you have saved aliases, an interactive call offers those first. Choose “Choose a provider and model…” for a fresh selection. Alias, provider, and model lists are sorted and filter as you type.
+If you have saved aliases, an interactive call offers those first. Choose “Select a new provider and model…” for a fresh selection. Alias, provider, and model lists are sorted and filter as you type.
 
 Use a saved global alias:
 
@@ -58,7 +58,7 @@ Exactly one prompt source is required: `--input` or stdin. Non-interactive calls
 
 ## Aliases and configuration
 
-After a successful unnamed interactive call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`, followed by the dim example `e.g. fast`. Type a name to save that exact provider/model pair, or press Enter to exit. A call that selected an existing alias does not ask again. Aliases contain no credentials and are available from every working directory.
+After a successful unnamed interactive call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`, with the provider and model emphasized. Type a name to save that exact provider/model pair, or press Enter to exit. A call that selected an existing alias does not ask again. Aliases contain no credentials and are available from every working directory.
 
 - macOS/Linux: `$XDG_CONFIG_HOME/llm-now/aliases.json`, otherwise `~/.config/llm-now/aliases.json`
 - Windows: `%APPDATA%\\llm-now\\aliases.json`, otherwise `%USERPROFILE%\\AppData\\Roaming\\llm-now\\aliases.json`

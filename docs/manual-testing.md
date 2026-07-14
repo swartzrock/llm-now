@@ -226,7 +226,7 @@ Keep stderr attached to the terminal. Confirm that:
 - arrow keys and Enter select the highlighted option, while Ctrl-C cancels;
 - the final response appears only in `stdout.txt`;
 - the response is followed by a clean terminal boundary on stderr even when it has no trailing newline or leaves SGR styling active;
-- the green contextual alias field names the selected provider and raw model, shows dim `e.g. fast`, and explains that Enter exits; and
+- the green contextual alias field emphasizes the selected provider and raw model and explains that Enter exits; and
 - machine-controlled work completes within approximately 60 seconds, excluding human menu time.
 
 ## Alias lifecycle

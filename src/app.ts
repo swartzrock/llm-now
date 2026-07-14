@@ -221,7 +221,7 @@ async function offerAliasSave(
 
   while (true) {
     const name = await deps.prompter.input(
-      `${colors.green(`Enter an alias name for ${target} (Enter to exit)`)}\n${colors.dim("e.g. fast")}`,
+      `${colors.green("Enter an alias name for ")}${colors.bold(target)}${colors.green(" (Enter to exit)")}`,
       {
         validate: (value) => value === undefined || value === "" || isValidAliasName(value)
           ? undefined

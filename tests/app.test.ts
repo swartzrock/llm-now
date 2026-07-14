@@ -165,7 +165,7 @@ describe("one-shot application", () => {
         { value: "assistant", label: "assistant", hint: "Claude CLI · provider default" },
         { value: "Daily", label: "Daily", hint: "Ollama · llama3" },
         { value: "fast", label: "fast", hint: "OpenAI · gpt-5" },
-        { value: false, label: "Choose a provider and model…" },
+        { value: false, label: "Select a new provider and model…" },
       ],
     }]);
   });
@@ -434,8 +434,27 @@ describe("one-shot application", () => {
     expect(app.stdout.text()).toBe("done");
     expect(app.stderr.text()).toBe("\u001b[0m\n\n");
     expect(inputMessages).toEqual([
-      "Enter an alias name for Ollama · qwen (Enter to exit)\ne.g. fast",
+      "Enter an alias name for Ollama · qwen (Enter to exit)",
     ]);
+  });
+
+  test("emphasizes the provider and model in the alias field", async () => {
+    const inputMessages: string[] = [];
+    const app = dependencies({
+      args: ["--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      runtime: runtime({ response: "done" }),
+      prompter: prompts({
+        choices: ["ollama", "qwen"],
+        names: [""],
+        inputMessages,
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(inputMessages[0]).toContain("\u001b[1mOllama · qwen\u001b[22m");
+    expect(inputMessages[0]).not.toContain("e.g. fast");
   });
 
   test("blank alias input exits successfully without saving", async () => {

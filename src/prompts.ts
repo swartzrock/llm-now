@@ -119,7 +119,7 @@ export async function selectAliasOrFresh(
   }));
   const options: PromptOption[] = [
     ...aliasOptions,
-    { value: false, label: "Choose a provider and model…" },
+    { value: false, label: "Select a new provider and model…" },
   ];
   const value = await prompter.select("Choose an alias", options);
   if (value === null) return { kind: "cancelled", exitCode: 130 };
@@ -205,10 +205,11 @@ export async function selectProviderAndModel(
 
     const modelOptions = sortPromptOptions(models.map((model) => {
       const id = sanitizePromptText(model.id);
+      const label = sanitizePromptText(model.label) || id;
       return {
         value: model.id,
-        label: sanitizePromptText(model.label) || id,
-        hint: id,
+        label,
+        ...(id !== "" && compareFoldedText(label, id) !== 0 ? { hint: id } : {}),
       };
     }));
     const modelValue = selectedString(
