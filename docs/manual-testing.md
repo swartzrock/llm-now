@@ -157,7 +157,9 @@ Run every case below. Each must exit `2`, leave stdout empty, write a useful `us
 | Case |
 | --- |
 | Unknown flag |
-| Positional argument |
+| Empty or whitespace-only positional alias |
+| Two positional aliases (the second is never prompt text) |
+| Positional alias combined with `--alias`, `--provider`, or `--model` |
 | `--provider` without `--model` |
 | `--model` without `--provider` |
 | `--alias` combined with provider or model |
@@ -166,6 +168,7 @@ Run every case below. Each must exit `2`, leave stdout empty, write a useful `us
 | Empty `--alias`, `--provider`, or `--model` |
 | `--help` combined with another option |
 | `--version` combined with another option |
+| `--help` or `--version` combined with a positional alias, in either order |
 | Both `--input` and piped stdin |
 | Empty or whitespace-only stdin |
 | Noninteractive input without an alias or explicit provider/model |
@@ -251,15 +254,20 @@ The model value is `null` when a supported CLI provider uses its default. Confir
 
 ### MT-12: Use an alias from another directory
 
-First run an interactive call with no explicit selection. Confirm that the sorted alias picker appears before discovery, typing `dai` filters to `daily`, and selecting it bypasses provider/model discovery and does not show another alias field. Repeat through “Select a new provider and model…”, choose the provider/model already stored as `daily`, and confirm the CLI reports that existing alias, suggests `--alias daily`, and does not show the alias field. Then verify deterministic non-interactive reuse from another directory:
+First run an interactive call with no explicit selection. Confirm that the sorted alias picker appears before discovery, typing `dai` filters to `daily`, and selecting it bypasses provider/model discovery and does not show another alias field. Repeat through “Select a new provider and model…”, choose the provider/model already stored as `daily`, and confirm the CLI reports that existing alias, suggests `llm-now daily --input "<prompt>"`, and does not show the alias field. Then verify deterministic non-interactive reuse from another directory:
 
 ```bash
 cd /
 printf 'Summarize the idea of gravity.' |
-  "$BIN" --alias daily >stdout.txt 2>stderr.txt
+  "$BIN" daily >stdout.txt 2>stderr.txt
 ```
 
-The command must exit `0`, resolve the alias independently of the working directory, write only the response to stdout, and skip the alias-save prompt.
+Repeat as `"$BIN" daily --input 'Summarize the idea of gravity.'` and with the
+long form `"$BIN" --alias daily --input 'Summarize the idea of gravity.'`. The commands
+must exit `0`, resolve the exact case-sensitive alias independently of option order and the
+working directory, write only the response to stdout, and skip the alias-save prompt. Also
+verify that aliases named `help`, `version`, and `run` work when supplied as bare positional
+names; only `--help` and `--version` select those standalone modes.
 
 ### MT-13: Decline alias saving
 

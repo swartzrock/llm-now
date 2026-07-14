@@ -43,9 +43,14 @@ If you have saved aliases, an interactive call offers those first. Choose “Sel
 Use a saved global alias:
 
 ```bash
-llm-now --input "Summarize this idea" --alias daily
-printf 'Explain this diff' | llm-now --alias daily
+llm-now daily --input "Summarize this idea"
+printf 'Explain this diff' | llm-now daily
 ```
+
+Alias names are exact and case-sensitive. Options may appear before or after the alias,
+though the alias-first form above is recommended. The explicit
+`--alias daily` form remains available for scripts and for resolving any future command-name
+ambiguity.
 
 Choose deterministically, including a supported CLI provider's default model:
 
@@ -54,11 +59,11 @@ llm-now --input "Hello" --provider ollama --model llama3
 printf 'Hello' | llm-now --provider claude-cli --model default
 ```
 
-Exactly one prompt source is required: `--input` or stdin. Non-interactive calls require `--alias` or both `--provider` and `--model`. Successful generation writes the model response, byte-for-byte, to stdout. Interactive UI and diagnostics use stderr, so the response remains safe to redirect or pipe. After an interactive response, stderr resets terminal styling and adds a clean visual boundary without changing stdout.
+Exactly one prompt source is required: `--input` or stdin. Non-interactive calls require a positional alias, `--alias`, or both `--provider` and `--model`. A second positional argument is never treated as prompt text. Successful generation writes the model response, byte-for-byte, to stdout. Interactive UI and diagnostics use stderr, so the response remains safe to redirect or pipe. After an interactive response, stderr resets terminal styling and adds a clean visual boundary without changing stdout.
 
 ## Aliases and configuration
 
-After a successful unnamed interactive call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`, with the provider and model emphasized. Type a name to save that exact provider/model pair, or press Enter to exit. If the selected provider/model is already saved, it reports the existing alias and suggests `--alias <name>` for next time instead of asking for a duplicate. A call that selected an existing alias does not ask again. Aliases contain no credentials and are available from every working directory.
+After a successful unnamed interactive call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`, with the provider and model emphasized. Type a name to save that exact provider/model pair, or press Enter to exit. If the selected provider/model is already saved, it reports the existing alias and suggests an executable command such as `llm-now daily --input "<prompt>"` for next time instead of asking for a duplicate. A call that selected an existing alias does not ask again. Aliases contain no credentials and are available from every working directory.
 
 - macOS/Linux: `$XDG_CONFIG_HOME/llm-now/aliases.json`, otherwise `~/.config/llm-now/aliases.json`
 - Windows: `%APPDATA%\\llm-now\\aliases.json`, otherwise `%USERPROFILE%\\AppData\\Roaming\\llm-now\\aliases.json`

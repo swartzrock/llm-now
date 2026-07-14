@@ -251,7 +251,13 @@ async function offerAliasSave(
           )) === true,
       });
       if (result === "saved") {
-        deps.stderr.write(`${colors.green(`◆ Saved alias ${name} → ${target}`)}\n`);
+        deps.stderr.write(
+          colors.green("◆ Saved alias ")
+          + colors.white(name)
+          + colors.green(` → ${target}\n  Next time, use `)
+          + colors.white(`llm-now ${name} --input "<prompt>"`)
+          + "\n",
+        );
       } else if (result === "already-saved") {
         deps.stderr.write(`${colors.green(`◆ Already saved ${name} → ${target}`)}\n`);
       }
@@ -303,10 +309,14 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     if (interactive && selection.existingAlias !== undefined) {
       const colors = createTerminalColors(deps.stderr, deps.env);
       const target = formatSelection(selection.selection);
-      deps.stderr.write(colors.green(
-        `◆ ${target} is already saved as alias ${selection.existingAlias}\n`
-        + `  Next time, use --alias ${selection.existingAlias}\n`,
-      ));
+      deps.stderr.write(
+        colors.green(
+          `◆ ${target} is already saved as alias ${selection.existingAlias}\n`
+          + "  Next time, use ",
+        )
+        + colors.white(`llm-now ${selection.existingAlias} --input "<prompt>"`)
+        + "\n",
+      );
     } else if (interactive && !selection.named) {
       if (!(await offerAliasSave(deps, selection.selection, diagnostic))) return 1;
     }

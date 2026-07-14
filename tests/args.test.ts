@@ -38,6 +38,55 @@ describe("arguments and input", () => {
     );
   });
 
+  test("normalizes one exact positional alias before or after options", () => {
+    expect(parseArguments(["Daily", "--input", "hello"])).toEqual({
+      kind: "run",
+      input: "hello",
+      selection: { kind: "alias", alias: "Daily" },
+    });
+    expect(parseArguments(["--input", "hello", "Daily"])).toEqual({
+      kind: "run",
+      input: "hello",
+      selection: { kind: "alias", alias: "Daily" },
+    });
+    expect(parseArguments(["Daily"])).toEqual({
+      kind: "run",
+      selection: { kind: "alias", alias: "Daily" },
+    });
+  });
+
+  test("treats bare help, version, and run as alias names", () => {
+    for (const alias of ["help", "version", "run"]) {
+      expect(parseArguments([alias])).toEqual({
+        kind: "run",
+        selection: { kind: "alias", alias },
+      });
+    }
+  });
+
+  test("rejects blank and multiple positional aliases", () => {
+    for (const alias of ["", "   "]) {
+      expect(() => parseArguments([alias])).toThrow("alias must not be blank");
+    }
+    expect(() => parseArguments(["daily", "prompt"])).toThrow(
+      "only one positional alias may be supplied",
+    );
+  });
+
+  test("rejects positional aliases combined with another selector", () => {
+    const conflicting = [
+      ["Daily", "--alias", "daily"],
+      ["Daily", "--provider", "ollama", "--model", "qwen"],
+      ["Daily", "--provider", "ollama"],
+      ["Daily", "--model", "qwen"],
+    ];
+    for (const args of conflicting) {
+      expect(() => parseArguments(args)).toThrow(
+        "positional alias cannot be combined with --alias, --provider, or --model",
+      );
+    }
+  });
+
   test("rejects both input sources, neither source, and blank input", async () => {
     const parsed = parseArguments(["--input", "prompt"]);
     if (parsed.kind !== "run") throw new Error("expected run arguments");
@@ -127,7 +176,7 @@ describe("arguments and input", () => {
     const interactive = parseArguments(["--input", "hello"]);
     if (interactive.kind !== "run") throw new Error("expected run arguments");
     expect(() => requireDeterministicSelection(interactive.selection, false)).toThrow(
-      "non-interactive calls require --alias or --provider and --model",
+      "non-interactive calls require a positional alias, --alias, or --provider and --model",
     );
 
     const aliased = parseArguments(["--input", "hello", "--alias", "daily"]);
@@ -157,6 +206,12 @@ describe("arguments and input", () => {
     expect(HELP_TEXT).toContain("XDG_CONFIG_HOME");
     expect(HELP_TEXT).toContain("Exit codes:");
     expect(() => parseArguments(["--help", "--alias", "daily"])).toThrow(UsageError);
+    expect(() => parseArguments(["--help", "daily"])).toThrow(UsageError);
+    expect(() => parseArguments(["daily", "--help"])).toThrow(UsageError);
+    expect(() => parseArguments(["--version", "daily"])).toThrow(UsageError);
+    expect(() => parseArguments(["daily", "--version"])).toThrow(UsageError);
+    expect(HELP_TEXT).toContain("llm-now <alias> --input <text>");
+    expect(HELP_TEXT).toContain("printf <text> | llm-now <alias>");
   });
 
   test("rejects test-only runtime smoke arguments", () => {

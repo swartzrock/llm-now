@@ -3,15 +3,18 @@ import { parseArgs as parseNodeArgs } from "node:util";
 
 export const HELP_TEXT = `Usage:
   llm-now --input <text>
+  llm-now <alias> --input <text>
   llm-now --input <text> --alias <name>
   llm-now --input <text> --provider <provider> --model <model|default>
+  printf <text> | llm-now <alias>
   printf <text> | llm-now --alias <name>
   printf <text> | llm-now --provider <provider> --model <model|default>
 
 Selection:
   Interactive calls offer saved aliases first, then provider and model choices.
   Type in any interactive list to filter its sorted choices.
-  Non-interactive calls require --alias or both --provider and --model.
+  Non-interactive calls require an alias (positional or --alias) or both
+  --provider and --model.
   --model default is supported only by codex-cli and claude-cli.
 
 Input:
@@ -60,7 +63,7 @@ export type ParsedArguments =
 
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
 
-function nonBlankFlag(name: string, value: string | undefined): string | undefined {
+function nonBlankArgument(name: string, value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   if (value.trim().length === 0) throw new UsageError(`${name} must not be blank.`);
   return value;
@@ -76,8 +79,10 @@ export function parseArguments(args: string[]): ParsedArguments {
     version?: boolean;
   };
 
+  let positionals: string[];
+
   try {
-    ({ values } = parseNodeArgs({
+    ({ values, positionals } = parseNodeArgs({
       args,
       options: {
         input: { type: "string" },
@@ -88,7 +93,7 @@ export function parseArguments(args: string[]): ParsedArguments {
         version: { type: "boolean" },
       },
       strict: true,
-      allowPositionals: false,
+      allowPositionals: true,
     }));
   } catch (error) {
     throw new UsageError(error instanceof Error ? error.message : String(error));
@@ -96,16 +101,29 @@ export function parseArguments(args: string[]): ParsedArguments {
 
   const supplied = Object.entries(values).filter(([, value]) => value !== undefined && value !== false);
   if (values.help || values.version) {
-    if (supplied.length !== 1) {
+    if (supplied.length !== 1 || positionals.length > 0) {
       throw new UsageError("--help and --version must be used without other options.");
     }
     return values.help ? { kind: "help" } : { kind: "version" };
   }
 
+  if (positionals.length > 1) {
+    throw new UsageError("only one positional alias may be supplied.");
+  }
+  if (
+    positionals.length === 1
+    && (values.alias !== undefined || values.provider !== undefined || values.model !== undefined)
+  ) {
+    throw new UsageError(
+      "positional alias cannot be combined with --alias, --provider, or --model.",
+    );
+  }
+
   const input = values.input;
-  const alias = nonBlankFlag("--alias", values.alias);
-  const providerValue = nonBlankFlag("--provider", values.provider);
-  const modelValue = nonBlankFlag("--model", values.model);
+  const positionalAlias = nonBlankArgument("alias", positionals[0]);
+  const alias = positionalAlias ?? nonBlankArgument("--alias", values.alias);
+  const providerValue = nonBlankArgument("--provider", values.provider);
+  const modelValue = nonBlankArgument("--model", values.model);
 
   if (alias !== undefined && (providerValue !== undefined || modelValue !== undefined)) {
     throw new UsageError("--alias cannot be combined with --provider or --model.");
@@ -140,7 +158,7 @@ export function requireDeterministicSelection(
 ): Selection {
   if (!interactive && selection.kind === "interactive") {
     throw new UsageError(
-      "non-interactive calls require --alias or --provider and --model.",
+      "non-interactive calls require a positional alias, --alias, or --provider and --model.",
     );
   }
   return selection;

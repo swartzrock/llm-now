@@ -178,7 +178,7 @@ async function smoke(archivePath: string): Promise<void> {
       server.stop(true);
     }
   } finally {
-    await rm(temporary, { recursive: true, force: true });
+    await rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
