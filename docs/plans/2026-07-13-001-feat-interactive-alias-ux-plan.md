@@ -14,9 +14,9 @@ deepened: 2026-07-13
 
 ## Goal Capsule
 
-- **Objective:** Make interactive `llm-now` runs alias-first, searchable, deterministically ordered, and visually separated from model output without changing byte-faithful stdout or non-interactive behavior.
+- **Objective:** Make interactive `llm-now` runs alias-first, searchable, deterministically ordered, and visually separated from model output, then make repeat runs concise through `llm-now <alias> --input` without changing byte-faithful stdout or normalized alias behavior.
 - **Authority:** The Product Contract below defines the behavior. The ideation artifact records the UX rationale; this plan resolves implementation and verification details.
-- **Execution profile:** One cohesive implementation phase and one pull request. Prompt infrastructure, selection provenance, alias persistence semantics, and finish UI ship together because partial combinations create inconsistent public behavior.
+- **Execution profile:** Two stacked pull requests. The existing interactive UX implementation remains on `codex/interactive-alias-ux`; the positional alias extension lands on a child branch based on it so the parser and adoption change stays reviewable without reopening the parent implementation.
 - **Stop conditions:** Stop for an incompatible Clack/Bun standalone-executable boundary, a required change to the persisted alias schema, or a product decision that changes stdout/non-interactive contracts.
 - **Tail ownership:** Implement, verify, simplify, review, commit, push, open the pull request, and watch CI in this run.
 
@@ -26,11 +26,11 @@ deepened: 2026-07-13
 
 ### Summary
 
-An interactive run with no explicit selection starts from saved aliases when they exist, then offers fresh provider/model discovery as an escape hatch. All selectable lists support type-ahead filtering and deterministic ordering. After every interactive generation, stderr creates a clear terminal boundary; when the selection is not already named by an alias, it asks directly for an optional alias name with enough context to know what will be saved.
+An interactive run with no explicit selection starts from saved aliases when they exist, then offers fresh provider/model discovery as an escape hatch. All selectable lists support type-ahead filtering and deterministic ordering. After every interactive generation, stderr creates a clear terminal boundary; when the selection is not already named by an alias, it asks directly for an optional alias name with enough context to know what will be saved. A repeat caller may select a saved alias as the sole positional operand while retaining `--alias <name>` as the permanent explicit form.
 
 ### Problem Frame
 
-Saved aliases are currently invisible unless the user remembers a flag and name. Provider/model menus require numeric scanning, preserve arbitrary runtime order, and are rendered twice. After generation, the confirmation prompt can touch output that lacks a trailing newline, while the two-step save question does not explain immediately what the requested alias will contain.
+Saved aliases were invisible unless the user remembered a flag and name. The interactive UX now makes them discoverable, but repeat invocations still require the verbose `--alias <name>` spelling and the green next-time hint teaches that longer form. The CLI rejects every positional today even though one bare alias can normalize into the existing deterministic path without changing discovery, generation, output, or persistence behavior.
 
 ### Actors
 
@@ -43,7 +43,8 @@ Saved aliases are currently invisible unless the user remembers a flag and name.
 - F1. **Saved alias fast path:** An interactive omitted-selection run with saved aliases shows a sorted searchable alias picker. Choosing an alias bypasses discovery, generates once, and finishes without another save prompt.
 - F2. **Fresh discovery:** Choosing the fresh-selection escape hatch, or having no aliases, shows sorted searchable provider and model pickers. Model-list failure removes the failed provider and redraws remaining choices.
 - F3. **Interactive finish:** After any interactive generation, the response is written byte-for-byte to stdout and stderr opens a clean visual boundary. If the run did not use an alias, one contextual field accepts a new alias or Enter/cancel to exit successfully; already-named selections finish after the boundary.
-- F4. **Deterministic invocation:** Explicit aliases, explicit provider/model selection, and every non-interactive invocation retain deterministic routing, exact stdout, and failure behavior. Interactive explicit executions still receive the universal R13 stderr boundary, and unnamed explicit provider/model selections receive the R14 alias field.
+- F4. **Deterministic invocation:** Previously supported explicit alias, explicit provider/model, and non-interactive forms retain deterministic routing, exact stdout, and failure behavior. R22-R27 intentionally add positional-alias grammar; after normalization, that shorthand follows the existing explicit-alias path. Interactive explicit executions still receive the universal R13 stderr boundary, and unnamed explicit provider/model selections receive the R14 alias field.
+- F5. **Positional alias invocation:** `llm-now <alias> --input <text>` and `producer | llm-now <alias>` preserve the exact alias spelling, normalize into the existing alias selection, bypass discovery, and behave identically to `--alias <alias>` after parsing.
 
 ### Requirements
 
@@ -59,7 +60,7 @@ Saved aliases are currently invisible unless the user remembers a flag and name.
 
 - R6. Use `@clack/prompts` for alias, provider, and model lists, with canonical alias/provider/model identifiers as option values and human text only as labels or hints. Provider display text comes from the runtime's public provider metadata.
 - R7. Sort copied option arrays by case-folded visible label and then canonical raw value. The escape hatch remains last and upstream arrays are not mutated.
-- R8. Model rows must expose the friendly label and raw ID so type-ahead search preserves identity even when labels collide.
+- R8. Model rows keep the canonical raw ID as the option value for search and identity. Show the friendly label as the row label and add the raw-ID hint only when it differs case-insensitively from that label, avoiding redundant text while preserving disambiguation when labels collide.
 - R9. Preserve supported provider-default behavior and model-list recovery: report the failed stage, remove that provider for the run, and redraw remaining sorted providers.
 - R10. Escape/Ctrl-C before generation returns exit 130 without generation or configuration writes.
 
@@ -68,17 +69,26 @@ Saved aliases are currently invisible unless the user remembers a flag and name.
 - R11. Write the generated response exactly once and unchanged to stdout, including a missing trailing newline and any response ANSI bytes.
 - R12. All Clack output, app-owned styling, cursor separation, diagnostics, and alias messages must use stderr only.
 - R13. Every interactive success receives the post-generation stderr boundary defined in the Boundary State Contract. For ordinary text, line breaks, and SGR styling, it must reset inherited SGR state and put subsequent UI or the returning shell prompt on a clean terminal line with one blank visual row without modifying stdout. Cursor-positioning or terminal-mode-changing response sequences remain byte-preserved but are outside the clean-placement guarantee. Non-interactive success emits no boundary.
-- R14. When an interactive selection is unnamed—fresh discovery or explicit provider/model—prompt with the semantic copy `Enter an alias name for <provider label> · <raw model> (Enter to exit)` and a dim `e.g. fast` example. The provider/model shown are the values that will be stored. Explicit and picker-selected aliases are already named and do not receive the field.
-- R15. Use Picocolors for app-owned green prompt/success text and dim context/example while honoring stderr capability and `NO_COLOR`; let Clack own list chrome.
+- R14. When an interactive selection is unnamed—fresh discovery or explicit provider/model—prompt with the semantic copy `Enter an alias name for <provider label> · <raw model or provider default> (Enter to exit)`. The provider/model shown are the values that will be stored, and the field does not use a placeholder that competes with the contextual prompt. Explicit and picker-selected aliases are already named and do not receive the field.
+- R15. Use Picocolors for app-owned green action/success text and bold provider/model target text while honoring stderr capability and `NO_COLOR`; wording and punctuation must remain understandable without color, and Clack owns list chrome.
 - R16. Empty input or post-generation cancellation exits 0 without changing configuration. Invalid nonempty names re-prompt.
-- R17. Saving an alias that already maps to the selected target returns a distinguishable `already-saved` outcome and reports “Already saved” without overwrite confirmation. A different target returns the observed old target, shows old and new targets, and defaults overwrite confirmation to No outside the filesystem lock. On approval, the store reacquires the lock and saves only if the current target still matches the observed conflict; otherwise it returns the updated conflict for another decision. Decline returns a distinguishable `declined` outcome.
-- R18. A successful save reports `Saved alias <name> → <provider label> · <raw model>` in green. Persistence failure after generation returns exit 1 while preserving the already-written response.
+- R17. Saving an alias that already maps to the selected target returns a distinguishable `already-saved` outcome and reports “Already saved” without overwrite confirmation. A different target returns the observed old target, shows old and new targets using `provider default` for a `null` model, and defaults overwrite confirmation to No outside the filesystem lock. On approval, the store reacquires the lock and saves only if the current target still matches the observed conflict; otherwise it returns the updated conflict for another decision. Decline returns a distinguishable `declined` outcome.
+- R18. A successful save reports `Saved alias <name> → <provider label> · <raw model or provider default>` in green. Persistence failure after generation returns exit 1 while preserving the already-written response.
 
 #### Compatibility and documentation
 
-- R19. Existing help/version, explicit alias, explicit provider/model, input, diagnostic sanitization, timeouts, and exit-code contracts remain unchanged except for documented interactive UX.
+- R19. Previously supported help/version, explicit alias, explicit provider/model, input, diagnostic sanitization, timeout, and exit-code contracts remain unchanged except for documented interactive UX. R22-R27 are the intentional grammar, help, and documentation exception; once parsed, positional alias execution remains behaviorally equivalent to `--alias`.
 - R20. Pin exact runtime dependency versions consistent with the repository and prove both dependencies work in Bun 1.3.14 source tests and standalone native compilation.
 - R21. Update help, README, and manual-test coverage for alias-first startup, type-ahead, ordering, finish copy, output separation, cancellation, colors, and native behavior.
+
+#### Positional alias shorthand
+
+- R22. Zero positionals preserve existing behavior, exactly one nonblank positional is an exact case-sensitive alias selector, and a blank positional or two or more positionals are invalid usage with exit 2. The positional form uses the same nonblank validation as `--alias`.
+- R23. Normalize one positional into the existing alias selection, accept it before or after ordinary run options, keep `--alias <name>` permanently supported, and teach alias-first order as canonical.
+- R24. Reject a positional alias combined with `--alias`, `--provider`, or `--model`; keep help/version standalone; never interpret a second positional as prompt text.
+- R25. Positional and long-form aliases must match for success, missing/invalid/corrupt/stale failure, discovery fallback prohibition, exit codes, stdout bytes, stderr diagnostics, and alias-save eligibility.
+- R26. When a fresh interactive selection already has an alias, the green next-time hint must teach the executable form `llm-now <alias> --input "<prompt>"`.
+- R27. Help, README, manual testing, parser/application tests, and compiled native smoke must cover positional shorthand while retaining long-form coverage.
 
 ### Acceptance Examples
 
@@ -89,6 +99,9 @@ Saved aliases are currently invisible unless the user remembers a flag and name.
 - AE5. **Collision safety:** Given `fast` already maps to the same selection, entering `fast` reports “Already saved” without confirmation. Given a different mapping, the prompt shows old/new targets and defaults to No; declining preserves the file and exit 0. Covers R17-R18.
 - AE6. **Automation safety:** A piped explicit or aliased invocation has no Clack/Picocolors bytes on stdout or stderr beyond existing diagnostics and does not load interactive choices. Covers F4 and R1, R11-R12, R19.
 - AE7. **Cancellation:** Cancelling alias/provider/model selection returns 130 before generation; cancelling the alias-name field after output returns 0. Covers R10 and R16.
+- AE8. **Equivalent invocation:** Given alias `Daily`, both `llm-now Daily --input "hello"` and `llm-now --input "hello" Daily` preserve case and resolve the same target once; `printf 'hello' | llm-now Daily` behaves the same non-interactively. Covers F5 and R22-R25.
+- AE9. **Grammar boundary:** Zero positionals retain current interactive/explicit behavior; two positionals, a positional plus another selector, or help/version plus a positional exit 2 before alias loading or provider calls. Covers R22-R24.
+- AE10. **Failure parity:** Missing, invalid, corrupt, and stale positional aliases produce the same exit code, stdout, stderr, and runtime call counts as the equivalent `--alias` invocation and never open discovery. Covers R25.
 
 ### Success Criteria
 
@@ -96,21 +109,22 @@ Saved aliases are currently invisible unless the user remembers a flag and name.
 - Every alias/provider/model list filters as the user types and has repeatable first-option ordering.
 - The output/prompt seam is visually clear for responses with and without trailing newlines while stdout remains byte-identical.
 - The finish prompt tells the user both what to type and which provider/model the alias will contain.
+- A recurring user can run a saved alias as `llm-now <alias> --input` or with piped stdin while retaining `--alias` as an equivalent explicit form.
 - Current automated checks, native compilation, and focused terminal behavior tests pass.
 
 ### Scope Boundaries
 
 #### In scope
 
-- Interactive selection and finish UX, prompt dependencies, selection provenance, same-target collision handling, tests, and documentation.
+- Interactive selection and finish UX, prompt dependencies, selection provenance, same-target collision handling, positional alias shorthand, post-run guidance, tests, and documentation.
 
 #### Out of scope
 
-- A bare `llm-now` prompt-entry mode; alias list/create/delete commands; changes to generation or provider discovery; persisted friendly model labels; alias-schema migration; non-interactive fuzzy selection; broad terminal UI redesign.
+- Positional prompt text such as `llm-now daily "prompt"`; fuzzy or case-insensitive alias matching; deprecation or removal of `--alias`; alias list/create/delete commands; changes to generation or provider discovery; persisted friendly model labels; alias-schema migration; broad terminal UI redesign.
 
 ### Product Contract Preservation
 
-This feature refines original F1/R6/R11/R15-R16 behavior from `docs/plans/2026-07-12-001-feat-llm-now-plan.md`. It preserves explicit alias reuse, non-interactive determinism, byte-faithful stdout, failure staging, configuration paths, and the two-field alias schema.
+This feature refines original F1/R6/R11/R15-R16 behavior from `docs/plans/2026-07-12-001-feat-llm-now-plan.md`. It preserves explicit alias reuse, non-interactive determinism, byte-faithful stdout, failure staging, configuration paths, and the two-field alias schema. R22-R27 expand only the public grammar and learning surfaces; normalized selection and runtime semantics stay unchanged.
 
 ---
 
@@ -125,6 +139,8 @@ This feature refines original F1/R6/R11/R15-R16 behavior from `docs/plans/2026-0
 - KTD5. **Make color detection output-aware.** Picocolors' singleton detects stdout, but UI is on stderr. Construct colors from injected stderr TTY capability and environment policy, with nonempty `NO_COLOR` disabling color; never embed ANSI in stored alias values or stdout.
 - KTD6. **Use optimistic conflict confirmation and distinguish outcomes.** `saveAlias` compares targets under its short-lived filesystem lock. Equal targets return `already-saved`; different targets return the observed conflict without waiting on a human while locked. After approval, a second save attempt carries that expected record, reacquires the lock, and commits only if it still matches; a changed target is re-presented. This avoids stale-lock takeover while retaining `saved`, `already-saved`, and `declined` UI outcomes.
 - KTD7. **Treat Clack/Bun compatibility as a release constraint.** Pin `@clack/prompts` 1.7.0 and `picocolors` 1.1.1. Clack is ESM and declares Node >=20.12 while using Node terminal APIs; the implementation is accepted only after Bun source, compiled-runtime, and PTY behavior checks prove the supported surface.
+- KTD8. **Normalize positional aliases at the parser seam.** Enable positionals only in `src/args.ts`, enforce the zero/one/many grammar and selector conflicts, and convert one raw operand into the existing `{ kind: "alias" }` selection. Do not add a selection kind, positional resolver, reserved command words, or application branch.
+- KTD9. **Make documented order canonical and accepted order tolerant.** Show alias-first syntax in help and examples, but accept the single alias before or after ordinary options. Count positionals in standalone help/version validation and preserve usage exit 2 for grammar conflicts before prompt or runtime work begins.
 
 ### Boundary State Contract
 
@@ -146,6 +162,9 @@ This feature refines original F1/R6/R11/R15-R16 behavior from `docs/plans/2026-0
 - Clack is invoked only under the existing stdin/stderr TTY gate; it is never a fallback for non-interactive input.
 - Interactive explicit provider/model runs remain eligible for alias capture because they have no alias name; explicit and picker-selected aliases are not.
 - Exact terminal cursor behavior with stdout redirected and stderr attached must be observed in PTY tests because Clack internally consults stdout width in some paths.
+- The root operand namespace belongs to aliases, including command-looking names such as `help`, `version`, and `run`; controls remain dashed options.
+- A syntactically valid but unresolved single positional is an alias/config failure with exit 1, while multiple positionals and selector conflicts remain usage failures with exit 2.
+- Native smoke uses an isolated config root and seeded alias document; it never reads or writes the developer's real alias store.
 
 ### High-Level Technical Design
 
@@ -153,7 +172,14 @@ The sketch is directional: exact helper names and module boundaries may follow e
 
 ```mermaid
 flowchart TB
-  Parse["Parse input and selection"] --> Mode{"Deterministic or interactive?"}
+  Argv["Read argv"] --> Count{"Positional count"}
+  Count -->|zero| Parse["Existing option selection"]
+  Count -->|one| Normalize["Normalize exact operand to alias selection"]
+  Count -->|two or more| Usage["Usage exit 2"]
+  Normalize --> Conflicts{"Other selector present?"}
+  Conflicts -->|yes| Usage
+  Conflicts -->|no| Parse
+  Parse --> Mode{"Deterministic or interactive?"}
   Mode -->|explicit/--alias| Deterministic["Resolve current deterministic path"]
   Mode -->|interactive omitted selection| Aliases["Load validated aliases once"]
   Aliases --> HasAliases{"Aliases exist?"}
@@ -178,9 +204,10 @@ flowchart TB
   Store --> Exit
 ```
 
-### Single-Phase Delivery and PR Strategy
+### Stacked Delivery and PR Strategy
 
-- **Phase 1 — Interactive alias UX:** U1-U4 on `codex/interactive-alias-ux`, based on `main`. Include the ideation HTML and this plan. Ship the prompt dependency boundary, alias-first routing, finish flow, persistence semantics, documentation, and complete verification as one pull request.
+- **Phase 1 — Interactive alias UX:** U1-U4 on `codex/interactive-alias-ux`, based on `main`. This existing parent PR owns the prompt dependency boundary, alias-first routing, finish flow, persistence semantics, and original documentation.
+- **Phase 2 — Positional alias shorthand:** U5 on `codex/positional-alias-shorthand`, based on `codex/interactive-alias-ux`. Commit the extended ideation HTML and this revised plan to the parent branch before cutting the child, then ship parser normalization, parity coverage, executable next-time guidance, documentation, and compiled smoke in the child PR.
 
 ---
 
@@ -196,11 +223,11 @@ flowchart TB
 - **Execution note:** Start with failing prompt selection/order/cancellation tests. Keep Clack integration tests focused while orchestration tests use a fake prompt contract.
 - **Patterns to follow:** Existing dependency injection in `src/app.ts`; current `InteractiveSelectionResult`; diagnostic sanitization boundary; upstream Clack injected-stream tests.
 - **Test scenarios:**
-  - Providers and models sort case-insensitively with a raw-value tie-break and select the correct canonical ID when labels collide.
+  - Providers and models sort case-insensitively with a raw-value tie-break and select the correct canonical ID when labels collide; a model omits the raw-ID hint when it duplicates the visible label case-insensitively.
   - Type-ahead can match label, hint, and raw value; cancellation at provider or model yields the existing cancelled result.
   - Model-list failure reports the stage, removes the provider, and redraws remaining sorted choices; CLI-provider default remains selectable.
   - Clack writes only to injected stderr, returns no ANSI-bearing identity, and sanitizes hostile option text.
-  - Picocolors emits green/dim only when stderr/environment policy allows it and honors `NO_COLOR`.
+  - Picocolors emits green action/success text and bold target text only when stderr/environment policy allows it and honors `NO_COLOR`.
 - **Verification:** Focused prompt tests demonstrate identity-safe ordering, filtering, recovery, cancellation, channel isolation, and color policy; typecheck accepts the dependency boundary.
 
 ### U2. Route omitted interactive selection through saved aliases
@@ -255,26 +282,49 @@ flowchart TB
   - Help/README/manual steps describe all new behavior and retain deterministic non-interactive guidance.
 - **Verification:** Full repository check, standalone runtime smoke, native build, and focused PTY/manual evidence pass or any platform-only gap is called out explicitly in the pull request.
 
+### U5. Add and teach positional alias invocation
+
+- **Goal:** Let repeat callers select a saved alias with one bare operand while keeping every post-parse behavior equivalent to `--alias`.
+- **Requirements:** R22-R27; F5; AE8-AE10.
+- **Dependencies:** U1-U4.
+- **Files:** `src/args.ts`, `src/app.ts`, `tests/args.test.ts`, `tests/app.test.ts`, `tests/runtime-compile-smoke.ts`, `README.md`, `docs/manual-testing.md`.
+- **Approach:** Capture positionals in the existing parser, count them in standalone-mode validation, reject cardinality and selector conflicts, and normalize exactly one raw alias into the existing selection variant. Preserve exact case and the current alias/store/runtime paths. Make positional syntax primary in usage examples, retain the long form without deprecation language, update the green hint to an executable alias-first command, and seed an isolated alias document for compiled smoke.
+- **Execution note:** Start with parser and application parity tests that fail against the current positional rejection before enabling positionals.
+- **Patterns to follow:** Existing `Selection` normalization in `src/args.ts`; explicit alias routing and fail-closed tests in `tests/app.test.ts`; isolated temporary-directory lifecycle in `tests/runtime-compile-smoke.ts`.
+- **Test scenarios:**
+  - Zero positionals retain interactive, provider/model, long-form alias, help, and version behavior.
+  - `Daily --input hello` and `--input hello Daily` both return `{ kind: "alias", alias: "Daily" }`; bare `help`, `version`, and `run` remain valid alias operands.
+  - Empty and whitespace-only positional values fail as usage with exit 2, matching the equivalent invalid `--alias` values.
+  - Piped positional invocation resolves the exact case-sensitive alias and writes the same response bytes as the long form.
+  - Two positionals, positional plus `--alias`, and positional plus any provider/model selection exit 2 before prompt resolution, alias loading, discovery, or generation.
+  - Help/version plus a positional remain invalid standalone combinations, independent of token order.
+  - A lone positional is never prompt text; missing input behavior matches the equivalent long-form alias invocation.
+  - Positional and long forms match for successful stdout/stderr, missing and invalid alias names, corrupt stores, stale targets, discovery/generation counts, and save suppression.
+  - The green existing-alias hint uses `llm-now <alias> --input "<prompt>"`.
+  - A compiled current-platform executable reads a seeded alias only from its isolated config root and completes positional generation without a separate Bun or Node installation.
+- **Verification:** Focused parser/application tests prove normalization and semantic equivalence; `bun run check`, runtime smoke, and native build pass; help, README, and manual guidance agree.
+
 ---
 
 ## Verification Contract
 
-- **Unit/integration:** `bun test` covers option ordering and identity, alias routing, provenance, stream bytes, cancellation, collision equality/overwrite, validation, and failures.
+- **Unit/integration:** `bun test` covers option ordering and identity, alias routing, provenance, stream bytes, cancellation, collision equality/overwrite, validation, zero/one/many positional grammar, selector conflicts, token-order tolerance, and long/short-form parity.
 - **Static:** `bun run typecheck` passes with exact Clack/Picocolors versions.
-- **Runtime smoke:** `bun run runtime:smoke` proves the application/runtime boundary remains compatible.
-- **Native:** `bun run build:native` builds all configured targets; current-platform standalone smoke exercises imported prompt/color code.
+- **Runtime smoke:** `bun run runtime:smoke` proves the application/runtime boundary and an isolated positional-alias invocation remain compatible.
+- **Native:** `bun run build:native` builds all configured targets; current-platform standalone smoke exercises imported prompt/color code and seeded positional alias resolution.
 - **Terminal:** A PTY case redirects stdout while keeping stderr interactive and verifies the exact Boundary State Contract for both response suffixes, filter input, cancellation, cursor restoration, no prompt bytes on stdout, and `NO_COLOR`.
-- **Documentation:** Help, README, and the manual guide agree on startup routing, option ordering, prompt copy, channels, and exit codes.
+- **Documentation:** Help, README, and the manual guide agree on startup routing, positional grammar, canonical alias-first syntax, accepted option ordering, prompt copy, channels, and exit codes.
 
 ## System-Wide Impact
 
-- **Entry and routing:** `runApplication()` gains selection provenance/namedness and an interactive alias-load branch; parsing and non-interactive selection rules do not change.
+- **Entry and routing:** The public grammar expands in `parseArguments()` to accept one alias operand, while `runApplication()` continues to receive the existing alias selection. Non-interactive selection requirements, lookup, discovery bypass, and generation routing do not change after normalization.
 - **Prompt boundary:** Numbered readline lists are removed in favor of one injected Clack contract. Every prompt must receive the same input/stderr channels and cancellation mapping.
 - **Mode/provenance matrix:** Verification covers fresh omitted selection, alias-picker selection, explicit named alias, and explicit provider/model, across interactive/non-interactive modes where each is valid; only interactivity controls the boundary and only namedness controls alias capture.
 - **Persistent state:** Alias schema and path stay unchanged. Same-target detection and conflict reads happen under short-lived locks; approved overwrite uses expected-current compare-and-save on a new lock acquisition. Atomic rename, permissions, validation, and corrupt-store behavior remain intact.
 - **Output/data flow:** The model response remains an opaque one-time stdout payload. Every interactive success gets an stderr boundary; only unnamed selections add the alias field. All new visible UI, ANSI, and spacing are isolated to stderr.
 - **Packaging:** Two runtime dependencies become part of standalone executables; native compile and PTY behavior are acceptance gates.
 - **Failure propagation:** Pre-generation cancellation remains 130; post-generation skip/cancel remains 0; prompt/discovery/config failures preserve their existing stage/exit behavior; save failure after output remains 1.
+- **Namespace:** The sole root operand belongs to saved aliases. Future bare-word subcommands would require a compatibility decision because existing aliases may already use command-looking names.
 
 ## Risks and Dependencies
 
@@ -285,10 +335,15 @@ flowchart TB
 - **Incorrect color detection:** Picocolors defaults to stdout capability. Mitigate with explicit stderr-aware `createColors()` policy and `NO_COLOR` tests.
 - **Terminal stream interleaving:** Separate file descriptors do not guarantee arbitrary control-rich output appearance. Guarantee printable/line-break/SGR placement with an stderr SGR reset, preserve stdout bytes, explicitly exclude cursor/mode-changing sequences, and verify representative PTY cases.
 - **Concurrent alias collision:** Holding the current stale-detectable filesystem lock across human input can allow takeover; confirming without a compare can overwrite newer state. Return the conflict, confirm outside the lock, and require expected-current equality after reacquisition.
+- **Over-permissive positional parsing:** Enabling positionals without explicit cardinality, standalone-mode, and selector-conflict checks could accept prompt-like trailing text or mixed selectors. Mitigate with parser matrix tests before normalization.
+- **Semantic drift between spellings:** A positional-specific application path could diverge on diagnostics, discovery, output, or save behavior. Mitigate by normalizing at the parser seam and comparing both spellings across success and failure cases.
+- **Smoke config leakage:** A compiled smoke could read the developer's real global aliases. Mitigate by seeding a temporary config root and setting platform config variables for every smoke child process.
 
 ## Documentation and Operational Notes
 
 - Update `--help`, README Usage/Aliases sections, and manual tests for alias-first navigation, type-ahead keys, sorted order, fresh-selection escape hatch, exact alias prompt, blank/cancel behavior, collision messages, `NO_COLOR`, and redirected stdout.
+- Make `llm-now <alias> --input "<prompt>"` the canonical repeat-run example; retain `--alias <name>` as the explicit equivalent and document piped positional input.
+- Replace the manual guide's blanket “Positional argument” failure with two-or-more positionals and mixed-selector cases, then add success/failure parity cases for both spellings.
 - Do not start a development server; this is a terminal-only feature.
 - No alias migration or release publication is required.
 - Cross-platform interactive PTY validation that cannot run locally remains a named manual/CI gap, not inferred success.
@@ -308,11 +363,14 @@ flowchart TB
 
 ## Definition of Done
 
-- R1-R21 and AE1-AE7 are traceable to implemented U1-U4 behavior and tests.
+- R1-R27 and AE1-AE10 are traceable to implemented U1-U5 behavior and tests.
 - Interactive omitted selection is alias-first when aliases exist and discovery-first when they do not.
 - Alias/provider/model choices are searchable, deterministically ordered, identity-safe, cancellable, and stderr-only.
 - Every interactive generation ends with the defined clean terminal seam for ordinary text/line breaks/SGR; unnamed selections add the contextual single-field alias flow, green/dim app-owned styling, and same/different-target collision safety.
 - Model response stdout remains byte-for-byte unchanged for interactive and automated calls.
 - Exact dependency pins, full repository checks, standalone/native compilation, and focused PTY verification pass; unresolved platform-only manual gaps are documented.
 - Help, README, and manual testing guide reflect verified behavior.
-- Ideation and plan artifacts are included in the implementation pull request.
+- One exact alias operand works before or after ordinary options, two or more operands fail as usage, and positional prompt text remains unsupported.
+- Positional and long-form aliases are equivalent across success, failure staging, exit codes, output channels, discovery calls, and save eligibility.
+- The parent PR contains the extended ideation and revised plan; the child PR targets `codex/interactive-alias-ux` and contains only U5 implementation work beyond that base.
+- No abandoned parser branches, unused test helpers, or experimental smoke setup remains in the child diff.

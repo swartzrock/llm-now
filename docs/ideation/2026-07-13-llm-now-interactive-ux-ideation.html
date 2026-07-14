@@ -216,21 +216,21 @@
 <body>
   <header class="shell">
     <p class="eyebrow">Ideation · CLI experience</p>
-    <h1>Make every run improve the next one.</h1>
-    <p class="lede">A ranked set of directions for making <code>llm-now</code> feel fast when aliases exist, searchable when they do not, and unmistakably finished when model output stops.</p>
+    <h1>Make every run improve the next one—and every repeat run shorter.</h1>
+    <p class="lede">A ranked set of directions for making <code>llm-now</code> fast when aliases exist, searchable when they do not, unmistakably finished when output stops, and concise enough to run as <code>llm-now &lt;alias&gt; --input</code>.</p>
 
     <dl class="metadata">
       <div class="meta"><dt>Date</dt><dd><time datetime="2026-07-13">2026-07-13</time></dd></div>
       <div class="meta"><dt>Topic</dt><dd><code>llm-now-interactive-ux</code></dd></div>
-      <div class="meta"><dt>Focus</dt><dd>Alias-first selection, sorted typeahead lists, output separation, and optional alias capture</dd></div>
+      <div class="meta"><dt>Focus</dt><dd>Alias-first selection, sorted typeahead lists, output separation, optional alias capture, and positional alias shorthand</dd></div>
       <div class="meta"><dt>Mode</dt><dd><code>repo-grounded</code></dd></div>
     </dl>
 
     <dl class="stats">
-      <div class="stat"><dt>Raw ideas</dt><dd>44</dd></div>
-      <div class="stat"><dt>Consolidated</dt><dd>21</dd></div>
-      <div class="stat"><dt>Survivors</dt><dd>7</dd></div>
-      <div class="stat"><dt>Topic axes</dt><dd>4</dd></div>
+      <div class="stat"><dt>Total ranked</dt><dd>13</dd></div>
+      <div class="stat"><dt>Original directions</dt><dd>7</dd></div>
+      <div class="stat"><dt>Extension survivors</dt><dd>6</dd></div>
+      <div class="stat"><dt>Topic axes</dt><dd>8</dd></div>
     </dl>
   </header>
 
@@ -238,7 +238,8 @@
     <div class="shell">
       <a href="#grounding-context">Grounding Context</a>
       <a href="#topic-axes">Topic Axes</a>
-      <a href="#ranked-ideas">Ranked Ideas</a>
+      <a href="#ranked-ideas">Positional Alias Ideas</a>
+      <a href="#prior-ranked-ideas">Prior Ranked Ideas</a>
       <a href="#rejection-summary">Rejection Summary</a>
       <a href="#sources">Sources</a>
     </div>
@@ -253,10 +254,16 @@
         <p>Generation writes the response exactly once and byte-for-byte to stdout. Interactive prompts use stderr, but the save prompt begins immediately after generation; when the response lacks a trailing newline, both streams share the same terminal row. The existing finish flow asks for confirmation, then asks for a name, then optionally asks about overwrite.</p>
         <p>Current tests and documentation protect the valuable parts of the contract: explicit aliases bypass discovery, non-interactive invocations stay deterministic, pre-generation cancellation exits 130, post-success skipping exits 0, overwrites require consent, and even an absent trailing newline is part of exact stdout.</p>
         <p>External prior art is aligned: Clack autocomplete searches structured option text, hints, and values; AWS auto-prompt and <code>fzf</code> normalize type-to-filter with arrows and Enter; mature LLM CLIs treat aliases as first-class persistent shortcuts. For app-owned ANSI styling around the prompt, <code>picocolors</code> provides a tiny, dependency-free, <code>NO_COLOR</code>-friendly ESM API.</p>
+        <p><strong>Positional-alias follow-up.</strong> The parser currently rejects every positional with <code>allowPositionals: false</code>, but it already normalizes <code>--alias &lt;name&gt;</code> into a single alias-selection variant that orchestration understands. Alias names are exact and case-sensitive, may currently be words such as <code>help</code>, <code>version</code>, or <code>run</code>, and cannot begin with <code>-</code>. Prompt content independently comes from exactly one source: <code>--input</code> or stdin.</p>
+        <p>The shortest safe extension is therefore syntax sugar, not a new execution mode: one bare operand can normalize into the existing alias path. The long form remains valid; missing and stale aliases still fail closed; discovery, output bytes, and post-run save eligibility must not vary by spelling.</p>
       </div>
       <aside class="callout">
         <p class="eyebrow">Non-negotiable constraint</p>
         <p>The visible newline belongs to the interactive UI channel. Appending it to stdout would fix the screenshot while breaking a stronger shell contract.</p>
+      </aside>
+      <aside class="callout">
+        <p class="eyebrow">Positional grammar boundary</p>
+        <p>The sole positional is an alias selector, never prompt text. <code>llm-now daily --input "…"</code> and <code>producer | llm-now daily</code> are complete forms; <code>llm-now daily "prompt"</code> remains invalid.</p>
       </aside>
     </section>
 
@@ -268,12 +275,132 @@
         <div class="axis"><b>2. Searchable selection</b><span>Provider/model ordering, filtering, identity, and recovery.</span></div>
         <div class="axis"><b>3. Terminal boundary</b><span>Where exact model output ends and interactive UI begins.</span></div>
         <div class="axis"><b>4. Finish flow</b><span>Optional alias capture, validation, collision safety, and exit.</span></div>
+        <div class="axis"><b>5. Positional grammar</b><span>Who owns the root operand namespace and how many operands exist.</span></div>
+        <div class="axis"><b>6. Semantic parity</b><span>Making shorthand indistinguishable from <code>--alias</code> after parsing.</span></div>
+        <div class="axis"><b>7. Input composition</b><span>Alias placement, option order, stdin, and the prompt-source firewall.</span></div>
+        <div class="axis"><b>8. Shorthand adoption</b><span>Help, hints, docs, errors, and release checks that teach one grammar.</span></div>
       </div>
     </section>
 
     <section id="ranked-ideas">
-      <p class="eyebrow">The strongest directions</p>
+      <p class="eyebrow">Further simplification · positional aliases</p>
       <h2>Ranked Ideas</h2>
+      <ol class="jump-list">
+        <li><a href="#alias-idea-1">1. The positional alias covenant</a></li>
+        <li><a href="#alias-idea-2">2. The semantic parity checksum</a></li>
+        <li><a href="#alias-idea-3">3. Address lane, payload lane</a></li>
+        <li><a href="#alias-idea-4">4. Canonical alias-first, tolerant parsing</a></li>
+        <li><a href="#alias-idea-5">5. Predictable failure phases</a></li>
+        <li><a href="#alias-idea-6">6. An executable adoption loop</a></li>
+      </ol>
+
+      <article class="idea top" id="alias-idea-1">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">1</span><h3>The positional alias covenant</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Positional grammar</span><span class="badge conf">Conf · 95%</span><span class="badge cx">Cx · Medium</span></div>
+        </div>
+        <p class="description">Define one durable rule: zero bare operands preserves today’s interactive or flag-led flow; exactly one means an exact saved alias; two or more are usage errors. Options own the control plane, aliases own the operand plane, and <code>--alias &lt;name&gt;</code> remains a permanent explicit equivalent. The shorthand immediately normalizes into the existing alias selection rather than creating a second execution mode.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> <code>src/args.ts</code> already defines one normalized alias-selection shape and no subcommand grammar. <code>src/aliases.ts</code> currently accepts command-looking aliases such as <code>help</code>, <code>version</code>, and <code>run</code>, while actual controls are already <code>--help</code> and <code>--version</code>.</dd></div>
+          <div><dt>Rationale</dt><dd>This delivers the requested shortcut as a tiny, memorable language without narrowing valid aliases today or silently reclaiming their names later.</dd></div>
+          <div><dt>Downsides</dt><dd>It spends the sole root operand on aliases. A future bare-word subcommand would require an explicit compatibility decision rather than quietly taking precedence.</dd></div>
+        </dl>
+        <div class="visual" aria-label="Illustrative positional alias grammar and normalization">
+          <svg viewBox="0 0 860 300" role="img" aria-labelledby="alias-contract-title alias-contract-desc">
+            <title id="alias-contract-title">The positional alias covenant</title>
+            <desc id="alias-contract-desc">Zero operands retain the existing interactive flow. One alias operand and the long alias option normalize into one alias-selection path. Two or more operands are usage errors.</desc>
+            <defs><marker id="alias-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#75e6c4"/></marker></defs>
+            <rect x="26" y="34" width="226" height="64" rx="14" fill="#171c26" stroke="#4a5570"/>
+            <text x="139" y="61" fill="#eef2ff" font-size="16" text-anchor="middle" font-family="ui-monospace, monospace">llm-now</text>
+            <text x="139" y="82" fill="#a8b0c3" font-size="12" text-anchor="middle" font-family="ui-sans-serif, sans-serif">zero operands · existing flow</text>
+            <rect x="26" y="118" width="226" height="64" rx="14" fill="#16352f" stroke="#4b927f"/>
+            <text x="139" y="145" fill="#b9f8e6" font-size="16" text-anchor="middle" font-family="ui-monospace, monospace">llm-now daily</text>
+            <text x="139" y="166" fill="#b9f8e6" font-size="12" text-anchor="middle" font-family="ui-sans-serif, sans-serif">one operand · alias intent</text>
+            <rect x="26" y="202" width="226" height="64" rx="14" fill="#171c26" stroke="#4a5570"/>
+            <text x="139" y="229" fill="#eef2ff" font-size="16" text-anchor="middle" font-family="ui-monospace, monospace">llm-now --alias daily</text>
+            <text x="139" y="250" fill="#a8b0c3" font-size="12" text-anchor="middle" font-family="ui-sans-serif, sans-serif">permanent explicit spelling</text>
+            <rect x="366" y="118" width="208" height="64" rx="14" fill="#292448" stroke="#655ca3"/>
+            <text x="470" y="145" fill="#ddd5ff" font-size="15" text-anchor="middle" font-family="ui-monospace, monospace">{ kind: "alias",</text>
+            <text x="470" y="166" fill="#ddd5ff" font-size="15" text-anchor="middle" font-family="ui-monospace, monospace">alias: "daily" }</text>
+            <line x1="252" y1="150" x2="354" y2="150" stroke="#75e6c4" stroke-width="3" marker-end="url(#alias-arrow)"/>
+            <path d="M252 234 C310 234, 310 170, 354 157" fill="none" stroke="#75e6c4" stroke-width="3" marker-end="url(#alias-arrow)"/>
+            <rect x="686" y="118" width="150" height="64" rx="14" fill="#16352f" stroke="#4b927f"/>
+            <text x="761" y="156" fill="#b9f8e6" font-size="16" text-anchor="middle" font-family="ui-sans-serif, sans-serif">Existing path</text>
+            <line x1="574" y1="150" x2="674" y2="150" stroke="#75e6c4" stroke-width="3" marker-end="url(#alias-arrow)"/>
+            <text x="470" y="228" fill="#ffc8dc" font-size="14" text-anchor="middle" font-family="ui-monospace, monospace">daily extra → usage error</text>
+          </svg>
+        </div>
+      </article>
+
+      <article class="idea" id="alias-idea-2">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">2</span><h3>The semantic parity checksum</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Semantic parity</span><span class="badge conf">Conf · 97%</span><span class="badge cx">Cx · Medium</span></div>
+        </div>
+        <p class="description">Make positional syntax provably interchangeable with <code>--alias</code>. For each success, missing, invalid, corrupt, and stale-alias scenario, mechanically substitute the shorthand and require the same normalized selection, exit code, stdout bytes, stderr bytes, discovery/provider call counts, and alias-save behavior.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> <code>tests/app.test.ts</code> already protects explicit-alias discovery bypass and stale-alias failure; <code>src/app.ts</code> already maps alias selection, namedness, output, and exit behavior after parsing.</dd></div>
+          <div><dt>Rationale</dt><dd>“Same alias, shorter spelling” becomes an enforceable invariant. Future alias fixes automatically protect both interfaces instead of letting a convenience path drift.</dd></div>
+          <div><dt>Downsides</dt><dd>A paired behavior matrix costs more than a couple of happy-path parser tests, especially when stdout, stderr, and runtime-call counts are all compared.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="alias-idea-3">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">3</span><h3>Address lane, payload lane</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Input composition</span><span class="badge conf">Conf · 96%</span><span class="badge cx">Cx · Low</span></div>
+        </div>
+        <p class="description">Treat the positional alias as the request address and the prompt as the request body. The only two complete composition families are <code>llm-now daily --input "…"</code> and <code>producer | llm-now daily</code>. A second positional never becomes prompt text, so <code>llm-now daily "prompt"</code> stays invalid.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> <code>src/io.ts</code> already enforces exactly one byte-faithful prompt source—<code>--input</code> or stdin—and <code>src/app.ts</code> resolves prompt and selection independently before generation.</dd></div>
+          <div><dt>Rationale</dt><dd>The shorthand gains shell-native convenience without creating an ordered two-positional grammar or new quoting and source-precedence rules.</dd></div>
+          <div><dt>Downsides</dt><dd>Users familiar with CLIs that accept a positional prompt may initially expect the deliberately rejected form to work.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="alias-idea-4">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">4</span><h3>Canonical alias-first, tolerant parsing</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Input composition</span><span class="badge conf">Conf · 90%</span><span class="badge cx">Cx · Low</span></div>
+        </div>
+        <p class="description">Teach only the memorable alias-first form—<code>llm-now daily --input "…"</code>—but accept the alias before or after ordinary run options. <code>llm-now --input "…" daily</code> normalizes identically; selector conflicts and standalone help/version behavior do not depend on token order.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>external:</strong> POSIX provides a recognizable option/operand model while GNU tools commonly tolerate intermixing. <strong>direct:</strong> Bun’s argument parser accepts both orders when positionals are enabled, and a valid alias cannot begin with <code>-</code>.</dd></div>
+          <div><dt>Rationale</dt><dd>Humans learn one visual sentence while scripts, wrappers, and muscle memory avoid an arbitrary order trap.</dd></div>
+          <div><dt>Downsides</dt><dd>The accepted grammar is wider than the documented grammar and needs explicit tests so tolerance does not become accidental behavior.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="alias-idea-5">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">5</span><h3>Predictable failure phases</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Semantic parity</span><span class="badge conf">Conf · 94%</span><span class="badge cx">Cx · Low</span></div>
+        </div>
+        <p class="description">A syntactically valid single operand communicates alias intent. If it is missing, invalid, corrupt, or stale, it follows the existing alias/config failure path with exit 1. Malformed options, multiple positionals, or conflicting selectors remain usage errors with exit 2. Unknown aliases never fall back to the picker, fuzzy matching, or discovery.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> <code>src/args.ts</code> and <code>src/app.ts</code> already distinguish usage exit 2 from alias-store/config exit 1, while stale explicit aliases already fail without selecting a replacement.</dd></div>
+          <div><dt>Rationale</dt><dd>The result tells humans and scripts whether the invocation was incomprehensible or understood but unresolved; the shortest form stays safe precisely because it refuses to improvise.</dd></div>
+          <div><dt>Downsides</dt><dd>An unknown bare word intentionally changes from today’s usage error to an alias-resolution error because the new grammar now understands its intent.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="alias-idea-6">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">6</span><h3>An executable adoption loop</h3></div>
+          <div class="badge-row"><span class="badge axis-tag">Axis · Shorthand adoption</span><span class="badge conf">Conf · 93%</span><span class="badge cx">Cx · Medium</span></div>
+        </div>
+        <p class="description">Make shorthand the first spelling in help and README examples, and change the green post-run guidance to a copyable next-time command such as <code>Next time, use llm-now daily</code>. Keep <code>--alias &lt;name&gt;</code> in the reference surface with no deprecation warning. Synchronize manual invalid-use cases, parser parity tests, and compiled smoke around the exact command the UI teaches.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> Help, README, the post-run hint, manual testing, parser/application tests, and compiled smoke currently reinforce only the long form and can drift independently.</dd></div>
+          <div><dt>Rationale</dt><dd>The shorthand becomes a learned default at the moment of success instead of hidden syntax, while the copy shown to users becomes a release-tested product contract.</dd></div>
+          <div><dt>Downsides</dt><dd>Several documentation and verification surfaces must move together even though the runtime behavior should remain localized to argument normalization.</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section id="prior-ranked-ideas">
+      <p class="eyebrow">The strongest directions</p>
+      <h2>Prior Ranked Ideas</h2>
       <ol class="jump-list">
         <li><a href="#idea-1">1. The named execution loop</a></li>
         <li><a href="#idea-2">2. Alias library as the default home</a></li>
@@ -447,6 +574,14 @@
           <tr><td>12</td><td class="cut">Four-state finish machine</td><td>Implementation scaffolding below the meeting-test floor.</td></tr>
           <tr><td>13</td><td class="cut">Search and sorting as separate promises</td><td>A useful principle that restates the typed options and deterministic-order cards.</td></tr>
           <tr><td>14</td><td class="cut">Context-rich safety duplicate</td><td>Near-exact duplicate of contextual collision completion; merged into the finish-flow survivor.</td></tr>
+          <tr><td>15</td><td class="cut">Future built-ins win positional collisions</td><td>Sound alternative, but weaker than preserving current alias ownership because it could later reinterpret working positional scripts.</td></tr>
+          <tr><td>16</td><td class="cut"><code>-- &lt;alias&gt;</code> namespace escrow</td><td><code>--alias &lt;name&gt;</code> already provides an explicit escape, while a third spelling makes later options awkward.</td></tr>
+          <tr><td>17</td><td class="cut">Strict alias-first token order</td><td>Adds explicit enforcement and wrapper friction without resolving any actual alias/option ambiguity.</td></tr>
+          <tr><td>18</td><td class="cut">Exact lookup as a standalone direction</td><td>Correct but already part of the positional covenant and predictable-failure contract.</td></tr>
+          <tr><td>19</td><td class="cut">Zero-migration feature as its own card</td><td>A valuable consequence of normalizing into the existing alias path, not an independent product direction.</td></tr>
+          <tr><td>20</td><td class="cut">Post-run shortcut hint alone</td><td>Useful but only one component of the stronger executable adoption loop.</td></tr>
+          <tr><td>21</td><td class="cut">Alias regex funds tolerance</td><td>Supporting evidence for order-tolerant parsing; parser option descriptors do most of the disambiguation.</td></tr>
+          <tr><td>22</td><td class="cut"><code>run &lt;alias&gt;</code>, <code>@alias</code>, sticky defaults, fuzzy lookup, or positional prompt text</td><td>Longer, less deterministic, or outside the requested shorthand scope.</td></tr>
         </tbody>
       </table>
     </section>
@@ -458,21 +593,27 @@
         <thead><tr><th>Source</th><th>Contribution</th></tr></thead>
         <tbody>
           <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/app.ts"><code>src/app.ts</code></a></td><td>Selection routing, exact response write, finish eligibility, and alias-save prompts.</td></tr>
+          <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/args.ts"><code>src/args.ts</code></a></td><td>Current positional rejection, normalized alias selection, selector conflicts, and usage exit semantics.</td></tr>
+          <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/io.ts"><code>src/io.ts</code></a></td><td>Exactly-one prompt source, stdin and <code>--input</code> composition, and byte-faithful input behavior.</td></tr>
           <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/prompts.ts"><code>src/prompts.ts</code></a></td><td>Numbered menu ownership, runtime order, cancellation, and provider recovery.</td></tr>
           <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/aliases.ts"><code>src/aliases.ts</code></a></td><td>Complete alias loading, validation, locked collision handling, and stored record shape.</td></tr>
+          <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/tests/app.test.ts"><code>tests/app.test.ts</code></a></td><td>Explicit-alias discovery bypass, stale-alias failure, output channels, exit codes, and runtime call counts.</td></tr>
           <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/docs/manual-testing.md"><code>docs/manual-testing.md</code></a></td><td>Byte-faithful stdout, channel separation, cancellation, overwrite, and exit contracts.</td></tr>
           <tr><td><a href="https://github.com/bombshell-dev/clack/blob/main/packages/prompts/README.md">Clack prompts README</a></td><td>Autocomplete option structure, filtering, keyboard interaction, and cancellation.</td></tr>
           <tr><td><a href="https://github.com/alexeyraspopov/picocolors">Picocolors</a></td><td>Dependency-free ANSI color helpers, ESM/TypeScript support, color detection, and <code>NO_COLOR</code>-friendly output.</td></tr>
           <tr><td><a href="https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-parameters-prompting.html">AWS CLI auto-prompt</a></td><td>Saved-profile completion, searchable choices, and partial interactive selection.</td></tr>
           <tr><td><a href="https://github.com/junegunn/fzf/blob/master/README.md"><code>fzf</code> README</a></td><td>Established terminal type-to-filter interaction grammar.</td></tr>
           <tr><td><a href="https://clig.dev/">Command Line Interface Guidelines</a></td><td>Stdout for primary data and stderr for human-facing messaging.</td></tr>
+          <tr><td><a href="https://pubs.opengroup.org/onlinepubs/9699919799.orig/basedefs/V1_chap12.html">POSIX utility syntax</a></td><td>Conventional option-and-operand grammar.</td></tr>
+          <tr><td><a href="https://www.gnu.org/software/coreutils/manual/html_node/Common-options.html">GNU common options</a></td><td>Established tolerance for intermixing options and operands.</td></tr>
+          <tr><td><a href="https://git-scm.com/docs/git-config/2.54.0">Git aliases</a></td><td>Prior art for built-in command precedence and explicit alias behavior; considered but not recommended for llm-now’s current namespace.</td></tr>
         </tbody>
       </table>
     </section>
   </main>
 
   <footer class="composition-signal">
-    <div class="shell">Composed <time datetime="2026-07-13T21:58:41Z">2026-07-13T21:58:41Z</time> by <code>ce-ideate</code> from the user’s interactive-UX prompt and repository evidence.</div>
+    <div class="shell">Composed <time datetime="2026-07-14T04:41:48Z">2026-07-14T04:41:48Z</time> by <code>ce-ideate</code> from the user’s interactive-UX and positional-alias prompts plus repository evidence.</div>
   </footer>
 </body>
 </html>
