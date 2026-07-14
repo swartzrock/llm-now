@@ -251,7 +251,7 @@ The model value is `null` when a supported CLI provider uses its default. Confir
 
 ### MT-12: Use an alias from another directory
 
-First run an interactive call with no explicit selection. Confirm that the sorted alias picker appears before discovery, typing `dai` filters to `daily`, and selecting it bypasses provider/model discovery and does not show another alias field. Then verify deterministic non-interactive reuse from another directory:
+First run an interactive call with no explicit selection. Confirm that the sorted alias picker appears before discovery, typing `dai` filters to `daily`, and selecting it bypasses provider/model discovery and does not show another alias field. Repeat through “Select a new provider and model…”, choose the provider/model already stored as `daily`, and confirm the CLI reports that existing alias, suggests `--alias daily`, and does not show the alias field. Then verify deterministic non-interactive reuse from another directory:
 
 ```bash
 cd /

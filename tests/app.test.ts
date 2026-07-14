@@ -223,6 +223,76 @@ describe("one-shot application", () => {
     ]);
   });
 
+  test("suggests an existing alias instead of offering to save the same target again", async () => {
+    const inputMessages: string[] = [];
+    let saves = 0;
+    const app = dependencies({
+      args: ["--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      prompter: prompts({
+        choices: [false, "ollama", "qwen"],
+        names: ["duplicate"],
+        inputMessages,
+      }),
+      loadAliases: async () => ({
+        version: 1,
+        aliases: {
+          zebra: { provider: "ollama", model: "qwen" },
+          Daily: { provider: "ollama", model: "qwen" },
+        },
+      }),
+      saveAlias: async () => {
+        saves += 1;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(inputMessages).toEqual([]);
+    expect(saves).toBe(0);
+    expect(app.stderr.text()).toContain(
+      "◆ Ollama · qwen is already saved as alias Daily\n  Next time, use --alias Daily\n",
+    );
+  });
+
+  test("suggests an existing alias for a provider-default target", async () => {
+    const inputMessages: string[] = [];
+    let saves = 0;
+    const app = dependencies({
+      args: ["--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      runtime: runtime({
+        providers: ["claude-cli"],
+        listModels: async () => [],
+      }),
+      prompter: prompts({
+        choices: [false, "claude-cli", false],
+        names: ["duplicate"],
+        inputMessages,
+      }),
+      loadAliases: async () => ({
+        version: 1,
+        aliases: { quick: { provider: "claude-cli", model: null } },
+      }),
+      saveAlias: async () => {
+        saves += 1;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(inputMessages).toEqual([]);
+    expect(saves).toBe(0);
+    expect(app.stderr.text()).toContain(
+      "◆ Claude CLI · provider default is already saved as alias quick\n"
+      + "  Next time, use --alias quick\n",
+    );
+  });
+
   test("returns 130 when the alias picker is cancelled", async () => {
     const app = dependencies({
       args: ["--input", "hello"],

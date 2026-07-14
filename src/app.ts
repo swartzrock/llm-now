@@ -27,6 +27,7 @@ import {
   formatSelection,
   selectAliasOrFresh,
   selectProviderAndModel,
+  sortPromptOptions,
   stripTerminalSequences,
   type SearchablePrompter,
 } from "./prompts.ts";
@@ -62,6 +63,7 @@ export interface ApplicationDependencies {
 interface ResolvedSelection {
   selection: AliasRecord;
   named: boolean;
+  existingAlias?: string;
 }
 
 function recognizedCredentialValues(env: ByokEnvironment): string[] {
@@ -202,12 +204,19 @@ async function resolveSelection(
     prompter: deps.prompter,
     diagnostic,
   });
-  return result.kind === "selected"
-    ? {
-        selection: { provider: result.provider, model: result.model },
-        named: false,
-      }
-    : result.exitCode;
+  if (result.kind !== "selected") return result.exitCode;
+
+  const resolved = { provider: result.provider, model: result.model };
+  const existingAlias = sortPromptOptions(Object.entries(aliases)
+    .filter(([, candidate]) =>
+      candidate.provider === resolved.provider && candidate.model === resolved.model
+    )
+    .map(([alias]) => ({ value: alias, label: alias })))[0]?.value;
+  return {
+    selection: resolved,
+    named: false,
+    existingAlias: typeof existingAlias === "string" ? existingAlias : undefined,
+  };
 }
 
 async function offerAliasSave(
@@ -291,7 +300,14 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     await writeResponse(deps.stdout, response);
 
     if (interactive) writeInteractiveBoundary(deps.stderr, response);
-    if (interactive && !selection.named) {
+    if (interactive && selection.existingAlias !== undefined) {
+      const colors = createTerminalColors(deps.stderr, deps.env);
+      const target = formatSelection(selection.selection);
+      deps.stderr.write(colors.green(
+        `◆ ${target} is already saved as alias ${selection.existingAlias}\n`
+        + `  Next time, use --alias ${selection.existingAlias}\n`,
+      ));
+    } else if (interactive && !selection.named) {
       if (!(await offerAliasSave(deps, selection.selection, diagnostic))) return 1;
     }
     return 0;
