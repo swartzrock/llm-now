@@ -294,6 +294,24 @@ describe("one-shot application", () => {
     );
   });
 
+  test("renders the existing-alias command in white", async () => {
+    const app = dependencies({
+      args: ["--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({ choices: [false, "ollama", "qwen"] }),
+      loadAliases: async () => ({
+        version: 1,
+        aliases: { Daily: { provider: "ollama", model: "qwen" } },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stderr.text()).toContain(
+      "\u001b[37mllm-now Daily --input \"<prompt>\"\u001b[39m",
+    );
+  });
+
   test("returns 130 when the alias picker is cancelled", async () => {
     const app = dependencies({
       args: ["--input", "hello"],

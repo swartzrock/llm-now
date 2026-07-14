@@ -303,10 +303,14 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     if (interactive && selection.existingAlias !== undefined) {
       const colors = createTerminalColors(deps.stderr, deps.env);
       const target = formatSelection(selection.selection);
-      deps.stderr.write(colors.green(
-        `◆ ${target} is already saved as alias ${selection.existingAlias}\n`
-        + `  Next time, use llm-now ${selection.existingAlias} --input "<prompt>"\n`,
-      ));
+      deps.stderr.write(
+        colors.green(
+          `◆ ${target} is already saved as alias ${selection.existingAlias}\n`
+          + "  Next time, use ",
+        )
+        + colors.white(`llm-now ${selection.existingAlias} --input "<prompt>"`)
+        + "\n",
+      );
     } else if (interactive && !selection.named) {
       if (!(await offerAliasSave(deps, selection.selection, diagnostic))) return 1;
     }
