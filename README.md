@@ -21,14 +21,16 @@ The repository builds and tests self-contained archives for macOS x64/ARM64, gli
 
 Homebrew and Chocolatey integration is intentionally deferred. A custom Homebrew tap and a Chocolatey package may be added in a future version if adoption justifies their ongoing maintenance; neither package manager is part of the current CI or release workflow.
 
-Release candidates are started manually with the `Release candidate` GitHub Actions workflow and an existing `v<package-version>` tag reachable from `main`. Its default `publish: false` path builds unsigned artifacts without publishing anything. The `publish: true` path additionally requires reviewer approval for both protected environments:
+Release candidates are started manually with the `Release candidate` GitHub Actions workflow and an existing `v<package-version>` tag reachable from `main`. Its default `publish: false` path builds unsigned artifacts for every supported target without publishing anything. The `publish: true` path signs, notarizes, and publishes only the macOS x64 and ARM64 archives. Linux and Windows remain CI-covered but are not public release assets yet. Publication uses two protected GitHub environments:
 
-- `release-signing`: Apple signing identity, base64 PKCS#12 certificate and password, notarization Apple ID/team/app password, plus a base64 Windows PFX certificate and password
-- `release-publication`: final approval to create the GitHub Release after native signing and asset validation pass
+- `release-signing`: stores the Apple signing identity, base64 PKCS#12 certificate and password, and notarization Apple ID/team/app password. A required reviewer gates the signing jobs but cannot view the environment secrets.
+- `release-publication`: stores no signing credentials; it provides a separate final approval before creating the GitHub Release after macOS signing and asset validation pass.
+
+Environment secrets cannot be read back from GitHub after they are saved. Approval allows the protected workflow job to use them on its ephemeral GitHub-hosted runner, so branch protection and review of release-workflow changes remain part of the signing-key security boundary. For both environments, set **Deployment branches and tags** to **Selected branches and tags**, allow only the `main` branch, and disable administrator bypass when that option is available. The workflow also rejects dispatches whose workflow ref is not `main`, but the environment rule is the security boundary because a branch can modify its own workflow.
 
 The macOS CI executable is ad-hoc signed so its code signature is structurally valid, but an unsigned `publish: false` artifact is not Apple-notarized. After verifying its checksum, macOS testers must remove browser quarantine as described in the [manual testing guide](docs/manual-testing.md). A `publish: true` release must pass Gatekeeper without that workaround.
 
-The repository owner must configure those environments with required reviewers and protect release tags from mutation. Every release job checks out the commit SHA established by the initial tag/version/main-ancestry gate, and publication rechecks that the tag still resolves to that SHA. Missing credentials fail the authorized signing job with the missing secret's name; they do not weaken pull-request verification or publish partial assets.
+The repository owner must configure those environments with required reviewers and protect release tags from mutation. Every release job checks out the commit SHA established by the initial tag/version/main-ancestry gate, and publication rechecks that the tag still resolves to that SHA. Publication fails rather than updating an existing GitHub Release, preventing stale Windows or Linux assets from remaining attached to a Mac-only release. Missing Apple credentials fail the authorized signing job with the missing secret's name; they do not weaken pull-request verification or publish partial assets.
 
 ## Usage
 

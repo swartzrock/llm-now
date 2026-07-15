@@ -79,6 +79,38 @@ describe("native release build", () => {
     }
   });
 
+  test("assembles a selected release target set", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".tmp-build-tests-"));
+    temporaryDirectories.push(root);
+    const input = join(root, "input");
+    const output = join(root, "output");
+    const macosTargets = RELEASE_TARGETS.filter((target) => target.id.startsWith("macos-"));
+    for (const target of macosTargets) {
+      await mkdir(join(input, target.id), { recursive: true });
+      await Bun.write(
+        join(input, target.id, archiveName("0.1.0", target)),
+        createExecutableArchive(target.executable, Uint8Array.from([target.id.length]), testArchiveMtime),
+      );
+    }
+
+    await assembleReleaseAssets(input, output, ["macos-x64", "macos-arm64"]);
+    const manifest = await Bun.file(join(output, "SHA256SUMS")).text();
+    expect(manifest.trim().split("\n")).toHaveLength(2);
+    for (const target of macosTargets) {
+      expect(await Bun.file(join(output, archiveName("0.1.0", target))).exists()).toBe(true);
+    }
+
+    const windowsTarget = RELEASE_TARGETS.find((target) => target.id === "windows-x64")!;
+    await mkdir(join(input, windowsTarget.id), { recursive: true });
+    await Bun.write(
+      join(input, windowsTarget.id, archiveName("0.1.0", windowsTarget)),
+      createExecutableArchive(windowsTarget.executable, Uint8Array.of(1), testArchiveMtime),
+    );
+    await expect(
+      assembleReleaseAssets(input, output, ["macos-x64", "macos-arm64"]),
+    ).rejects.toThrow("release archive set mismatch");
+  });
+
   test("keeps the Bun event loop available while a child calls a local fixture", async () => {
     const server = Bun.serve({ port: 0, fetch: () => new Response("fixture-ok") });
     try {

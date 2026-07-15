@@ -362,11 +362,13 @@ The macOS executable must have a valid ad-hoc signature, but it is not trusted b
 
 Run only when publication is explicitly authorized. Confirm that:
 
-- macOS executables pass `codesign --verify` and `spctl --assess`;
-- Windows reports a valid Authenticode signature;
+- both macOS executables pass `codesign --verify` and `spctl --assess`;
+- the GitHub Release contains only the macOS x64 and ARM64 archives plus `SHA256SUMS`;
 - GitHub Release assets match `SHA256SUMS`;
 - browser-downloaded macOS artifacts pass Gatekeeper without manual quarantine removal; and
-- each downloaded executable passes `--help` and `--version` on a clean target machine.
+- both downloaded executables pass `--help` and `--version` on a clean target machine.
+
+Linux and Windows remain part of CI and unsigned release-candidate testing, but are deferred from public distribution until their release paths are authorized.
 
 ## Automation-backed coverage
 
