@@ -34,10 +34,21 @@ export async function validateArchives(directory: string): Promise<void> {
   }
 }
 
-export async function assembleReleaseAssets(input: string, output: string): Promise<void> {
+export async function assembleReleaseAssets(
+  input: string,
+  output: string,
+  targetIds?: readonly string[],
+): Promise<void> {
+  const selectedTargetIds = targetIds ?? RELEASE_TARGETS.map((target) => target.id);
+  const targets = selectedTargetIds.map((id) => {
+    const target = RELEASE_TARGETS.find((candidate) => candidate.id === id);
+    if (!target) throw new Error(`unknown release target: ${id}`);
+    return target;
+  });
+  if (new Set(selectedTargetIds).size !== selectedTargetIds.length) throw new Error("duplicate release target");
   const files = await zipFiles(input);
   const actualNames = files.map((path) => basename(path)).sort();
-  const expectedNames = RELEASE_TARGETS.map((target) => archiveName(packageMetadata.version, target)).sort();
+  const expectedNames = targets.map((target) => archiveName(packageMetadata.version, target)).sort();
   if (new Set(actualNames).size !== expectedNames.length || actualNames.join("\n") !== expectedNames.join("\n")) {
     throw new Error(`release archive set mismatch: expected ${expectedNames.join(", ")}; received ${actualNames.join(", ")}`);
   }
@@ -47,7 +58,7 @@ export async function assembleReleaseAssets(input: string, output: string): Prom
   for (const path of files) {
     const name = basename(path);
     const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
-    const target = RELEASE_TARGETS.find(
+    const target = targets.find(
       (candidate) => archiveName(packageMetadata.version, candidate) === name,
     )!;
     const entry = extractExecutableArchive(bytes, path);
@@ -185,9 +196,11 @@ async function smoke(archivePath: string): Promise<void> {
 async function main(): Promise<void> {
   const [command, ...args] = Bun.argv.slice(2);
   if (command === "archives" && args[0]) await validateArchives(args[0]);
-  else if (command === "assemble" && args[0] && args[1]) await assembleReleaseAssets(args[0], args[1]);
+  else if (command === "assemble" && args[0] && args[1]) {
+    await assembleReleaseAssets(args[0], args[1], args.length > 2 ? args.slice(2) : undefined);
+  }
   else if (command === "smoke" && args[0]) await smoke(args[0]);
-  else throw new Error("usage: release-validate <archives DIR | assemble INPUT OUTPUT | smoke ARCHIVE>");
+  else throw new Error("usage: release-validate <archives DIR | assemble INPUT OUTPUT [TARGET ...] | smoke ARCHIVE>");
 }
 
 if (import.meta.main) await main();

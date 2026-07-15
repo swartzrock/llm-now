@@ -7,6 +7,7 @@ const ciWorkflow = await Bun.file(new URL("../.github/workflows/ci.yml", import.
 
 describe("release workflow policy", () => {
   test("pins downstream checkouts to the validated commit", () => {
+    expect(releaseWorkflow).toContain('test "$GITHUB_REF" = "refs/heads/main"');
     const refs = [...releaseWorkflow.matchAll(/^\s+ref:\s+(.+)$/gm)].map((match) => match[1]);
     expect(refs.filter((ref) => ref === "${{ inputs.tag }}")).toHaveLength(1);
     expect(refs.slice(1).every((ref) => ref === "${{ needs.validate-ref.outputs.release-sha }}"))
@@ -49,7 +50,26 @@ describe("release workflow policy", () => {
   test("stamps native and repacked archives with the source commit time", () => {
     const sourceDateStep = 'echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)"';
     expect(ciWorkflow.split(sourceDateStep)).toHaveLength(2);
-    expect(releaseWorkflow.split(sourceDateStep)).toHaveLength(4);
+    expect(releaseWorkflow.split(sourceDateStep)).toHaveLength(3);
+  });
+
+  test("publishes only signed macOS archives", () => {
+    expect(releaseWorkflow).not.toContain("\n  sign-windows:");
+    expect(releaseWorkflow).not.toContain("\n  promote-linux:");
+    expect(releaseWorkflow).not.toContain("WINDOWS_CERTIFICATE_PFX_BASE64");
+    expect(releaseWorkflow).not.toContain("WINDOWS_CERTIFICATE_PASSWORD");
+    expect(releaseWorkflow.toLowerCase()).not.toContain("signtool");
+    expect(releaseWorkflow).toContain(
+      `target: \${{ fromJSON(inputs.publish && '["macos-x64","macos-arm64"]' || `,
+    );
+    expect(releaseWorkflow).toContain("needs: [sign-macos, validate-ref]");
+    expect(releaseWorkflow).toContain("pattern: release-macos-*");
+    expect(releaseWorkflow).toContain(
+      "bun scripts/release-validate.ts assemble .release-artifacts dist macos-x64 macos-arm64",
+    );
+    expect(releaseWorkflow).toContain("https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG");
+    expect(releaseWorkflow).toContain("404) ;;");
+    expect(releaseWorkflow).toContain("Release $TAG already exists");
   });
 
   test("defers package-manager integration outside GitHub Actions", () => {
