@@ -5,6 +5,7 @@ import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import {
   createSearchablePrompter,
   createTerminalColors,
+  formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
   selectProviderAndModel,
   type PromptOption,
@@ -79,6 +80,24 @@ describe("terminal provider and model selection", () => {
     expect(diagnostics).toEqual([]);
   });
 
+  test("preserves the established Gemini label after runtime metadata removal", async () => {
+    const prompter = choices("google", "gemini-2.5-pro");
+
+    await selectProviderAndModel({
+      runtime: gateway({
+        providers: ["google"],
+        models: { google: [{ id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" }] },
+      }).value,
+      prompter,
+      diagnostic: () => {},
+    });
+
+    expect(prompter.seen[0]?.[0]?.label).toBe("Gemini");
+    expect(formatSelection({ provider: "google", model: "gemini-2.5-pro" })).toBe(
+      "Gemini · gemini-2.5-pro",
+    );
+  });
+
   test("empty discovery emits every required checked state and next step", async () => {
     const diagnostics: string[] = [];
     const result = await selectProviderAndModel({
@@ -93,8 +112,19 @@ describe("terminal provider and model selection", () => {
     expect(NO_PROVIDER_DIAGNOSTIC).toContain("127.0.0.1:1234");
     expect(NO_PROVIDER_DIAGNOSTIC).toContain("codex");
     expect(NO_PROVIDER_DIAGNOSTIC).toContain("claude");
-    expect(NO_PROVIDER_DIAGNOSTIC).toContain("Anthropic");
-    expect(NO_PROVIDER_DIAGNOSTIC).toContain("OpenRouter");
+    for (const provider of [
+      "Anthropic",
+      "OpenAI",
+      "Google",
+      "xAI",
+      "OpenRouter",
+      "Groq",
+      "Mistral",
+      "DeepSeek",
+      "DeepInfra",
+    ]) {
+      expect(NO_PROVIDER_DIAGNOSTIC).toContain(provider);
+    }
     expect(NO_PROVIDER_DIAGNOSTIC).toContain("without printing values");
   });
 

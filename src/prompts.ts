@@ -1,5 +1,4 @@
 import {
-  byokProviderDefinition,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
 import {
@@ -16,7 +15,27 @@ import type { RuntimeGateway } from "./runtime.ts";
 export const NO_PROVIDER_DIAGNOSTIC = `llm-now: discovery: no available provider found.
 Local servers: checked Ollama on 127.0.0.1:11434 and LM Studio on 127.0.0.1:1234. Start an already-installed server with a model, then retry.
 Authenticated AI CLIs: checked codex and claude on PATH. Install and authenticate a supported CLI separately, then retry.
-Environment-backed cloud providers: checked recognized Anthropic, OpenAI, Google, xAI, and OpenRouter key variables without printing values. Export a supported provider key in the shell, then retry.`;
+Environment-backed cloud providers: checked recognized Anthropic, OpenAI, Google, xAI, OpenRouter, Groq, Mistral, DeepSeek, and DeepInfra key variables without printing values. Export a supported provider key in the shell, then retry.`;
+
+const PROVIDER_LABELS = {
+  ollama: "Ollama",
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  google: "Gemini",
+  xai: "xAI",
+  openrouter: "OpenRouter",
+  groq: "Groq",
+  mistral: "Mistral",
+  deepseek: "DeepSeek",
+  deepinfra: "DeepInfra",
+  "lm-studio": "LM Studio",
+  "codex-cli": "Codex CLI",
+  "claude-cli": "Claude CLI",
+} satisfies Record<ByokProviderId, string>;
+
+function providerLabel(provider: ByokProviderId): string {
+  return PROVIDER_LABELS[provider];
+}
 
 export type PromptValue = string | number | boolean;
 
@@ -97,9 +116,7 @@ export function sanitizePromptText(text: string): string {
 }
 
 export function formatSelection(selection: AliasRecord): string {
-  const provider = sanitizePromptText(
-    byokProviderDefinition(selection.provider).shortLabel,
-  );
+  const provider = providerLabel(selection.provider);
   const model = selection.model === null
     ? "provider default"
     : sanitizePromptText(selection.model);
@@ -163,7 +180,7 @@ export async function selectProviderAndModel(
   while (providers.length > 0) {
     const providerOptions = sortPromptOptions(providers.map((provider) => ({
       value: provider,
-      label: sanitizePromptText(byokProviderDefinition(provider).shortLabel),
+      label: providerLabel(provider),
     })));
     const providerValue = selectedString(
       await deps.prompter.select("Choose a provider", providerOptions),

@@ -1,5 +1,5 @@
 import {
-  BYOK_PROVIDER_API_KEY_ENV_VARS,
+  BYOK_API_KEY_ENV_VARS,
   type ByokEnvironment,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
@@ -68,8 +68,7 @@ interface ResolvedSelection {
 
 function recognizedCredentialValues(env: ByokEnvironment): string[] {
   return [...new Set(
-    Object.values(BYOK_PROVIDER_API_KEY_ENV_VARS)
-      .flat()
+    BYOK_API_KEY_ENV_VARS
       .map((name) => env[name])
       .filter((value): value is string => Boolean(value)),
   )].sort((left, right) => right.length - left.length);

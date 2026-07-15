@@ -1,27 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  ByokEnvironment,
-  ByokModelOption,
-  ByokProviderConfig,
-  ByokProviderId,
-  ByokProviderRuntime,
+import {
+  BYOK_API_KEY_ENV_VARS,
+  BYOK_PROVIDER_IDS,
+  type ByokEnvironment,
+  type ByokModelOption,
+  type ByokProviderConfig,
+  type ByokProviderId,
+  type ByokProviderRuntime,
 } from "@swartzrock/byok-runtime";
 import {
   RuntimeStageError,
   createRuntimeGateway,
 } from "../src/runtime.ts";
 
-const providerIds: ByokProviderId[] = [
-  "ollama",
-  "lm-studio",
-  "codex-cli",
-  "claude-cli",
-  "anthropic",
-  "openai",
-  "google",
-  "xai",
-  "openrouter",
-];
+const providerIds: ByokProviderId[] = [...BYOK_PROVIDER_IDS];
 
 function runtime(overrides: Partial<ByokProviderRuntime> = {}): ByokProviderRuntime {
   return {
@@ -65,27 +57,43 @@ describe("runtime gateway", () => {
     for (const provider of providerIds) await gateway.listModels(provider);
 
     expect(configs).toEqual([
-      { provider: "ollama", model: "" },
-      { provider: "lm-studio", model: "" },
-      { provider: "codex-cli", command: "codex" },
-      { provider: "claude-cli", command: "claude" },
       { provider: "anthropic", credential: { source: "env", env }, model: "" },
       { provider: "openai", credential: { source: "env", env }, model: "" },
       { provider: "google", credential: { source: "env", env }, model: "" },
       { provider: "xai", credential: { source: "env", env }, model: "" },
       { provider: "openrouter", credential: { source: "env", env }, model: "" },
+      { provider: "groq", credential: { source: "env", env }, model: "" },
+      { provider: "mistral", credential: { source: "env", env }, model: "" },
+      { provider: "deepseek", credential: { source: "env", env }, model: "" },
+      { provider: "deepinfra", credential: { source: "env", env }, model: "" },
+      { provider: "ollama", model: "" },
+      { provider: "lm-studio", model: "" },
+      { provider: "codex-cli", command: "codex" },
+      { provider: "claude-cli", command: "claude" },
     ]);
   });
 
   test("retains the failing stage and redacts environment values", async () => {
-    const secret = "credential-from-environment";
+    const credentials = BYOK_API_KEY_ENV_VARS.map((name, index) => ({
+      name,
+      secret: `${name}-secret-${index}`,
+    }));
+    const secrets = credentials.map(({ secret }) => secret);
     const ordinaryEnvironmentValue = "/custom/bin";
+    const env = {
+      ...Object.fromEntries(
+        credentials.map(({ name, secret }) => [name, secret]),
+      ),
+      PATH: ordinaryEnvironmentValue,
+    };
     const gateway = createRuntimeGateway({
-      env: { OPENAI_API_KEY: secret, PATH: ordinaryEnvironmentValue },
+      env,
       createProvider: () =>
         runtime({
           listModels: async () => {
-            throw new Error(`upstream rejected ${secret} from ${ordinaryEnvironmentValue}`);
+            throw new Error(
+              `upstream rejected ${secrets.join(" ")} from ${ordinaryEnvironmentValue}`,
+            );
           },
         }),
     });
@@ -96,7 +104,7 @@ describe("runtime gateway", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(RuntimeStageError);
       expect(error).toMatchObject({ stage: "model-list", provider: "openai" });
-      expect(String(error)).not.toContain(secret);
+      for (const secret of secrets) expect(String(error)).not.toContain(secret);
       expect(String(error)).toContain("[REDACTED]");
       expect(String(error)).toContain(ordinaryEnvironmentValue);
     }

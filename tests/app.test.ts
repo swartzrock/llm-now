@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { ByokProviderId } from "@swartzrock/byok-runtime";
+import {
+  BYOK_API_KEY_ENV_VARS,
+  type ByokProviderId,
+} from "@swartzrock/byok-runtime";
 import { AliasStoreError, type SaveAliasResult } from "../src/aliases.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import { runApplication, type ApplicationPrompter } from "../src/app.ts";
@@ -567,11 +570,18 @@ describe("one-shot application", () => {
   });
 
   test("sanitizes and bounds hostile diagnostic detail without leaking credentials", async () => {
-    const secret = "super-secret-value";
-    const hostile = `bad\r\n\u001b[31m${secret}\u0000${"x".repeat(2_000)}`;
+    const credentials = BYOK_API_KEY_ENV_VARS.map((name, index) => ({
+      name,
+      secret: `${name}-secret-${index}`,
+    }));
+    const secrets = credentials.map(({ secret }) => secret);
+    const env = Object.fromEntries(
+      credentials.map(({ name, secret }) => [name, secret]),
+    );
+    const hostile = `bad\r\n\u001b[31m${secrets.join(" ")}\u0000${"x".repeat(2_000)}`;
     const app = dependencies({
       args: ["--input", "hello", "--provider", "openai", "--model", "gpt"],
-      env: { OPENAI_API_KEY: secret },
+      env,
       runtime: runtime({
         generate: async () => {
           throw new RuntimeStageError("generation", "openai", hostile);
@@ -581,7 +591,7 @@ describe("one-shot application", () => {
 
     expect(await runApplication(app.value)).toBe(1);
     expect(app.stdout.text()).toBe("");
-    expect(app.stderr.text()).not.toContain(secret);
+    for (const secret of secrets) expect(app.stderr.text()).not.toContain(secret);
     expect(app.stderr.text()).not.toContain("\u001b");
     expect(app.stderr.text()).not.toContain("\u0000");
     expect(app.stderr.text()).not.toContain("\r");

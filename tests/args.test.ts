@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BYOK_API_KEY_ENV_VARS } from "@swartzrock/byok-runtime";
 import {
   HELP_TEXT,
   UsageError,
@@ -212,6 +213,14 @@ describe("arguments and input", () => {
     expect(() => parseArguments(["daily", "--version"])).toThrow(UsageError);
     expect(HELP_TEXT).toContain("llm-now <alias> --input <text>");
     expect(HELP_TEXT).toContain("printf <text> | llm-now <alias>");
+  });
+
+  test("lists the runtime-supported API key environment variables in help", () => {
+    const rows = BYOK_API_KEY_ENV_VARS.map((name) => `  ${name}`).join("\n");
+
+    expect(HELP_TEXT).toContain(
+      `Supported API keys:\n  Environment variable\n  --------------------\n${rows}\n\nOptions:`,
+    );
   });
 
   test("rejects test-only runtime smoke arguments", () => {

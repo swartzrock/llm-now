@@ -1,5 +1,11 @@
-import { isByokProviderId, type ByokProviderId } from "@swartzrock/byok-runtime";
+import {
+  BYOK_API_KEY_ENV_VARS,
+  isByokProviderId,
+  type ByokProviderId,
+} from "@swartzrock/byok-runtime";
 import { parseArgs as parseNodeArgs } from "node:util";
+
+const API_KEY_TABLE_ROWS = BYOK_API_KEY_ENV_VARS.map((name) => `  ${name}`).join("\n");
 
 export const HELP_TEXT = `Usage:
   llm-now --input <text>
@@ -33,6 +39,11 @@ Output and diagnostics:
 Exit codes:
   0 success/help/version, 1 runtime/configuration failure, 2 invalid usage,
   130 alias/provider/model selection cancelled before generation.
+
+Supported API keys:
+  Environment variable
+  --------------------
+${API_KEY_TABLE_ROWS}
 
 Options:
   --input <text>       Prompt text
