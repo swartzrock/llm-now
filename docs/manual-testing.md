@@ -362,7 +362,7 @@ The macOS executable must have a valid ad-hoc signature, but it is not trusted b
 
 Run only when publication is explicitly authorized. Confirm that:
 
-- both macOS executables pass `codesign --verify` and `spctl --assess`;
+- both macOS executables pass `codesign --verify` and `codesign -vvvv -R="notarized" --check-notarization`;
 - the GitHub Release contains only the macOS x64 and ARM64 archives plus `SHA256SUMS`;
 - GitHub Release assets match `SHA256SUMS`;
 - browser-downloaded macOS artifacts pass Gatekeeper without manual quarantine removal; and

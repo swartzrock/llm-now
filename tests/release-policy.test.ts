@@ -72,6 +72,13 @@ describe("release workflow policy", () => {
     expect(releaseWorkflow).toContain("Release $TAG already exists");
   });
 
+  test("checks notarization for standalone macOS executables", () => {
+    expect(releaseWorkflow).not.toMatch(/\bspctl\b[^\n]*signed\/llm-now/);
+    expect(releaseWorkflow).toContain(
+      'codesign -vvvv -R="notarized" --check-notarization signed/llm-now',
+    );
+  });
+
   test("defers package-manager integration outside GitHub Actions", () => {
     for (const workflow of [ciWorkflow, releaseWorkflow]) {
       expect(workflow.toLowerCase()).not.toContain("homebrew");
