@@ -88,6 +88,19 @@ describe("release workflow policy", () => {
     );
   });
 
+  test("authenticates the publication tag refresh without persisting checkout credentials", () => {
+    const publishJob = releaseWorkflow.slice(releaseWorkflow.indexOf("\n  publish:"));
+    expect(publishJob).toContain("persist-credentials: false");
+    expect(publishJob).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(publishJob).toContain(
+      `GIT_AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w 0)"`,
+    );
+    expect(publishJob).toContain(
+      'git --config-env=http.https://github.com/.extraheader=GIT_AUTH_HEADER fetch origin "+refs/tags/${TAG}:refs/tags/${TAG}"',
+    );
+    expect(publishJob).not.toContain("https://x-access-token:");
+  });
+
   test("defers package-manager integration outside GitHub Actions", () => {
     for (const workflow of [ciWorkflow, releaseWorkflow]) {
       expect(workflow.toLowerCase()).not.toContain("homebrew");
