@@ -207,10 +207,13 @@ jobs:
           persist-credentials: false
       - shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
           RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
         run: |
-          git fetch origin "+refs/tags/${TAG}:refs/tags/${TAG}"
+          GIT_AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w 0)"
+          export GIT_AUTH_HEADER
+          git --config-env=http.https://github.com/.extraheader=GIT_AUTH_HEADER fetch origin "+refs/tags/${TAG}:refs/tags/${TAG}"
           test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA"
       - uses: actions/download-artifact@v8.0.1
         with:
