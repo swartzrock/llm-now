@@ -233,11 +233,8 @@ jobs:
             200) echo "Release $TAG already exists; remove it explicitly before publishing replacement assets" >&2; exit 1 ;;
             *) echo "Could not verify whether release $TAG exists (HTTP $status)" >&2; exit 1 ;;
           esac
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          tag_name: ${{ inputs.tag }}
-          target_commitish: ${{ needs.validate-ref.outputs.release-sha }}
-          files: |
-            dist/*.zip
-            dist/SHA256SUMS
-          fail_on_unmatched_files: true
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release create "$TAG" dist/*.zip dist/SHA256SUMS --verify-tag --notes-from-tag --title "$TAG"

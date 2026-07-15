@@ -13,7 +13,9 @@ describe("release workflow policy", () => {
     expect(refs.slice(1).every((ref) => ref === "${{ needs.validate-ref.outputs.release-sha }}"))
       .toBe(true);
     expect(releaseWorkflow).toContain('git rev-parse "refs/tags/${TAG}^{commit}"');
-    expect(releaseWorkflow).toContain("target_commitish: ${{ needs.validate-ref.outputs.release-sha }}");
+    expect(releaseWorkflow).toContain('gh release create "$TAG"');
+    expect(releaseWorkflow).toContain("--verify-tag");
+    expect(releaseWorkflow).not.toContain("target_commitish:");
   });
 
   test("does not run repository scripts in steps holding signing secrets", () => {
