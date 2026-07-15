@@ -158,7 +158,7 @@ jobs:
           done
           archive="$(find .release-artifacts -name '*.zip' -type f -print -quit)"
           xcrun notarytool submit "$archive" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-          spctl --assess --type execute --verbose=2 signed/llm-now
+          codesign -vvvv -R="notarized" --check-notarization signed/llm-now
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-${{ matrix.target }}
