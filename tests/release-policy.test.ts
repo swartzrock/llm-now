@@ -79,6 +79,15 @@ describe("release workflow policy", () => {
     );
   });
 
+  test("uploads signed archives from the hidden staging directory", () => {
+    expect(releaseWorkflow).toContain(
+      `name: release-\${{ matrix.target }}
+          path: .release-artifacts/*.zip
+          if-no-files-found: error
+          include-hidden-files: true`,
+    );
+  });
+
   test("defers package-manager integration outside GitHub Actions", () => {
     for (const workflow of [ciWorkflow, releaseWorkflow]) {
       expect(workflow.toLowerCase()).not.toContain("homebrew");

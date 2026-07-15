@@ -164,6 +164,7 @@ jobs:
           name: release-${{ matrix.target }}
           path: .release-artifacts/*.zip
           if-no-files-found: error
+          include-hidden-files: true
 
   signed-assets:
     if: ${{ inputs.publish }}
