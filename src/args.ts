@@ -3,55 +3,48 @@ import {
   isByokProviderId,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
+import pc from "picocolors";
 import { parseArgs as parseNodeArgs } from "node:util";
 
-const API_KEY_TABLE_ROWS = BYOK_API_KEY_ENV_VARS.map((name) => `  ${name}`).join("\n");
+type TerminalColors = ReturnType<typeof pc.createColors>;
 
-export const HELP_TEXT = `Usage:
-  llm-now --input <text>
-  llm-now <alias> --input <text>
-  llm-now --input <text> --alias <name>
-  llm-now --input <text> --provider <provider> --model <model|default>
-  printf <text> | llm-now <alias>
-  printf <text> | llm-now --alias <name>
-  printf <text> | llm-now --provider <provider> --model <model|default>
+export function renderHelpText(
+  colors: TerminalColors,
+  credentialNames: readonly string[],
+): string {
+  const heading = (text: string) => colors.bold(colors.greenBright(text));
+  const literal = (text: string) => colors.bold(colors.cyanBright(text));
+  const metadata = (text: string) => colors.cyan(text);
+  const credentialRows = [...credentialNames]
+    .sort()
+    .map((name) => `  ${metadata(name)}`)
+    .join("\n");
 
-Selection:
-  Interactive calls offer saved aliases first, then provider and model choices.
-  Type in any interactive list to filter its sorted choices.
-  Non-interactive calls require an alias (positional or --alias) or both
-  --provider and --model.
-  --model default is supported only by codex-cli and claude-cli.
+  return `Send a prompt to a selected model.
 
-Input:
-  Supply exactly one source: --input or stdin.
+${heading("Usage:")}
+  ${literal("llm-now")} ${literal("--input")} ${metadata("<text>")}
+  ${literal("llm-now")} ${metadata("<alias>")} ${literal("--input")} ${metadata("<text>")}
+  ${literal("llm-now")} ${literal("--provider")} ${metadata("<id>")} ${literal("--model")} ${metadata("<id|default>")} ${literal("--input")} ${metadata("<text>")}
 
-Aliases:
-  Saved aliases contain only provider/model selection data.
-  After an unnamed interactive call, enter an alias name or press Enter to exit.
-  macOS/Linux: $XDG_CONFIG_HOME/llm-now/aliases.json or ~/.config/llm-now/aliases.json.
-  Windows: %APPDATA%\\llm-now\\aliases.json or the roaming directory under %USERPROFILE%.
+${heading("Rules:")}
+  Input comes from exactly one of ${literal("--input")} or stdin.
+  Omit selection for interactive choice; otherwise use an alias or provider/model.
+  Model "default" is available only for codex-cli and claude-cli.
 
-Output and diagnostics:
-  Successful response text is written byte-for-byte to stdout.
-  Interactive UI, output separation, and stage-labelled diagnostics use stderr.
+${heading("Options:")}
+  ${literal("--input")} ${metadata("<text>")}       Prompt text
+  ${literal("--alias")} ${metadata("<name>")}       Saved provider/model selection
+  ${literal("--provider")} ${metadata("<id>")}      Explicit provider
+  ${literal("--model")} ${metadata("<id>")}         Explicit model, or default for a supported CLI provider
+  ${literal("-h, --help")}           Show help
+  ${literal("--version")}            Show version
 
-Exit codes:
-  0 success/help/version, 1 runtime/configuration failure, 2 invalid usage,
-  130 alias/provider/model selection cancelled before generation.
+${heading("API key environment variables:")}
+${credentialRows}`;
+}
 
-Supported API keys:
-  Environment variable
-  --------------------
-${API_KEY_TABLE_ROWS}
-
-Options:
-  --input <text>       Prompt text
-  --alias <name>       Saved provider/model selection
-  --provider <id>      Explicit provider
-  --model <id>         Explicit model, or default for a supported CLI provider
-  -h, --help           Show help
-  --version            Show version`;
+export const HELP_TEXT = renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS);
 
 export class UsageError extends Error {
   readonly exitCode = 2;

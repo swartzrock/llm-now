@@ -4,9 +4,14 @@ import {
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
 import { AliasStoreError, type SaveAliasResult } from "../src/aliases.ts";
+import { HELP_TEXT } from "../src/args.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import { runApplication, type ApplicationPrompter } from "../src/app.ts";
-import type { PromptOption, PromptValue } from "../src/prompts.ts";
+import {
+  stripTerminalSequences,
+  type PromptOption,
+  type PromptValue,
+} from "../src/prompts.ts";
 
 function input(text = "", isTTY = false) {
   return {
@@ -86,6 +91,7 @@ function runtime(options: {
 function dependencies(options: {
   args: string[];
   stdin?: ReturnType<typeof input>;
+  stdoutTty?: boolean;
   stderrTty?: boolean;
   runtime?: ReturnType<typeof runtime>;
   prompter?: ApplicationPrompter;
@@ -100,7 +106,7 @@ function dependencies(options: {
   discoveryTimeoutMs?: number;
   modelListTimeoutMs?: number;
 }) {
-  const stdout = output();
+  const stdout = output(options.stdoutTty ?? false);
   const stderr = output(options.stderrTty ?? false);
   const selectedRuntime = options.runtime ?? runtime();
   return {
@@ -128,6 +134,91 @@ function dependencies(options: {
     },
   };
 }
+
+describe("help output", () => {
+  test("colors a capable stdout terminal and returns before aliases or runtime work", async () => {
+    const app = dependencies({
+      args: ["-h"],
+      stdoutTty: true,
+      loadAliases: async () => {
+        throw new Error("help must not load aliases");
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toContain("\u001b[");
+    expect(stripTerminalSequences(app.stdout.text())).toBe(`${HELP_TEXT}\n`);
+    expect(app.stderr.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("keeps non-TTY and capability-missing stdout byte-plain", async () => {
+    const nonTty = dependencies({ args: ["--help"], stdoutTty: false });
+
+    expect(await runApplication(nonTty.value)).toBe(0);
+    expect(nonTty.stdout.text()).toBe(`${HELP_TEXT}\n`);
+    expect(nonTty.stdout.text()).not.toContain("\u001b");
+    expect(nonTty.stderr.text()).toBe("");
+    expect(nonTty.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+
+    const missingCapability = dependencies({ args: ["--help"] });
+    const { isTTY: _isTTY, ...stdoutWithoutTty } = missingCapability.stdout;
+
+    expect(await runApplication({
+      ...missingCapability.value,
+      stdout: stdoutWithoutTty,
+    })).toBe(0);
+    expect(missingCapability.stdout.text()).toBe(`${HELP_TEXT}\n`);
+    expect(missingCapability.stdout.text()).not.toContain("\u001b");
+    expect(missingCapability.stderr.text()).toBe("");
+    expect(missingCapability.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("uses only stdout capability and honors every help color suppression", async () => {
+    const scenarios: Array<{
+      name: string;
+      stdoutTty: boolean;
+      stderrTty: boolean;
+      env: Record<string, string>;
+    }> = [
+      { name: "stderr-only TTY", stdoutTty: false, stderrTty: true, env: {} },
+      { name: "NO_COLOR", stdoutTty: true, stderrTty: false, env: { NO_COLOR: "1" } },
+      { name: "TERM=dumb", stdoutTty: true, stderrTty: false, env: { TERM: "dumb" } },
+      {
+        name: "FORCE_COLOR on non-TTY stdout",
+        stdoutTty: false,
+        stderrTty: false,
+        env: { FORCE_COLOR: "1" },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const app = dependencies({
+        args: ["--help"],
+        stdoutTty: scenario.stdoutTty,
+        stderrTty: scenario.stderrTty,
+        env: scenario.env,
+      });
+
+      expect(await runApplication(app.value), scenario.name).toBe(0);
+      expect(app.stdout.text(), scenario.name).toBe(`${HELP_TEXT}\n`);
+      expect(app.stdout.text(), scenario.name).not.toContain("\u001b");
+      expect(app.stderr.text(), scenario.name).toBe("");
+      expect(app.runtime.calls, scenario.name).toEqual({ discover: 0, list: 0, generate: 0 });
+    }
+  });
+
+  test("keeps combined help as usage failure without rendering or runtime work", async () => {
+    const app = dependencies({ args: ["--help", "--alias", "daily"], stdoutTty: true });
+
+    expect(await runApplication(app.value)).toBe(2);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toBe(
+      "usage: --help and --version must be used without other options.\n",
+    );
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+});
 
 describe("one-shot application", () => {
   test("offers sorted saved aliases first and bypasses discovery for the selected alias", async () => {
