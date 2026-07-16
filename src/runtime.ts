@@ -1,5 +1,5 @@
 import {
-  BYOK_PROVIDER_API_KEY_ENV_VARS,
+  BYOK_API_KEY_ENV_VARS,
   type ByokEnvironment,
   type ByokModelOption,
   type ByokProviderConfig,
@@ -70,6 +70,10 @@ function providerConfig(
     case "google":
     case "xai":
     case "openrouter":
+    case "groq":
+    case "mistral":
+    case "deepseek":
+    case "deepinfra":
       return {
         provider,
         credential: { source: "env", env },
@@ -83,9 +87,11 @@ function errorMessage(error: unknown): string {
 }
 
 function redact(message: string, env: ByokEnvironment): string {
-  const credentialNames = Object.values(BYOK_PROVIDER_API_KEY_ENV_VARS).flat();
-  const values = [...new Set(credentialNames.map((name) => env[name]).filter((value): value is string => Boolean(value)))]
-    .sort((left, right) => right.length - left.length);
+  const values = [...new Set(
+    BYOK_API_KEY_ENV_VARS
+      .map((name) => env[name])
+      .filter((value): value is string => Boolean(value)),
+  )].sort((left, right) => right.length - left.length);
   return values.reduce(
     (redacted, value) => redacted.replaceAll(value, "[REDACTED]"),
     message,

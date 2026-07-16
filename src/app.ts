@@ -1,8 +1,9 @@
 import {
-  BYOK_PROVIDER_API_KEY_ENV_VARS,
+  BYOK_API_KEY_ENV_VARS,
   type ByokEnvironment,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
+import pc from "picocolors";
 import type { Readable, Writable } from "node:stream";
 import {
   type AliasRecord,
@@ -14,9 +15,9 @@ import {
   saveAlias as saveStoredAlias,
 } from "./aliases.ts";
 import {
-  HELP_TEXT,
   UsageError,
   parseArguments,
+  renderHelpText,
   requireDeterministicSelection,
   type Selection,
 } from "./args.ts";
@@ -68,8 +69,7 @@ interface ResolvedSelection {
 
 function recognizedCredentialValues(env: ByokEnvironment): string[] {
   return [...new Set(
-    Object.values(BYOK_PROVIDER_API_KEY_ENV_VARS)
-      .flat()
+    BYOK_API_KEY_ENV_VARS
       .map((name) => env[name])
       .filter((value): value is string => Boolean(value)),
   )].sort((left, right) => right.length - left.length);
@@ -284,7 +284,12 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
   try {
     const parsed = parseArguments(deps.args);
     if (parsed.kind === "help") {
-      deps.stdout.write(`${HELP_TEXT}\n`);
+      const colors = pc.createColors(
+        deps.stdout.isTTY === true
+        && !deps.env.NO_COLOR
+        && deps.env.TERM !== "dumb",
+      );
+      deps.stdout.write(`${renderHelpText(colors, BYOK_API_KEY_ENV_VARS)}\n`);
       return 0;
     }
     if (parsed.kind === "version") {

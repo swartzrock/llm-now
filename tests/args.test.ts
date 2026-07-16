@@ -1,11 +1,47 @@
 import { describe, expect, test } from "bun:test";
+import { BYOK_API_KEY_ENV_VARS } from "@swartzrock/byok-runtime";
+import pc from "picocolors";
 import {
   HELP_TEXT,
   UsageError,
   parseArguments,
+  renderHelpText,
   requireDeterministicSelection,
 } from "../src/args.ts";
 import { isInteractive, resolvePrompt } from "../src/io.ts";
+import { stripTerminalSequences } from "../src/prompts.ts";
+
+const APPROVED_HELP_TEXT = `Send a prompt to a selected model.
+
+Usage:
+  llm-now --input <text>
+  llm-now <alias> --input <text>
+  llm-now --provider <id> --model <id|default> --input <text>
+
+Rules:
+  Input comes from exactly one of --input or stdin.
+  Omit selection for interactive choice; otherwise use an alias or provider/model.
+  Model "default" is available only for codex-cli and claude-cli.
+
+Options:
+  --input <text>       Prompt text
+  --alias <name>       Saved provider/model selection
+  --provider <id>      Explicit provider
+  --model <id>         Explicit model, or default for a supported CLI provider
+  -h, --help           Show help
+  --version            Show version
+
+API key environment variables:
+  ANTHROPIC_API_KEY
+  DEEPINFRA_TOKEN
+  DEEPSEEK_API_KEY
+  GEMINI_API_KEY
+  GOOGLE_API_KEY
+  GROQ_API_KEY
+  MISTRAL_API_KEY
+  OPENAI_API_KEY
+  OPENROUTER_API_KEY
+  XAI_API_KEY`;
 
 function input(text: string, isTTY = false) {
   return {
@@ -193,25 +229,66 @@ describe("arguments and input", () => {
     expect(isInteractive({ isTTY: true }, { isTTY: false })).toBe(false);
   });
 
-  test("help and version are stable standalone modes", () => {
+  test("help and version remain stable standalone modes", () => {
     expect(parseArguments(["--help"])).toEqual({ kind: "help" });
     expect(parseArguments(["--version"])).toEqual({ kind: "version" });
-    expect(HELP_TEXT).toContain("--alias");
-    expect(HELP_TEXT).toContain("--provider");
-    expect(HELP_TEXT).toContain("stdin");
-    expect(HELP_TEXT).toContain("offer saved aliases first");
-    expect(HELP_TEXT).toContain("filter its sorted choices");
-    expect(HELP_TEXT).toContain("press Enter to exit");
-    expect(HELP_TEXT).toContain("alias/provider/model selection cancelled");
-    expect(HELP_TEXT).toContain("XDG_CONFIG_HOME");
-    expect(HELP_TEXT).toContain("Exit codes:");
     expect(() => parseArguments(["--help", "--alias", "daily"])).toThrow(UsageError);
     expect(() => parseArguments(["--help", "daily"])).toThrow(UsageError);
     expect(() => parseArguments(["daily", "--help"])).toThrow(UsageError);
     expect(() => parseArguments(["--version", "daily"])).toThrow(UsageError);
     expect(() => parseArguments(["daily", "--version"])).toThrow(UsageError);
-    expect(HELP_TEXT).toContain("llm-now <alias> --input <text>");
-    expect(HELP_TEXT).toContain("printf <text> | llm-now <alias>");
+  });
+
+  test("renders the exact approved compact plain help", () => {
+    expect(HELP_TEXT).toBe(APPROVED_HELP_TEXT);
+    for (const rejectedCopy of [
+      "printf",
+      "Selection:",
+      "Input:",
+      "Aliases:",
+      "Output and diagnostics:",
+      "Exit codes:",
+      "XDG_CONFIG_HOME",
+    ]) {
+      expect(HELP_TEXT).not.toContain(rejectedCopy);
+    }
+  });
+
+  test("copies and ASCII-sorts credential names without mutating the input", () => {
+    const credentialNames = Object.freeze([
+      "ZETA_API_KEY",
+      "ALPHA_API_KEY",
+      "MIDDLE_TOKEN",
+    ]);
+    const originalOrder = [...credentialNames];
+    const rendered = renderHelpText(pc.createColors(false), credentialNames);
+
+    expect(credentialNames).toEqual(originalOrder);
+    expect(rendered).toContain(
+      `API key environment variables:\n  ALPHA_API_KEY\n  MIDDLE_TOKEN\n  ZETA_API_KEY`,
+    );
+    for (const name of credentialNames) {
+      expect(rendered.split(name)).toHaveLength(2);
+    }
+  });
+
+  test("lists every runtime-supported credential name exactly once", () => {
+    for (const name of BYOK_API_KEY_ENV_VARS) {
+      expect(HELP_TEXT.split(name)).toHaveLength(2);
+    }
+  });
+
+  test("applies semantic ANSI roles without changing the plain layout", () => {
+    const colors = pc.createColors(true);
+    const rendered = renderHelpText(colors, BYOK_API_KEY_ENV_VARS);
+
+    expect(rendered).toContain(colors.bold(colors.greenBright("Usage:")));
+    expect(rendered).toContain(colors.bold(colors.cyanBright("llm-now")));
+    expect(rendered).toContain(colors.bold(colors.cyanBright("--input")));
+    expect(rendered).toContain(colors.cyan("<text>"));
+    expect(rendered).toContain(colors.cyan("ANTHROPIC_API_KEY"));
+    expect(rendered).toContain("Prompt text");
+    expect(stripTerminalSequences(rendered)).toBe(HELP_TEXT);
   });
 
   test("rejects test-only runtime smoke arguments", () => {

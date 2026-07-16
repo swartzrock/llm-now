@@ -64,6 +64,17 @@ try {
       args: ["--help"],
       exitCode: 0,
       stdoutIncludes: "Usage:\n  llm-now --input <text>",
+      stdoutLandmarks: [
+        "Send a prompt to a selected model.",
+        "Usage:\n  llm-now --input <text>",
+        "Rules:\n  Input comes from exactly one of --input or stdin.",
+        "Options:\n  --input <text>       Prompt text",
+        "API key environment variables:\n  ANTHROPIC_API_KEY",
+        "  DEEPINFRA_TOKEN",
+        "  XAI_API_KEY",
+      ],
+      stdoutExcludes: "\u001b",
+      stdoutHasOneFinalNewline: true,
       stderr: "",
     },
     {
@@ -110,12 +121,25 @@ try {
     const stdoutMatches = "stdout" in smoke
       ? stdout === smoke.stdout
       : stdout.includes(smoke.stdoutIncludes);
+    let landmarkIndex = -1;
+    const landmarksMatch = !("stdoutLandmarks" in smoke)
+      || smoke.stdoutLandmarks.every((landmark) => {
+        landmarkIndex = stdout.indexOf(landmark, landmarkIndex + 1);
+        return landmarkIndex !== -1;
+      });
+    const stdoutExclusionMatches = !("stdoutExcludes" in smoke)
+      || !stdout.includes(smoke.stdoutExcludes);
+    const stdoutNewlineMatches = !("stdoutHasOneFinalNewline" in smoke)
+      || (stdout.endsWith("\n") && !stdout.endsWith("\n\n"));
     const stderrMatches = "stderr" in smoke
       ? stderr === smoke.stderr
       : stderr.includes(smoke.stderrIncludes);
     if (
       result.exitCode !== smoke.exitCode
       || !stdoutMatches
+      || !landmarksMatch
+      || !stdoutExclusionMatches
+      || !stdoutNewlineMatches
       || !stderrMatches
     ) {
       throw new Error(

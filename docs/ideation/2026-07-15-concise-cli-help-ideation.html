@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: Concise llm-now CLI help</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e14;
+      --panel: #121722;
+      --panel-strong: #171e2b;
+      --ink: #eef3fb;
+      --muted: #aab5c7;
+      --line: #2a3445;
+      --cyan: #69d4d0;
+      --cyan-soft: #163534;
+      --cyan-text: #b9f4f0;
+      --amber-soft: #3a2f18;
+      --amber-text: #ffe2a0;
+      --violet-soft: #2b2748;
+      --violet-text: #ddd4ff;
+      --rose-soft: #3b2029;
+      --rose-text: #ffc8d6;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.65; }
+    .shell { width: min(940px, calc(100% - 32px)); margin-inline: auto; }
+    header { padding: 64px 0 36px; }
+    .eyebrow { margin: 0 0 8px; color: var(--cyan); font-size: .75rem; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
+    h1, h2, h3 { line-height: 1.2; letter-spacing: -.025em; }
+    h1 { max-width: 760px; margin: 0; font-size: clamp(2.2rem, 6vw, 4.25rem); }
+    h2 { margin: 0 0 18px; font-size: clamp(1.55rem, 4vw, 2.15rem); }
+    h3 { margin: 0; font-size: 1.28rem; }
+    p { max-width: 72ch; }
+    .lede { color: var(--muted); font-size: 1.08rem; }
+    .metadata, .stats { display: grid; gap: 10px; margin-top: 26px; }
+    .metadata { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .meta, .stat { margin: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 13px 15px; }
+    dt { color: var(--muted); font-size: .7rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    dd { margin: 4px 0 0; }
+    .stat dd { color: var(--cyan); font-size: 1.55rem; font-weight: 850; }
+    nav { position: sticky; top: 0; z-index: 2; border-block: 1px solid var(--line); background: rgba(11,14,20,.92); backdrop-filter: blur(12px); }
+    nav .shell { display: flex; gap: 18px; overflow-x: auto; padding-block: 11px; }
+    nav a, a { color: var(--cyan); text-underline-offset: 3px; }
+    nav a { color: var(--muted); font-size: .84rem; font-weight: 750; text-decoration: none; white-space: nowrap; }
+    nav a:hover { color: var(--ink); }
+    main { padding: 40px 0 72px; }
+    section { margin-bottom: 58px; scroll-margin-top: 66px; }
+    code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    code { font-size: .92em; }
+    .callout { border: 1px solid #37625f; border-radius: 16px; background: var(--cyan-soft); color: var(--cyan-text); padding: 17px 19px; }
+    .callout p { margin: 0; }
+    .jump-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 20px; padding: 0; list-style: none; }
+    .jump-list a { display: block; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); padding: 9px 11px; color: var(--ink); text-decoration: none; }
+    .idea { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); padding: 24px; scroll-margin-top: 68px; }
+    .idea.top { border-color: #3f7470; background: linear-gradient(145deg, #16302f, #121923 64%); }
+    .idea-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+    .title-row { display: flex; align-items: center; gap: 11px; }
+    .rank { display: inline-grid; place-items: center; min-width: 34px; height: 34px; border-radius: 10px; background: var(--cyan-soft); color: var(--cyan-text); font-weight: 900; }
+    .badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+    .badge { border: 1px solid transparent; border-radius: 999px; padding: 3px 8px; font-size: .7rem; font-weight: 800; letter-spacing: .04em; }
+    .confidence { background: var(--cyan-soft); color: var(--cyan-text); border-color: #37625f; }
+    .complexity { background: var(--violet-soft); color: var(--violet-text); border-color: #504a77; }
+    .idea-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px 20px; margin: 20px 0 0; }
+    .idea-meta > div { border-top: 1px solid var(--line); padding-top: 11px; }
+    .idea-meta .wide { grid-column: 1 / -1; }
+    pre { margin: 20px 0 0; overflow-x: auto; border: 1px solid #37625f; border-radius: 14px; background: #0a1214; color: #d8f8f5; padding: 17px 19px; font-size: .86rem; line-height: 1.55; }
+    .term-heading { color: #b8f77c; font-weight: 850; }
+    .term-command, .term-flag { color: #f5f7fb; font-weight: 800; }
+    .term-meta { color: #cbc9ff; }
+    .term-copy { color: #e4e8ef; }
+    .term-dim { color: #8d98a8; }
+    .palette { display: flex; flex-wrap: wrap; gap: 7px; margin: 18px 0 0; }
+    .swatch { border: 1px solid var(--line); border-radius: 999px; background: #0a0c10; padding: 5px 10px; font-family: "SFMono-Regular", Consolas, monospace; font-size: .76rem; }
+    .swatch.heading { color: #b8f77c; }
+    .swatch.literal { color: #f5f7fb; font-weight: 800; }
+    .swatch.meta { color: #cbc9ff; }
+    .swatch.copy { color: #e4e8ef; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: var(--panel); }
+    th, td { padding: 11px 13px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--panel-strong); color: var(--muted); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .cut { color: var(--rose-text); font-weight: 750; }
+    .source-list { max-width: 76ch; }
+    footer { border-top: 1px solid var(--line); padding: 24px 0 38px; color: var(--muted); font-size: .82rem; }
+    @media (max-width: 720px) {
+      header { padding-top: 42px; }
+      .metadata, .stats, .jump-list, .idea-meta { grid-template-columns: 1fr; }
+      .idea-meta .wide { grid-column: auto; }
+      .idea-head { flex-direction: column; }
+      .badges { justify-content: flex-start; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell">
+    <p class="eyebrow">Ideation · CLI help</p>
+    <h1>Make help a quick-start card, not a miniature manual.</h1>
+    <p class="lede">The requested cuts are well-founded. The strongest rewrite keeps three representative commands, only the rules that prevent failed invocations, and one alphabetized API-key list.</p>
+    <dl class="metadata">
+      <div class="meta"><dt>Date</dt><dd><time datetime="2026-07-15">2026-07-15</time></dd></div>
+      <div class="meta"><dt>Topic</dt><dd>concise-cli-help</dd></div>
+      <div class="meta"><dt>Focus</dt><dd>Shorter usage, aliases, and API-key reference</dd></div>
+      <div class="meta"><dt>Mode</dt><dd>repo-grounded</dd></div>
+    </dl>
+    <dl class="stats">
+      <div class="stat"><dt>Raw candidates</dt><dd>29</dd></div>
+      <div class="stat"><dt>After dedupe</dt><dd>16</dd></div>
+      <div class="stat"><dt>Survivors</dt><dd>5</dd></div>
+      <div class="stat"><dt>Top confidence</dt><dd>95%</dd></div>
+    </dl>
+  </header>
+
+  <nav aria-label="Document sections">
+    <div class="shell">
+      <a href="#grounding-context">Grounding Context</a>
+      <a href="#topic-axes">Topic Axes</a>
+      <a href="#ranked-ideas">Ranked Ideas</a>
+      <a href="#rejection-summary">Rejection Summary</a>
+      <a href="#sources">Sources</a>
+    </div>
+  </nav>
+
+  <main class="shell">
+    <section id="grounding-context">
+      <p class="eyebrow">Evidence</p>
+      <h2>Grounding Context</h2>
+      <p><code>src/args.ts</code> currently enumerates seven invocation forms, then explains selection, input, aliases, output channels, exit codes, API-key names, and options at equal weight. Three <code>printf</code> forms duplicate the existing rule that input comes from exactly one of <code>--input</code> or stdin.</p>
+      <p>The README already holds the durable reference material being considered for removal: pipe examples, alias lifecycle and storage paths, stdout/stderr guarantees, diagnostics, and all exit codes. The executable help can therefore specialize in forming a valid command and recognizing supported credential variables.</p>
+      <p>The runtime export remains the correct source of truth for API-key names. The list should be alphabetized from a copied array, keeping the imported constant immutable. External CLI guidance from GNU, clap, argparse, and clig.dev converges on brief invocation documentation and representative examples rather than an exhaustive syntax matrix.</p>
+      <div class="callout"><p><strong>Arbitration result:</strong> retain only facts that prevent a likely usage error or enable first-run provider setup. Everything else belongs in the README.</p></div>
+    </section>
+
+    <section id="topic-axes">
+      <p class="eyebrow">Scope</p>
+      <h2>Topic Axes</h2>
+      <p>Decomposition skipped — atomic subject.</p>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">Five survivors</p>
+      <h2>Ranked Ideas</h2>
+      <ul class="jump-list">
+        <li><a href="#idea-1">1. Cargo-inspired quick-start card</a></li>
+        <li><a href="#idea-2">2. Grammar-first reference</a></li>
+        <li><a href="#idea-3">3. Input-and-selection reference</a></li>
+        <li><a href="#idea-4">4. Credential-reference ordering</a></li>
+        <li><a href="#idea-5">5. Two-column key list</a></li>
+      </ul>
+
+      <article class="idea top" id="idea-1">
+        <div class="idea-head">
+          <div class="title-row"><span class="rank">1</span><h3>Cargo-inspired quick-start card</h3></div>
+          <div class="badges"><span class="badge confidence">Confidence 95%</span><span class="badge complexity">Complexity Low</span></div>
+        </div>
+        <p><strong>Description:</strong> Keep three representative commands—interactive, saved alias, and explicit provider/model—then replace Selection, Input, and Aliases with a compact Rules block. Borrow Cargo’s restrained terminal hierarchy: green section landmarks, bright literal commands and flags, cool lavender metavariables, and neutral explanatory text. Options follows, then one <code>API key environment variables:</code> heading and the complete alphabetized list.</p>
+        <div class="palette" aria-label="Proposed terminal color roles">
+          <span class="swatch heading">Section heading</span>
+          <span class="swatch literal">literal --flag</span>
+          <span class="swatch meta">&lt;replaceable-value&gt;</span>
+          <span class="swatch copy">Explanation</span>
+        </div>
+        <pre aria-label="Illustrative Cargo-inspired compact help direction"><span class="term-copy">Send a prompt to a selected model.</span>
+
+<span class="term-heading">Usage:</span>
+  <span class="term-command">llm-now</span> <span class="term-flag">--input</span> <span class="term-meta">&lt;text&gt;</span>
+  <span class="term-command">llm-now</span> <span class="term-meta">&lt;alias&gt;</span> <span class="term-flag">--input</span> <span class="term-meta">&lt;text&gt;</span>
+  <span class="term-command">llm-now</span> <span class="term-flag">--provider</span> <span class="term-meta">&lt;id&gt;</span> <span class="term-flag">--model</span> <span class="term-meta">&lt;id|default&gt;</span> <span class="term-flag">--input</span> <span class="term-meta">&lt;text&gt;</span>
+
+<span class="term-heading">Rules:</span>
+  <span class="term-copy">Input comes from exactly one of</span> <span class="term-flag">--input</span> <span class="term-copy">or stdin.</span>
+  <span class="term-copy">Omit selection for interactive choice; otherwise use an alias or provider/model.</span>
+  <span class="term-copy">Model "default" is available only for codex-cli and claude-cli.</span>
+
+<span class="term-heading">Options:</span>
+  <span class="term-flag">--input</span> <span class="term-meta">&lt;text&gt;</span>       <span class="term-copy">Prompt text</span>
+  <span class="term-flag">--alias</span> <span class="term-meta">&lt;name&gt;</span>       <span class="term-copy">Saved provider/model selection</span>
+  <span class="term-flag">--provider</span> <span class="term-meta">&lt;id&gt;</span>      <span class="term-copy">Explicit provider</span>
+  <span class="term-flag">--model</span> <span class="term-meta">&lt;id&gt;</span>         <span class="term-copy">Explicit model, or default for a supported CLI provider</span>
+  <span class="term-flag">-h, --help</span>           <span class="term-copy">Show help</span>
+  <span class="term-flag">--version</span>            <span class="term-copy">Show version</span>
+
+<span class="term-heading">API key environment variables:</span>
+  <span class="term-meta">ANTHROPIC_API_KEY</span>
+  <span class="term-meta">DEEPINFRA_TOKEN</span>
+  <span class="term-meta">DEEPSEEK_API_KEY</span>
+  <span class="term-meta">GEMINI_API_KEY</span>
+  <span class="term-meta">GOOGLE_API_KEY</span>
+  <span class="term-meta">GROQ_API_KEY</span>
+  <span class="term-meta">MISTRAL_API_KEY</span>
+  <span class="term-meta">OPENAI_API_KEY</span>
+  <span class="term-meta">OPENROUTER_API_KEY</span>
+  <span class="term-meta">XAI_API_KEY</span></pre>
+        <div class="callout"><p><strong>Color behavior:</strong> enable ANSI styling only when help is written to a color-capable stdout TTY. Respect <code>NO_COLOR</code> and <code>TERM=dumb</code>; never emit escapes when help is piped or redirected. The plain-text fallback keeps identical words, spacing, and hierarchy.</p></div>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> The parser has three real selection paths and one independent input source. The README already owns every removed detail. <strong>external:</strong> Representative examples are a standard compact-help pattern.</dd></div>
+          <div><dt>Rationale</dt><dd>Color makes landmarks and syntax roles recognizable before reading, while the compact copy remains understandable without it.</dd></div>
+          <div><dt>Downsides</dt><dd>The long-form <code>--alias</code> spelling appears only in Options. Color also requires stdout-aware capability detection and dedicated no-color tests.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-2">
+        <div class="idea-head">
+          <div class="title-row"><span class="rank">2</span><h3>Grammar-first reference</h3></div>
+          <div class="badges"><span class="badge confidence">Confidence 90%</span><span class="badge complexity">Complexity Low</span></div>
+        </div>
+        <p><strong>Description:</strong> Replace every Usage example with one composable synopsis: <code>llm-now [&lt;alias&gt; | --alias &lt;name&gt; | --provider &lt;id&gt; --model &lt;id|default&gt;] [--input &lt;text&gt;]</code>. Follow it with the same three rules, Options, and the single alphabetized key list.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> The synopsis maps cleanly to the parser's interactive, alias, and explicit selection union. <strong>external:</strong> GNU and mature parser libraries use synopsis grammar for compact reference help.</dd></div>
+          <div><dt>Rationale</dt><dd>It scales best: future options are added once rather than multiplying a Usage matrix.</dd></div>
+          <div><dt>Downsides</dt><dd>Bracket-and-pipe notation is efficient for experienced CLI users but less copyable and less immediately friendly.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-3">
+        <div class="idea-head">
+          <div class="title-row"><span class="rank">3</span><h3>Input-and-selection reference</h3></div>
+          <div class="badges"><span class="badge confidence">Confidence 86%</span><span class="badge complexity">Complexity Low</span></div>
+        </div>
+        <p><strong>Description:</strong> Keep a short example-shaped Usage block, then organize all explanatory copy under one <code>Input and selection:</code> heading. State the exact-one-input rule, the three selection forms, interactive fallback, and the <code>default</code> limitation in three compact lines.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> <code>ParsedArguments</code> models input separately from <code>Selection</code>; the current separate Selection, Input, and Aliases headings scatter those two decisions.</dd></div>
+          <div><dt>Rationale</dt><dd>It teaches the CLI's mental model in plain language while retaining familiar command examples.</dd></div>
+          <div><dt>Downsides</dt><dd>A combined heading is less skimmable for someone looking only for alias behavior, though Options still exposes <code>--alias</code>.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-4">
+        <div class="idea-head">
+          <div class="title-row"><span class="rank">4</span><h3>Credential-reference ordering</h3></div>
+          <div class="badges"><span class="badge confidence">Confidence 82%</span><span class="badge complexity">Complexity Low</span></div>
+        </div>
+        <p><strong>Description:</strong> Keep the three representative commands and compact input/selection guidance, but place the standalone alphabetized API-key list directly after provider guidance and before general Options. The list remains un-mapped: it says which variable names are recognized, not which key belongs to a specific provider.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> The product goal is credential discoverability, and the runtime supplies a flat list rather than provider mappings. <strong>reasoned:</strong> Proximity to provider selection helps setup scanning without implying stronger semantics.</dd></div>
+          <div><dt>Rationale</dt><dd>It gives credential setup more visual priority while preserving the requested single heading and complete inventory.</dd></div>
+          <div><dt>Downsides</dt><dd>Options are the conventional final reference block after Usage; interrupting that flow may feel slightly unusual.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-5">
+        <div class="idea-head">
+          <div class="title-row"><span class="rank">5</span><h3>Two-column key list</h3></div>
+          <div class="badges"><span class="badge confidence">Confidence 70%</span><span class="badge complexity">Complexity Low</span></div>
+        </div>
+        <p><strong>Description:</strong> Apply a compact two-column presentation to the alphabetized, single-heading variable list. Pair it with any of the first four information architectures; no secondary column header or divider is needed.</p>
+        <dl class="idea-meta">
+          <div class="wide"><dt>Basis</dt><dd><strong>direct:</strong> The current ten names are short and uniform. <strong>reasoned:</strong> Two columns cut the list's height roughly in half while preserving the complete runtime-derived inventory.</dd></div>
+          <div><dt>Rationale</dt><dd>It recovers terminal height without removing setup information.</dd></div>
+          <div><dt>Downsides</dt><dd>Column widths and reading order must remain obvious across narrow terminals; a single column is more robust and easier to test exactly.</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <p class="eyebrow">Adversarial cut</p>
+      <h2>Rejection Summary</h2>
+      <table>
+        <thead><tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="cut">Four familiar non-pipe forms</td><td>Preserves redundant alias spellings and under-delivers on “shorten substantially.”</td></tr>
+          <tr><td>2</td><td class="cut">Interactive versus scripted lanes</td><td>Interactivity depends on stdin and diagnostic TTY state, not a reliable user-intent split.</td></tr>
+          <tr><td>3</td><td class="cut">Options-first reference</td><td>Cross-cutting input and positional-alias rules do not fit cleanly under individual flags.</td></tr>
+          <tr><td>4</td><td class="cut">README pointer as primary disclosure</td><td>Installed users still need the requested complete API-key inventory from the executable.</td></tr>
+          <tr><td>5</td><td class="cut">Action-first product line</td><td>Adds copy without solving the information hierarchy better than the top candidates.</td></tr>
+          <tr><td>6</td><td class="cut">Recipe-card labels</td><td>Presentation-only duplicate of the stronger three-form quick-start.</td></tr>
+          <tr><td>7</td><td class="cut">Provider-adjacent key mapping</td><td>The runtime exports names, not an authoritative provider-to-key mapping.</td></tr>
+          <tr><td>8</td><td class="cut">Progressive-disclosure-only help</td><td>Risks making required credential setup inaccessible when README is not installed locally.</td></tr>
+          <tr><td>9</td><td class="cut">Setup-checklist framing</td><td>Suggests llm-now creates or manages credentials, which it explicitly does not.</td></tr>
+          <tr><td>10</td><td class="cut">One-column table chrome</td><td>A second header and divider add no meaning to a one-dimensional list.</td></tr>
+          <tr><td>11</td><td class="cut">Two-lane combined variant</td><td>Inherits the unsupported interactive/scripted dichotomy.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="sources">
+      <p class="eyebrow">Reference index</p>
+      <h2>Sources &amp; References</h2>
+      <ul class="source-list">
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/args.ts"><code>src/args.ts</code></a> — current help text and parser contract.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/tests/args.test.ts"><code>tests/args.test.ts</code></a> — current help assertions that must move with the copy.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/README.md"><code>README.md</code></a> — durable home for detailed alias, pipe, output, diagnostic, and exit-code behavior.</li>
+        <li><a href="https://www.gnu.org/prep/standards/html_node/_002d_002dhelp.html">GNU Coding Standards: <code>--help</code></a> — brief invocation documentation.</li>
+        <li><a href="https://clig.dev/">Command Line Interface Guidelines</a> — representative examples and scan-first help.</li>
+        <li><a href="https://docs.rs/clap/latest/clap/_tutorial/">clap tutorial</a> and <a href="https://docs.python.org/3/library/argparse.html">Python argparse</a> — compact Usage and grouped reference patterns.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="composition-signal">
+    <div class="shell">Composed <time datetime="2026-07-15T23:16Z">2026-07-15T23:16Z</time> by <code>ce-ideate</code> from the current <code>llm-now --help</code> simplification prompt.</div>
+  </footer>
+</body>
+</html>
