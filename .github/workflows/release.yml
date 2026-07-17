@@ -50,7 +50,6 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
-      - run: bun install --frozen-lockfile
       - id: metadata
         shell: bash
         env:
@@ -115,16 +114,23 @@ jobs:
           }
 
           tag_exists=false
-          if git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>&1; then
+          tag_probe_status=0
+          git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>tag-probe-error || tag_probe_status=$?
+          if [[ "$tag_probe_status" -eq 0 ]]; then
             tag_exists=true
             git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
             test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA" || {
               echo "$TAG already points to another commit" >&2
               exit 1
             }
+          elif [[ "$tag_probe_status" -ne 2 ]]; then
+            cat tag-probe-error >&2
+            exit "$tag_probe_status"
           fi
+          rm -f tag-probe-error
 
-          release_status="$(curl --silent --show-error --output release.json --write-out '%{http_code}' \
+          release_status="$(curl --silent --show-error --connect-timeout 10 --max-time 30 --retry 2 --retry-all-errors \
+            --output release.json --write-out '%{http_code}' \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
@@ -136,6 +142,17 @@ jobs:
               ;;
             404)
               if [[ "$tag_exists" == "false" ]]; then
+                published_tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+                while IFS= read -r published_tag; do
+                  candidate="${published_tag#v}"
+                  [[ "$published_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || continue
+                  newest="$(printf '%s\n%s\n' "$VERSION" "$candidate" | sort -V | tail -n 1)"
+                  if [[ "$newest" == "$candidate" && "$candidate" != "$VERSION" ]]; then
+                    echo "Refusing to create $TAG because higher stable Release $published_tag is already public" >&2
+                    exit 1
+                  fi
+                done <<< "$published_tags"
+
                 parent_sha="$(git rev-parse "${RELEASE_SHA}^1")"
                 output="$(mktemp)"
                 bun scripts/release-plan.ts "$parent_sha" "$RELEASE_SHA" "$output"
@@ -382,16 +399,23 @@ jobs:
           }
 
           tag_exists=false
-          if git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>&1; then
+          tag_probe_status=0
+          git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>tag-probe-error || tag_probe_status=$?
+          if [[ "$tag_probe_status" -eq 0 ]]; then
             tag_exists=true
             git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
             test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA" || {
               echo "$TAG already points to another commit" >&2
               exit 1
             }
+          elif [[ "$tag_probe_status" -ne 2 ]]; then
+            cat tag-probe-error >&2
+            exit "$tag_probe_status"
           fi
+          rm -f tag-probe-error
 
-          release_status="$(curl --silent --show-error --output release.json --write-out '%{http_code}' \
+          release_status="$(curl --silent --show-error --connect-timeout 10 --max-time 30 --retry 2 --retry-all-errors \
+            --output release.json --write-out '%{http_code}' \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
@@ -407,6 +431,7 @@ jobs:
           esac
 
           if [[ "$tag_exists" == "false" ]]; then
+            published_tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
             while IFS= read -r published_tag; do
               candidate="${published_tag#v}"
               [[ "$published_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || continue
@@ -415,7 +440,7 @@ jobs:
                 echo "Refusing to create $TAG because higher stable Release $published_tag is already public" >&2
                 exit 1
               fi
-            done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')
+            done <<< "$published_tags"
 
             GIT_AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w 0)"
             export GIT_AUTH_HEADER

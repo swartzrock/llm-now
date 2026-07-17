@@ -14,9 +14,10 @@ const releaseCoordinator = await Bun.file(
 describe("release workflow policy", () => {
   test("pins every build checkout to the validated source input", () => {
     const refs = [...releaseWorkflow.matchAll(/^\s+ref:\s+(.+)$/gm)].map((match) => match[1]);
-    expect(refs.filter((ref) => ref === "${{ inputs.release-sha }}")).toHaveLength(1);
-    expect(refs.slice(1).every((ref) => ref === "${{ needs.validate-ref.outputs.release-sha }}"))
-      .toBe(true);
+    expect(refs).toEqual([
+      "${{ inputs.release-sha }}",
+      ...Array(5).fill("${{ needs.validate-ref.outputs.release-sha }}"),
+    ]);
     expect(releaseWorkflow).toContain('git rev-parse "refs/tags/${TAG}^{commit}"');
     expect(releaseWorkflow).toContain('gh release create "$TAG"');
     expect(releaseWorkflow).toContain("--verify-tag");
@@ -265,6 +266,16 @@ describe("release workflow policy", () => {
     expect(releaseWorkflow).toContain("Release $TAG exists without its tag");
     expect(releaseWorkflow).toContain("$TAG already points to another commit");
     expect(releaseWorkflow).toContain("higher stable Release $published_tag is already public");
+    expect(releaseWorkflow.match(/elif \[\[ "\$tag_probe_status" -ne 2 \]\]/g)).toHaveLength(2);
+    expect(releaseWorkflow.match(/--connect-timeout 10 --max-time 30/g)).toHaveLength(2);
+    expect(releaseWorkflow.match(/published_tags="\$\(gh api --paginate/g)).toHaveLength(2);
+    expect(releaseWorkflow).not.toContain("done < <(gh api --paginate");
+    const preflight = releaseWorkflow.slice(
+      releaseWorkflow.indexOf("\n      - id: state"),
+      releaseWorkflow.indexOf("\n  native:"),
+    );
+    expect(preflight.indexOf('published_tags="$(gh api --paginate'))
+      .toBeLessThan(preflight.lastIndexOf('echo "should-build=true"'));
     expect(releaseWorkflow).toContain(`concurrency:
   group: release-\${{ inputs.release-sha }}
   cancel-in-progress: false`);

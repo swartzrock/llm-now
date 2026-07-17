@@ -71,18 +71,10 @@ describe("Changesets authoring", () => {
       version: "1.0.0",
       private: true,
     }, null, 2));
-    await Bun.write(join(directory, ".changeset", "config.json"), JSON.stringify({
-      $schema: "https://unpkg.com/@changesets/config@3.1.4/schema.json",
-      changelog: "@changesets/cli/changelog",
-      commit: false,
-      fixed: [],
-      linked: [],
-      access: "restricted",
-      baseBranch: "main",
-      updateInternalDependencies: "patch",
-      ignore: [],
-      privatePackages: { version: true, tag: false },
-    }, null, 2));
+    await Bun.write(
+      join(directory, ".changeset", "config.json"),
+      JSON.stringify(changesetsConfig, null, 2),
+    );
     await Bun.write(join(directory, ".changeset", "README.md"), "# Changesets fixture\n");
     await Bun.write(
       join(directory, ".changeset", "calm-patch.md"),

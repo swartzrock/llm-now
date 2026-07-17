@@ -23,7 +23,6 @@ export interface ReleaseTransitionInput {
 export interface ReleasePlan {
   shouldRelease: boolean;
   releaseSha: string;
-  version: string;
 }
 
 const stableVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -45,14 +44,29 @@ export function compareStableVersions(left: string, right: string): number {
   return 0;
 }
 
-function validateSha(sha: string, label: string): void {
+export function extractChangelogSection(changelog: string, version: string): string {
+  parseStableVersion(version);
+  const lines = changelog.replace(/\r\n/g, "\n").split("\n");
+  const heading = `## ${version}`;
+  const matches = lines.flatMap((line, index) => line === heading ? [index] : []);
+  if (matches.length !== 1) {
+    throw new Error(`CHANGELOG.md must contain exactly one ${heading} heading`);
+  }
+  const start = matches[0]!;
+  const adjacent = lines.findIndex((line, index) => index > start && /^##\s/.test(line));
+  const section = lines.slice(start, adjacent === -1 ? undefined : adjacent).join("\n").trimEnd();
+  if (section === heading) throw new Error(`${heading} changelog section must not be empty`);
+  return section;
+}
+
+export function validateCommitSha(sha: string, label: string): void {
   if (!shaPattern.test(sha)) throw new Error(`${label} must be a full lowercase commit SHA`);
 }
 
 export function classifyReleaseTransition(input: ReleaseTransitionInput): ReleasePlan {
-  validateSha(input.beforeSha, "before SHA");
-  validateSha(input.afterSha, "after SHA");
-  validateSha(input.firstParentSha, "first parent SHA");
+  validateCommitSha(input.beforeSha, "before SHA");
+  validateCommitSha(input.afterSha, "after SHA");
+  validateCommitSha(input.firstParentSha, "first parent SHA");
   if (/^0{40}$/.test(input.beforeSha)) throw new Error("before SHA cannot be the zero SHA");
   if (input.beforeSha !== input.firstParentSha) {
     throw new Error("push before SHA must equal the release commit's first parent");
@@ -66,7 +80,6 @@ export function classifyReleaseTransition(input: ReleaseTransitionInput): Releas
     return {
       shouldRelease: false,
       releaseSha: input.afterSha,
-      version: input.afterPackage.version,
     };
   }
   if (comparison < 0) throw new Error("package version must increase during a release transition");
@@ -79,16 +92,11 @@ export function classifyReleaseTransition(input: ReleaseTransitionInput): Releas
   );
   if (!consumedChangeset) throw new Error("release transition must delete a consumed Changeset");
 
-  const expectedHeading = `## ${input.afterPackage.version}`;
-  const headingCount = input.changelog.split(/\r?\n/).filter((line) => line === expectedHeading).length;
-  if (headingCount !== 1) {
-    throw new Error(`CHANGELOG.md must contain exactly one ${expectedHeading} heading`);
-  }
+  extractChangelogSection(input.changelog, input.afterPackage.version);
 
   return {
     shouldRelease: true,
     releaseSha: input.afterSha,
-    version: input.afterPackage.version,
   };
 }
 
@@ -126,21 +134,20 @@ function changedFiles(cwd: string, beforeSha: string, afterSha: string): Changed
 }
 
 export function planRelease(beforeSha: string, afterSha: string, cwd = process.cwd()): ReleasePlan {
-  validateSha(beforeSha, "before SHA");
-  validateSha(afterSha, "after SHA");
+  validateCommitSha(beforeSha, "before SHA");
+  validateCommitSha(afterSha, "after SHA");
   const firstParentSha = git(cwd, ["rev-parse", `${afterSha}^1`]);
   const beforePackage = packageAt(cwd, beforeSha);
   const afterPackage = packageAt(cwd, afterSha);
+  const versionChanged = beforePackage.version !== afterPackage.version;
   return classifyReleaseTransition({
     beforePackage,
     afterPackage,
     beforeSha,
     afterSha,
     firstParentSha,
-    changedFiles: changedFiles(cwd, beforeSha, afterSha),
-    changelog: beforePackage.version === afterPackage.version
-      ? ""
-      : git(cwd, ["show", `${afterSha}:CHANGELOG.md`]),
+    changedFiles: versionChanged ? changedFiles(cwd, beforeSha, afterSha) : [],
+    changelog: versionChanged ? git(cwd, ["show", `${afterSha}:CHANGELOG.md`]) : "",
   });
 }
 
@@ -148,7 +155,6 @@ export async function writeGithubOutput(plan: ReleasePlan, outputPath: string): 
   await appendFile(outputPath, [
     `should-release=${plan.shouldRelease}`,
     `release-sha=${plan.releaseSha}`,
-    `version=${plan.version}`,
     "",
   ].join("\n"));
 }

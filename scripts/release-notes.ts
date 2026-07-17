@@ -1,26 +1,9 @@
-import { parseStableVersion } from "./release-plan.ts";
+import { extractChangelogSection, validateCommitSha } from "./release-plan.ts";
 
-const sourceDigestPattern = /^[a-f0-9]{40}$/;
-
-export function extractChangelogSection(changelog: string, version: string): string {
-  parseStableVersion(version);
-  const lines = changelog.replace(/\r\n/g, "\n").split("\n");
-  const heading = `## ${version}`;
-  const matches = lines.flatMap((line, index) => line === heading ? [index] : []);
-  if (matches.length !== 1) {
-    throw new Error(`CHANGELOG.md must contain exactly one ${heading} heading`);
-  }
-  const start = matches[0]!;
-  const adjacent = lines.findIndex((line, index) => index > start && /^##\s/.test(line));
-  const section = lines.slice(start, adjacent === -1 ? undefined : adjacent).join("\n").trimEnd();
-  if (section === heading) throw new Error(`${heading} changelog section must not be empty`);
-  return section;
-}
+export { extractChangelogSection } from "./release-plan.ts";
 
 export function renderReleaseNotes(changelog: string, version: string, sourceDigest: string): string {
-  if (!sourceDigestPattern.test(sourceDigest)) {
-    throw new Error("source digest must be a full lowercase commit SHA");
-  }
+  validateCommitSha(sourceDigest, "source digest");
   const section = extractChangelogSection(changelog, version);
   return `## Choose an asset
 

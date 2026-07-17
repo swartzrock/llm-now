@@ -6,6 +6,7 @@ import {
   compareStableVersions,
   parseStableVersion,
   planRelease,
+  writeGithubOutput,
   type ReleaseTransitionInput,
 } from "../scripts/release-plan.ts";
 
@@ -48,13 +49,13 @@ describe("stable release versions", () => {
 
 describe("release transition classification", () => {
   test("returns normalized release outputs for a valid generated transition", () => {
-    expect(classifyReleaseTransition(transition())).toEqual({ shouldRelease: true, releaseSha, version: "0.1.1" });
+    expect(classifyReleaseTransition(transition())).toEqual({ shouldRelease: true, releaseSha });
   });
   test("returns a clean no-op only when name and version are unchanged", () => {
     expect(classifyReleaseTransition(transition({
       afterPackage: { name: "llm-now", version: "0.1.0" },
       changedFiles: [{ status: "M", path: "README.md" }], changelog: "",
-    }))).toEqual({ shouldRelease: false, releaseSha, version: "0.1.0" });
+    }))).toEqual({ shouldRelease: false, releaseSha });
   });
   test("rejects malformed, decreased, renamed, zero-before, and non-first-parent transitions", () => {
     expect(() => classifyReleaseTransition(transition({ afterPackage: { name: "llm-now", version: "0.1.0-beta.1" } }))).toThrow("stable X.Y.Z");
@@ -69,6 +70,7 @@ describe("release transition classification", () => {
     expect(() => classifyReleaseTransition(transition({ changedFiles: transition().changedFiles.filter((file) => !file.path.includes("safe-release")) }))).toThrow("consumed Changeset");
     expect(() => classifyReleaseTransition(transition({ changelog: "## 0.1.0\n" }))).toThrow("exactly one");
     expect(() => classifyReleaseTransition(transition({ changelog: "## 0.1.1\n\nFirst\n\n## 0.1.1\n\nSecond\n" }))).toThrow("exactly one");
+    expect(() => classifyReleaseTransition(transition({ changelog: "## 0.1.1\n" }))).toThrow("must not be empty");
   });
   test("does not treat deletion of the Changesets README as release intent", () => {
     expect(() => classifyReleaseTransition(transition({ changedFiles: [
@@ -91,7 +93,7 @@ describe("release transition classification", () => {
     git(directory, "commit", "-m", "docs");
     const afterSha = git(directory, "rev-parse", "HEAD");
     expect(planRelease(beforeSha, afterSha, directory)).toEqual({
-      shouldRelease: false, releaseSha: afterSha, version: "0.1.0",
+      shouldRelease: false, releaseSha: afterSha,
     });
   });
   test("plans a real generated release diff from its exact first parent", async () => {
@@ -121,7 +123,44 @@ describe("release transition classification", () => {
     const afterSha = git(directory, "rev-parse", "HEAD");
 
     expect(planRelease(beforeSha, afterSha, directory)).toEqual({
-      shouldRelease: true, releaseSha: afterSha, version: "0.1.1",
+      shouldRelease: true, releaseSha: afterSha,
     });
+  });
+
+  test("plans a generated release merged with a first-parent merge commit", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-release-plan-"));
+    temporaryDirectories.push(directory);
+    git(directory, "init", "--initial-branch=main");
+    git(directory, "config", "user.email", "release@example.invalid");
+    git(directory, "config", "user.name", "Release Test");
+    await Bun.write(join(directory, "package.json"), '{"name":"llm-now","version":"0.1.0"}\n');
+    await Bun.write(join(directory, ".changeset", "README.md"), "# Changesets\n");
+    await Bun.write(join(directory, ".changeset", "safe-release.md"), '---\n"llm-now": patch\n---\n\nRelease it.\n');
+    git(directory, "add", ".");
+    git(directory, "commit", "-m", "feature intent");
+    git(directory, "checkout", "-b", "release-pr");
+    await Bun.write(join(directory, "package.json"), '{"name":"llm-now","version":"0.1.1"}\n');
+    await Bun.write(join(directory, "CHANGELOG.md"), "# llm-now\n\n## 0.1.1\n\n- Release it.\n");
+    await rm(join(directory, ".changeset", "safe-release.md"));
+    git(directory, "add", "-A");
+    git(directory, "commit", "-m", "chore: release");
+    git(directory, "checkout", "main");
+    const beforeSha = git(directory, "rev-parse", "HEAD");
+    git(directory, "merge", "--no-ff", "release-pr", "-m", "merge release PR");
+    const afterSha = git(directory, "rev-parse", "HEAD");
+    expect(planRelease(beforeSha, afterSha, directory)).toEqual({
+      shouldRelease: true, releaseSha: afterSha,
+    });
+  });
+
+  test("appends exact GitHub Actions outputs", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-release-plan-"));
+    temporaryDirectories.push(directory);
+    const outputPath = join(directory, "github-output");
+    await Bun.write(outputPath, "sentinel=kept\n");
+    await writeGithubOutput({ shouldRelease: true, releaseSha }, outputPath);
+    expect(await Bun.file(outputPath).text()).toBe(
+      `sentinel=kept\nshould-release=true\nrelease-sha=${releaseSha}\n`,
+    );
   });
 });
