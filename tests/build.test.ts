@@ -79,6 +79,29 @@ describe("native release build", () => {
     }
   });
 
+  test("rejects duplicate archive basenames across nested artifact directories", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".tmp-build-tests-"));
+    temporaryDirectories.push(root);
+    const input = join(root, "input");
+    for (const target of RELEASE_TARGETS) {
+      const archive = createExecutableArchive(
+        target.executable,
+        Uint8Array.from([target.id.length]),
+        testArchiveMtime,
+      );
+      await mkdir(join(input, target.id), { recursive: true });
+      await Bun.write(join(input, target.id, archiveName("0.1.0", target)), archive);
+      if (target.id === "linux-x64") {
+        await mkdir(join(input, "duplicate", target.id), { recursive: true });
+        await Bun.write(join(input, "duplicate", target.id, archiveName("0.1.0", target)), archive);
+      }
+    }
+
+    await expect(assembleReleaseAssets(input, join(root, "output"))).rejects.toThrow(
+      "release archive set mismatch",
+    );
+  });
+
   test("assembles a selected release target set", async () => {
     const root = await mkdtemp(join(process.cwd(), ".tmp-build-tests-"));
     temporaryDirectories.push(root);

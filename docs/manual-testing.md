@@ -105,7 +105,13 @@ shasum -a 256 -c SHA256SUMS
 Windows:
 
 ```powershell
-Get-FileHash .\llm-now-*.zip -Algorithm SHA256
+$Manifest = Get-Content .\SHA256SUMS
+foreach ($Line in $Manifest) {
+  $Expected, $Archive = $Line -split '\s+', 2
+  $Actual = (Get-FileHash (".\" + $Archive) -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($Expected.ToLowerInvariant() -ne $Actual) { throw "SHA-256 mismatch for $Archive" }
+  "SHA-256 verified: $Archive"
+}
 ```
 
 Expected results:
@@ -358,17 +364,63 @@ The workflow must validate the tag/version/main ancestry, build all five targets
 
 The macOS executable must have a valid ad-hoc signature, but it is not trusted by Gatekeeper as a public download. After checksum verification, use the quarantine-removal step in the preparation section for this unsigned test artifact.
 
-### MT-25: Signed public release
+### MT-25: First public cross-platform release
 
-Run only when publication is explicitly authorized. Confirm that:
+Run only when publication is explicitly authorized. Before dispatch:
 
-- both macOS executables pass `codesign --verify` and `codesign -vvvv -R="notarized" --check-notarization`;
-- the GitHub Release contains only the macOS x64 and ARM64 archives plus `SHA256SUMS`;
-- GitHub Release assets match `SHA256SUMS`;
-- browser-downloaded macOS artifacts pass Gatekeeper without manual quarantine removal; and
-- both downloaded executables pass `--help` and `--version` on a clean target machine.
+1. Confirm the repository is public and eligible to issue GitHub artifact attestations.
+2. Fetch `origin/main` and tags. Record `RELEASE_SHA` as the protected `main` commit that will dispatch the workflow.
+3. Confirm the `vX.Y.Z` tag resolves to exactly `RELEASE_SHA`, not merely an older ancestor:
 
-Linux and Windows remain part of CI and unsigned release-candidate testing, but are deferred from public distribution until their release paths are authorized.
+   ```bash
+   git fetch origin main --tags
+   TAG=vX.Y.Z
+   RELEASE_SHA="$(git rev-parse origin/main)"
+   test "$(git rev-parse "${TAG}^{commit}")" = "$RELEASE_SHA"
+   ```
+
+4. Dispatch `publish: true` from that protected `main` commit and complete the `release-publication` approval.
+
+After publication, download the release assets to an empty directory and confirm there are exactly five ZIPs plus `SHA256SUMS`:
+
+- `llm-now-X.Y.Z-macos-x64.zip`
+- `llm-now-X.Y.Z-macos-arm64.zip`
+- `llm-now-X.Y.Z-linux-x64.zip`
+- `llm-now-X.Y.Z-linux-arm64.zip`
+- `llm-now-X.Y.Z-windows-x64.zip`
+
+Complete these trust and integrity gates:
+
+- verify all five final archives against `SHA256SUMS` using MT-01;
+- run `codesign --verify --strict --verbose=2` and `codesign -vvvv -R="notarized" --check-notarization` for both macOS executables;
+- confirm browser-downloaded macOS executables pass Gatekeeper with quarantine intact; and
+- verify every ZIP's attestation names this repository's release workflow and exact `RELEASE_SHA`:
+
+```bash
+for archive in llm-now-*.zip; do
+  gh attestation verify "$archive" \
+    --repo swartzrock/llm-now \
+    --signer-workflow swartzrock/llm-now/.github/workflows/release.yml \
+    --source-digest "$RELEASE_SHA"
+done
+```
+
+On Windows, verify the declared unsigned status before running the executable:
+
+```powershell
+(Get-AuthenticodeSignature $Bin).Status
+```
+
+The expected status is `NotSigned`. The Windows x64 archive is **unsigned early access**: SmartScreen may offer **Run anyway** where policy permits, while Smart App Control or enterprise policy may block execution with no supported user bypass. Do not disable or weaken security controls.
+
+Finally, record:
+
+- a full functional pass on Linux x64 glibc;
+- a native smoke on Linux ARM64 glibc;
+- a full functional pass on Windows x64; and
+- operation without Bun or Node.js on every tested target.
+
+The Linux artifacts do not claim Alpine or other musl compatibility. Windows signing, Homebrew, and Chocolatey remain deferred.
 
 ## Automation-backed coverage
 
