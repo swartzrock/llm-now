@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: Changesets release automation for llm-now</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b0f;
+      --surface: #12161d;
+      --surface-2: #181e27;
+      --text: #f3f4f6;
+      --muted: #aab2c0;
+      --line: #2c3441;
+      --green: #b9f27c;
+      --green-soft: #1d3120;
+      --purple: #c9c6ff;
+      --purple-soft: #282643;
+      --blue: #9bd7ff;
+      --blue-soft: #173044;
+      --amber: #ffd58a;
+      --amber-soft: #3a2c16;
+      --red: #ffb4ab;
+      --red-soft: #40201f;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.62 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    main { max-width: 940px; margin: 0 auto; padding: 56px 28px 80px; }
+    header { margin-bottom: 44px; }
+    .eyebrow {
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.22; letter-spacing: -.025em; }
+    h1 { max-width: 22ch; margin: 10px 0 16px; font-size: clamp(34px, 6vw, 62px); }
+    h2 { margin: 0 0 20px; font-size: 25px; }
+    h3 { margin: 0; font-size: 20px; }
+    p { max-width: 75ch; }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    code { color: var(--purple); font-family: inherit; }
+    strong { color: inherit; }
+    .lede { color: var(--muted); font-size: 17px; max-width: 70ch; }
+    .metadata, .stats, .idea-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--text);
+      font-size: 12px;
+    }
+    .chip.green { background: var(--green-soft); color: var(--green); border-color: #345637; }
+    .chip.purple { background: var(--purple-soft); color: var(--purple); border-color: #464274; }
+    .chip.blue { background: var(--blue-soft); color: var(--blue); border-color: #29516d; }
+    .chip.amber { background: var(--amber-soft); color: var(--amber); border-color: #614822; }
+    section { margin-top: 52px; scroll-margin-top: 24px; }
+    .panel, .idea, .diagram, .callout {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .panel, .callout { padding: 20px 22px; }
+    .panel p:last-child, .callout p:last-child { margin-bottom: 0; }
+    .stats { margin-top: 24px; }
+    .stat {
+      flex: 1 1 145px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+    }
+    .stat b { display: block; font-size: 22px; color: var(--green); }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .axes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .axis { padding: 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+    .axis b { display: block; margin-bottom: 5px; color: var(--purple); }
+    .axis span { color: var(--muted); }
+    .jump-list {
+      margin: 0 0 22px;
+      padding: 16px 18px 16px 38px;
+      border-radius: 12px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+    }
+    .jump-list li + li { margin-top: 5px; }
+    .ideas { display: grid; gap: 18px; }
+    .idea { padding: 22px; scroll-margin-top: 24px; }
+    .rank { color: var(--green); font-size: 12px; font-weight: 800; letter-spacing: .08em; }
+    .idea header { margin: 4px 0 13px; }
+    .idea p { max-width: none; }
+    .idea dl {
+      display: grid;
+      grid-template-columns: 104px 1fr;
+      gap: 9px 16px;
+      margin: 18px 0 0;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .idea dt { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; }
+    .idea dd { margin: 0; }
+    .top-pick { background: linear-gradient(135deg, var(--surface) 0%, #142019 100%); border-color: #3f6441; }
+    .callout { background: var(--green-soft); border-color: #345637; }
+    .callout .eyebrow { color: var(--green); }
+    .diagram { margin-top: 20px; padding: 18px; overflow-x: auto; }
+    svg { display: block; min-width: 760px; width: 100%; height: auto; }
+    .diagram-note { margin: 10px 2px 0; color: var(--muted); font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 12px; }
+    th, td { padding: 12px 14px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--surface-2); color: var(--purple); font-size: 12px; text-transform: uppercase; }
+    td { background: var(--surface); }
+    td:first-child { width: 34px; color: var(--muted); }
+    footer { margin-top: 52px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    @media (max-width: 700px) {
+      main { padding: 34px 18px 60px; }
+      .axes { grid-template-columns: 1fr; }
+      .idea dl { grid-template-columns: 1fr; gap: 3px; }
+      .idea dd + dt { margin-top: 8px; }
+      table { font-size: 12px; }
+      th, td { padding: 9px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Ideation · Release automation</div>
+    <h1>Changesets for a binary release train</h1>
+    <p class="lede">Use the contributor ergonomics from <code>byok-runtime</code>, while keeping <code>llm-now</code>'s five-platform binaries, protected signing, attestations, and recovery controls intact.</p>
+    <div class="metadata" aria-label="Document metadata">
+      <span class="chip">Date · <time datetime="2026-07-16">2026-07-16</time></span>
+      <span class="chip">Topic · changesets-release-automation</span>
+      <span class="chip">Mode · repo-grounded</span>
+      <span class="chip purple">Focus · @changesets/cli-driven releases</span>
+    </div>
+    <div class="stats" aria-label="Ideation summary">
+      <div class="stat"><b>29</b><span>deduped candidates</span></div>
+      <div class="stat"><b>7</b><span>ranked survivors</span></div>
+      <div class="stat"><b>4</b><span>topic axes covered</span></div>
+      <div class="stat"><b>1</b><span>recommended architecture</span></div>
+    </div>
+  </header>
+
+  <section id="grounding-context">
+    <div class="eyebrow">Evidence before ideas</div>
+    <h2>Grounding Context</h2>
+    <div class="panel">
+      <p><strong>Codebase context.</strong> <code>package.json</code> is already the single version source for CLI output, archive filenames, validators, and packaging. The current public workflow is manually dispatched with a pre-existing tag and then builds five native targets, signs and notarizes macOS, assembles the exact asset set, verifies checksums, issues attestations, and creates a GitHub Release behind protected environments.</p>
+      <p><strong>Reference pattern.</strong> <code>byok-runtime</code> uses <code>@changesets/cli</code> and <code>changesets/action</code> to maintain a <code>chore: release</code> PR. Its publication step targets npm, so llm-now should copy the version-PR half, not <code>changeset publish</code>.</p>
+      <p><strong>External constraints.</strong> Changesets officially separates versioning from publication and supports versioning private packages. A workflow should not rely on a tag pushed with <code>GITHUB_TOKEN</code> to wake a second workflow; an explicit reusable-workflow call is the reliable handoff.</p>
+      <p><strong>Institutional context.</strong> This repository has no <code>docs/solutions/</code> corpus or <code>CONCEPTS.md</code>, so the current workflows, release policy tests, maintainer docs, and sibling repository are the governing evidence.</p>
+    </div>
+  </section>
+
+  <section id="topic-axes">
+    <div class="eyebrow">Surface map</div>
+    <h2>Topic Axes</h2>
+    <div class="axes">
+      <div class="axis"><b>Contributor/version intent</b><span>How contributors declare SemVer and user-facing release notes.</span></div>
+      <div class="axis"><b>Release-PR orchestration</b><span>How queued intent becomes one reviewed version commit and starts the binary engine.</span></div>
+      <div class="axis"><b>Protected binary publication</b><span>How final assets retain signing, checksum, attestation, and approval boundaries.</span></div>
+      <div class="axis"><b>Retry/idempotency</b><span>How failures, duplicate triggers, tags, and manual recovery behave deterministically.</span></div>
+    </div>
+  </section>
+
+  <section id="ranked-ideas">
+    <div class="eyebrow">Qualified directions</div>
+    <h2>Ranked Ideas</h2>
+    <ol class="jump-list">
+      <li><a href="#idea-1">Reviewed release train with protected promotion</a></li>
+      <li><a href="#idea-2">Changesets as a version-only intent compiler</a></li>
+      <li><a href="#idea-3">One reusable binary engine, two entry points</a></li>
+      <li><a href="#idea-4">Tag-last publication with exact-SHA resumability</a></li>
+      <li><a href="#idea-5">Desired-version reconciliation state machine</a></li>
+      <li><a href="#idea-6">Least-privilege permission airlock</a></li>
+      <li><a href="#idea-7">Two independent concurrency lanes</a></li>
+    </ol>
+
+    <div class="ideas">
+      <article class="idea top-pick" id="idea-1">
+        <div class="rank">IDEA 1 · TOP PICK</div>
+        <header><h3>Reviewed release train with protected promotion</h3></header>
+        <p><strong>Description:</strong> Feature PRs add Changesets intent. A low-privilege push-to-main coordinator creates or refreshes one reviewable release PR that consumes those files, bumps <code>package.json</code>, and writes <code>CHANGELOG.md</code>. Merging that generated PR explicitly invokes the existing binary pipeline for its exact merge SHA; final signing and publication remain protected.</p>
+        <div class="diagram" aria-label="Conceptual release train">
+          <svg viewBox="0 0 900 245" role="img" aria-labelledby="flow-title flow-desc">
+            <title id="flow-title">Reviewed release train</title>
+            <desc id="flow-desc">Feature pull requests contribute changesets to a generated release pull request. Merging it directly invokes a reusable five-platform release engine. Protected approval promotes final assets to a tag and GitHub Release.</desc>
+            <defs>
+              <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#9bd7ff"/></marker>
+            </defs>
+            <rect x="18" y="58" width="170" height="92" rx="12" fill="#282643" stroke="#5c57a0"/>
+            <text x="103" y="88" fill="#c9c6ff" text-anchor="middle" font-size="15" font-weight="700">Feature PRs</text>
+            <text x="103" y="115" fill="#f3f4f6" text-anchor="middle" font-size="13">.changeset intent</text>
+            <text x="103" y="136" fill="#aab2c0" text-anchor="middle" font-size="12">patch · minor · major</text>
+            <line x1="188" y1="104" x2="252" y2="104" stroke="#9bd7ff" stroke-width="2.5" marker-end="url(#arrow)"/>
+            <text x="220" y="91" fill="#9bd7ff" text-anchor="middle" font-size="11">queue</text>
+            <rect x="262" y="43" width="195" height="122" rx="12" fill="#1d3120" stroke="#4d7c50"/>
+            <text x="359" y="75" fill="#b9f27c" text-anchor="middle" font-size="15" font-weight="700">chore: release PR</text>
+            <text x="359" y="105" fill="#f3f4f6" text-anchor="middle" font-size="13">version + changelog</text>
+            <text x="359" y="128" fill="#f3f4f6" text-anchor="middle" font-size="13">reviewed merge gate</text>
+            <line x1="457" y1="104" x2="520" y2="104" stroke="#9bd7ff" stroke-width="2.5" marker-end="url(#arrow)"/>
+            <text x="488" y="91" fill="#9bd7ff" text-anchor="middle" font-size="11">direct call</text>
+            <rect x="530" y="43" width="180" height="122" rx="12" fill="#173044" stroke="#356987"/>
+            <text x="620" y="75" fill="#9bd7ff" text-anchor="middle" font-size="15" font-weight="700">Release engine</text>
+            <text x="620" y="103" fill="#f3f4f6" text-anchor="middle" font-size="13">5 native targets</text>
+            <text x="620" y="126" fill="#f3f4f6" text-anchor="middle" font-size="13">sign · assemble · verify</text>
+            <line x1="710" y1="104" x2="770" y2="104" stroke="#9bd7ff" stroke-width="2.5" marker-end="url(#arrow)"/>
+            <text x="740" y="91" fill="#9bd7ff" text-anchor="middle" font-size="11">approve</text>
+            <rect x="780" y="58" width="105" height="92" rx="46" fill="#3a2c16" stroke="#8b672f"/>
+            <text x="832" y="94" fill="#ffd58a" text-anchor="middle" font-size="14" font-weight="700">vX.Y.Z</text>
+            <text x="832" y="118" fill="#f3f4f6" text-anchor="middle" font-size="12">Release</text>
+            <text x="450" y="213" fill="#aab2c0" text-anchor="middle" font-size="12">Intent is automatic. Cadence is reviewed. Public promotion stays protected.</text>
+          </svg>
+        </div>
+        <p class="diagram-note">Conceptual flow only; implementation boundaries belong in the downstream requirements and plan.</p>
+        <div class="idea-meta">
+          <span class="chip purple">Axis · Release-PR orchestration</span>
+          <span class="chip green">Confidence · 94%</span>
+          <span class="chip amber">Complexity · High</span>
+        </div>
+        <dl>
+          <dt>Basis</dt><dd><code>direct:</code> byok-runtime proves the release-PR loop; llm-now already propagates one validated SHA through its five-platform workflow. <code>external:</code> an explicit call avoids GitHub token recursion limits.</dd>
+          <dt>Rationale</dt><dd>This gives the user the requested “changeset triggers a bumped release” behavior without equating a feature merge with immediate public publication.</dd>
+          <dt>Downsides</dt><dd>Requires reshaping the existing manual workflow into a coordinator plus reusable release engine and commissioning bot-authored release PR behavior.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-2">
+        <div class="rank">IDEA 2</div>
+        <header><h3>Changesets as a version-only intent compiler</h3></header>
+        <p><strong>Description:</strong> Add the same authoring surface as byok-runtime—<code>bun run changeset</code>, <code>.changeset/config.json</code>, a contributor README, and a generated changelog—but configure private-package versioning and omit npm publication. Multiple pending Changesets coalesce into the next version PR, with the highest applicable SemVer bump.</p>
+        <div class="idea-meta">
+          <span class="chip purple">Axis · Contributor/version intent</span>
+          <span class="chip green">Confidence · 93%</span>
+          <span class="chip blue">Complexity · Low</span>
+        </div>
+        <dl>
+          <dt>Basis</dt><dd><code>external:</code> official Changesets lifecycle separates version from publish and supports private-package versioning. <code>direct:</code> llm-now's <code>package.json</code> version already drives every user-visible binary version surface.</dd>
+          <dt>Rationale</dt><dd>The useful part of Changesets is semantic intent and a reviewed version/changelog diff; the npm publisher is incidental to byok-runtime and unnecessary here.</dd>
+          <dt>Downsides</dt><dd>Contributors must learn when to add patch, minor, or major intent. Whether non-release PRs need an explicit declaration remains a policy choice.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-3">
+        <div class="rank">IDEA 3</div>
+        <header><h3>One reusable binary engine, two entry points</h3></header>
+        <p><strong>Description:</strong> Extract the current build/sign/assemble/attest/publish graph behind a reusable workflow interface keyed by version and source SHA. The Changesets coordinator calls it for normal releases, while <code>workflow_dispatch</code> remains a clearly labeled recovery and unsigned-candidate entrance to the same engine.</p>
+        <div class="idea-meta">
+          <span class="chip purple">Axis · Release-PR orchestration</span>
+          <span class="chip green">Confidence · 90%</span>
+          <span class="chip amber">Complexity · High</span>
+        </div>
+        <dl>
+          <dt>Basis</dt><dd><code>direct:</code> the current workflow already has a validated SHA handoff and separate candidate/public paths. <code>reasoned:</code> one engine prevents the automatic and emergency paths from drifting.</dd>
+          <dt>Rationale</dt><dd>The normal path becomes simple without deleting a proven operator escape hatch for commissioning, runner failures, or exceptional recovery.</dd>
+          <dt>Downsides</dt><dd>Reusable-workflow permissions, secrets, environment approvals, and caller inputs need careful validation; this is the largest structural change.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-4">
+        <div class="rank">IDEA 4</div>
+        <header><h3>Tag-last publication with exact-SHA resumability</h3></header>
+        <p><strong>Description:</strong> Build, sign, notarize, assemble, and checksum every final asset before creating <code>vX.Y.Z</code>. In the protected publication job, create the tag if absent; if it exists, continue only when its peeled commit equals the exact release SHA. A mismatched tag fails closed, and an existing GitHub Release is never overwritten.</p>
+        <div class="idea-meta">
+          <span class="chip purple">Axis · Protected binary publication</span>
+          <span class="chip green">Confidence · 88%</span>
+          <span class="chip amber">Complexity · Medium</span>
+        </div>
+        <dl>
+          <dt>Basis</dt><dd><code>direct:</code> today's workflow creates no release until final checks pass but requires the tag before building; it already revalidates remote tag SHA and refuses duplicate releases.</dd>
+          <dt>Rationale</dt><dd>A public version identity should mean releasable bytes exist. Exact-SHA resume semantics preserve retry safety if failure occurs between tag and Release creation.</dd>
+          <dt>Downsides</dt><dd>Tag creation moves into a privileged transaction. The team must define and test every partial state around tag push, attestation, and Release creation.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-5">
+        <div class="rank">IDEA 5</div>
+        <header><h3>Desired-version reconciliation state machine</h3></header>
+        <p><strong>Description:</strong> Treat the merged <code>package.json</code> version as desired state and the remote tag/GitHub Release as observed state. No tag or release starts work; a matching completed release is a no-op; an exact-SHA tag without a release is resumable; conflicting or impossible partial states fail with a precise operator message.</p>
+        <div class="idea-meta">
+          <span class="chip purple">Axis · Retry/idempotency</span>
+          <span class="chip green">Confidence · 85%</span>
+          <span class="chip amber">Complexity · Medium</span>
+        </div>
+        <dl>
+          <dt>Basis</dt><dd><code>external:</code> Changesets warns that “no pending changesets” also occurs on unrelated post-release pushes. <code>direct:</code> llm-now already refuses duplicate releases and checks exact tag/SHA identity.</dd>
+          <dt>Rationale</dt><dd>Automation should reconcile toward the intended release rather than depend on one perfect event. That makes runner, signing, and approval failures recoverable without empty commits.</dd>
+          <dt>Downsides</dt><dd>A state table adds policy surface and must avoid accidentally normalizing dangerous partial states; only a small set should be resumable.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-6">
+        <div class="rank">IDEA 6</div>
+        <header><h3>Least-privilege permission airlock</h3></header>
+        <p><strong>Description:</strong> Give the Changesets job only the permissions needed to update the version PR. Keep native builds read-only, Apple credentials only in <code>release-signing</code>, and contents/OIDC/attestation writes only in <code>release-publication</code>. The coordinator passes version and SHA across that boundary, never secrets.</p>
+        <div class="idea-meta">
+          <span class="chip purple">Axis · Protected binary publication</span>
+          <span class="chip green">Confidence · 92%</span>
+          <span class="chip amber">Complexity · Medium</span>
+        </div>
+        <dl>
+          <dt>Basis</dt><dd><code>direct:</code> llm-now's release policy tests already enforce narrow publication permissions and protected environments; byok-runtime's simpler npm workflow uses broader workflow-level writes.</dd>
+          <dt>Rationale</dt><dd>Copying byok-runtime's ergonomics should not widen the trusted surface of a signed, attested binary release.</dd>
+          <dt>Downsides</dt><dd>GitHub reusable-workflow permission inheritance is subtle. The final design must prove that the caller cannot grant or consume authority outside the intended jobs.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-7">
+        <div class="rank">IDEA 7</div>
+        <header><h3>Two independent concurrency lanes</h3></header>
+        <p><strong>Description:</strong> Serialize and cancel superseded release-PR refreshes on <code>main</code>, but key binary publication to the settled version/SHA and never cancel an active signing or publication run. New feature merges may update the next release queue without interrupting the release already in promotion.</p>
+        <div class="idea-meta">
+          <span class="chip purple">Axis · Retry/idempotency</span>
+          <span class="chip green">Confidence · 82%</span>
+          <span class="chip blue">Complexity · Low</span>
+        </div>
+        <dl>
+          <dt>Basis</dt><dd><code>direct:</code> CI already uses cancel-in-progress concurrency, the current release workflow has no concurrency, and byok-runtime serializes its main-branch release workflow.</dd>
+          <dt>Rationale</dt><dd>Version-PR freshness and public promotion have opposite cancellation semantics. Separating them prevents ordinary development activity from superseding protected release work.</dd>
+          <dt>Downsides</dt><dd>Concurrency keys must distinguish versions while preventing duplicate work for the same version; careless grouping can block a legitimate recovery run.</dd>
+        </dl>
+      </article>
+    </div>
+  </section>
+
+  <section id="rejection-summary">
+    <div class="eyebrow">What did not survive</div>
+    <h2>Rejection Summary</h2>
+    <table>
+      <thead><tr><th>#</th><th>Idea</th><th>Reason Rejected</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Changeset-or-no-release declaration on every PR</td><td>Useful policy variant, but not necessary for first adoption and may add contributor friction.</td></tr>
+        <tr><td>2</td><td>Release PR as executable manifest including lockfile</td><td>Basis refuted: Bun's root lockfile does not encode the package version.</td></tr>
+        <tr><td>3</td><td>Add a new release-PR native preflight</td><td>Existing PR CI already builds and smokes all five targets; only bot-PR commissioning remains.</td></tr>
+        <tr><td>4</td><td>Generate a separate machine-readable release contract</td><td>Grounded, but added schema and plumbing are premature while version + SHA + target registry already carry the core identity.</td></tr>
+        <tr><td>5</td><td>Release dashboard</td><td>Changesets PR metadata plus GitHub checks and artifacts already provide the surface; a second dashboard adds little value.</td></tr>
+        <tr><td>6</td><td>Read-only classifier</td><td>Underspecified and subsumed by the explicit reconciliation state machine and permission airlock.</td></tr>
+        <tr><td>7</td><td>Sealed asset consignment across runs</td><td>No durable immutable cross-run store, retention model, or lookup mechanism was justified.</td></tr>
+        <tr><td>8</td><td>Preview and production share one immutable manifest</td><td>A pre-merge preview cannot contain the eventual merge SHA; it needs a finalization boundary and adds complexity.</td></tr>
+        <tr><td>9</td><td>Immediate release for every individual changeset</td><td>Fails the cost/cadence test: each release consumes a five-platform matrix and protected signing stages; batching is stronger.</td></tr>
+        <tr><td>10</td><td>Copy byok-runtime's <code>changeset publish</code></td><td>Scope mismatch: llm-now is a private binary CLI with GitHub assets, not an npm publication target.</td></tr>
+        <tr><td>11</td><td>Create the tag before the build and rely on tag events</td><td>Fragile failure semantics and GitHub token recursion make this weaker than explicit same-run orchestration.</td></tr>
+        <tr><td>12</td><td>Remove manual dispatch entirely</td><td>Eliminates a valuable commissioning and recovery entrance without reducing the underlying release engine.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="callout">
+      <div class="eyebrow">Recommendation</div>
+      <p><strong>Choose Idea 1 as the architecture.</strong> Treat Ideas 2, 3, 4, and 6 as required parts of its first implementation. Add Ideas 5 and 7 as explicit operational contracts during brainstorming so retry and concurrency behavior cannot remain accidental.</p>
+    </div>
+  </section>
+
+  <footer class="composition-signal">Composed 2026-07-17T06:05:50Z by ce-ideate from the user prompt, the llm-now repository, the local byok-runtime reference, and official Changesets/GitHub documentation.</footer>
+</main>
+</body>
+</html>
