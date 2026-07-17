@@ -466,7 +466,7 @@
 
     <article class="idea" id="idea-4">
       <div class="idea-head"><span class="rank">4</span><div><p class="eyebrow">Cross-platform security</p><h3>Native-vault first, secure-only fallback policy</h3></div></div>
-      <p>Use a small host-owned credential-store adapter with <code>Bun.secrets</code> as the preferred implementation, but only after compiled-artifact tests prove <code>get/set/delete</code> across the supported targets and relevant session contexts. Runtime outcomes distinguish usable storage from locked/unavailable/interaction-required failures. Automatic selection may choose native storage or a configured helper; it never silently writes a plaintext or self-encrypted file.</p>
+      <p>Use a small host-owned credential-store adapter with <code>Bun.secrets</code> as the preferred implementation, but only after compiled-artifact tests prove <code>get/set/delete</code> across the supported targets and relevant session contexts. Runtime outcomes distinguish usable storage from locked/unavailable/interaction-required failures. The MVP chooses environment or native storage; a configured helper can follow later. It never silently writes a plaintext or self-encrypted file.</p>
       <dl class="fields">
         <dt>Axis</dt><dd>Secure-store portability</dd>
         <dt>Basis</dt><dd><strong>external:</strong> Bun maps its experimental secrets API to native stores on all three OS families. Secret Service documents session, lock, and prompt behavior. <strong>direct:</strong> llm-now already compiles and smokes five native targets but has no secret-store coverage.</dd>
@@ -490,12 +490,12 @@
       </dl>
       <div class="visual">
         <svg viewBox="0 0 880 250" role="img" aria-labelledby="lanes-title lanes-desc">
-          <title id="lanes-title">Interactive and headless secret-input lanes converge on one resolver</title>
-          <desc id="lanes-desc">Interactive hidden input and auth stdin lead to a native store, while environment and external helpers serve automation. All sources converge on one host-owned resolver before byok-runtime receives an explicit key.</desc>
+          <title id="lanes-title">MVP interactive and headless secret-input lanes converge on one resolver</title>
+          <desc id="lanes-desc">Interactive hidden input leads to the native store while environment credentials serve automation. Both sources converge on one host-owned resolver before byok-runtime receives an explicit key.</desc>
           <defs><marker id="arrow3" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#78e7c5"/></marker></defs>
           <g font-family="ui-sans-serif,system-ui">
-            <rect x="20" y="38" width="210" height="70" rx="12" fill="#123b35" stroke="#36796a"/><text x="125" y="68" fill="#c1fff0" font-size="16" text-anchor="middle">Human enrollment</text><text x="125" y="91" fill="#a7dacf" font-size="13" text-anchor="middle">hidden TTY · auth stdin</text>
-            <rect x="20" y="142" width="210" height="70" rx="12" fill="#172e46" stroke="#355b7b"/><text x="125" y="172" fill="#c4e4ff" font-size="16" text-anchor="middle">Automation</text><text x="125" y="195" fill="#a8cae6" font-size="13" text-anchor="middle">environment · helper</text>
+            <rect x="20" y="38" width="210" height="70" rx="12" fill="#123b35" stroke="#36796a"/><text x="125" y="68" fill="#c1fff0" font-size="16" text-anchor="middle">Human enrollment</text><text x="125" y="91" fill="#a7dacf" font-size="13" text-anchor="middle">hidden TTY</text>
+            <rect x="20" y="142" width="210" height="70" rx="12" fill="#172e46" stroke="#355b7b"/><text x="125" y="172" fill="#c4e4ff" font-size="16" text-anchor="middle">Automation</text><text x="125" y="195" fill="#a8cae6" font-size="13" text-anchor="middle">environment</text>
             <rect x="335" y="91" width="210" height="72" rx="12" fill="#2d2448" stroke="#665292"/><text x="440" y="122" fill="#eadfff" font-size="16" text-anchor="middle">llm-now resolver</text><text x="440" y="145" fill="#c8bae9" font-size="13" text-anchor="middle">source + redaction scope</text>
             <rect x="655" y="91" width="200" height="72" rx="12" fill="#18212c" stroke="#3b4b59"/><text x="755" y="122" fill="#edf4f7" font-size="16" text-anchor="middle">byok-runtime</text><text x="755" y="145" fill="#a8bac4" font-size="13" text-anchor="middle">explicit apiKey input</text>
           </g>
@@ -503,7 +503,7 @@
             <path d="M230 73 C275 73, 285 108, 325 116"/><path d="M230 177 C275 177, 285 148, 325 139"/><line x1="545" y1="127" x2="645" y2="127"/>
           </g>
         </svg>
-        <p class="caption">Illustrative split: credential input has dedicated channels; generation keeps its current prompt contract.</p>
+        <p class="caption">MVP split: hidden enrollment feeds the vault, automation keeps environment credentials, and generation preserves its prompt contract.</p>
       </div>
     </article>
 
