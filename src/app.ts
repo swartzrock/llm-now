@@ -1,5 +1,6 @@
 import {
   BYOK_API_KEY_ENV_VARS,
+  type ByokCloudProviderId,
   type ByokEnvironment,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
@@ -23,13 +24,16 @@ import {
 } from "./args.ts";
 import { isInteractive, resolvePrompt, type PromptInput, type TextOutput } from "./io.ts";
 import {
+  cloudCredentialProviderOptions,
   createSearchablePrompter,
   createTerminalColors,
   formatSelection,
+  providerLabel,
   selectAliasOrFresh,
   selectProviderAndModel,
   sortPromptOptions,
   stripTerminalSequences,
+  validateCredentialCandidate,
   type SearchablePrompter,
 } from "./prompts.ts";
 import { RuntimeStageError, type RuntimeGateway } from "./runtime.ts";
@@ -38,6 +42,9 @@ const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 5_000;
 const DEFAULT_MODEL_LIST_TIMEOUT_MS = 10_000;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
+const MANAGE_API_KEYS_VALUE = "setup:manage-api-keys";
+const ALIAS_SETUP_PREFIX = "setup:alias:";
+const PROVIDER_SETUP_PREFIX = "setup:provider:";
 
 export type ApplicationPrompter = SearchablePrompter;
 
@@ -269,6 +276,92 @@ async function offerAliasSave(
   }
 }
 
+async function runSetup(
+  deps: ApplicationDependencies,
+  diagnostic: (text: string) => void,
+): Promise<number> {
+  const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
+    applicationAliasPath(deps),
+  )).aliases;
+  let providers: readonly ByokProviderId[] = [];
+  try {
+    providers = await deps.runtime.discover();
+  } catch (error) {
+    diagnostic(error instanceof Error ? error.message : String(error));
+  }
+
+  const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => ({
+    value: `${ALIAS_SETUP_PREFIX}${alias}`,
+    label: sanitizeDiagnostic(alias, deps.env),
+    hint: formatSelection(selection),
+  })));
+  const providerOptions = sortPromptOptions([...new Set(providers)].map((provider) => ({
+    value: `${PROVIDER_SETUP_PREFIX}${provider}`,
+    label: providerLabel(provider),
+  })));
+  const selected = await deps.prompter.select("What would you like to set up?", [
+    ...aliasOptions,
+    ...providerOptions,
+    { value: MANAGE_API_KEYS_VALUE, label: "Add or manage API keys…" },
+  ]);
+  if (selected === null) return 130;
+
+  if (typeof selected !== "string") {
+    throw new RangeError("Prompter returned an invalid setup choice.");
+  }
+  if (selected.startsWith(ALIAS_SETUP_PREFIX)) {
+    const alias = selected.slice(ALIAS_SETUP_PREFIX.length);
+    if (!Object.hasOwn(aliases, alias)) throw new RangeError("Alias choice was unavailable.");
+    deps.stderr.write(`Next: llm-now ${alias} --input "<prompt>"\n`);
+    return 0;
+  }
+  if (selected.startsWith(PROVIDER_SETUP_PREFIX)) {
+    const provider = selected.slice(PROVIDER_SETUP_PREFIX.length);
+    if (!providers.includes(provider as ByokProviderId)) {
+      throw new RangeError("Provider choice was unavailable.");
+    }
+    deps.stderr.write(
+      `Provider ${providerLabel(provider as ByokProviderId)} is available. `
+      + `Run llm-now --provider ${provider} --model <id> --input "<prompt>".\n`,
+    );
+    return 0;
+  }
+  if (selected !== MANAGE_API_KEYS_VALUE) {
+    throw new RangeError("Prompter returned an invalid setup choice.");
+  }
+
+  const cloudOptions = cloudCredentialProviderOptions();
+  const providerValue = await deps.prompter.select("Choose an API-key provider", cloudOptions);
+  if (providerValue === null) return 130;
+  if (
+    typeof providerValue !== "string"
+    || !cloudOptions.some((option) => option.value === providerValue)
+  ) {
+    throw new RangeError("Prompter returned an invalid credential provider choice.");
+  }
+  const provider = providerValue as ByokCloudProviderId;
+
+  while (true) {
+    const candidate = await deps.prompter.password(`Enter the ${providerLabel(provider)} API key`, {
+      validate: validateCredentialCandidate,
+    });
+    if (candidate === null) return 130;
+    const validationMessage = validateCredentialCandidate(candidate);
+    if (validationMessage !== undefined) {
+      diagnostic(`credential: ${validationMessage}`);
+      continue;
+    }
+    await withStageTimeout(
+      deps.runtime.validateCredential(provider, candidate),
+      deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
+      "model-list",
+      provider,
+    );
+    deps.stderr.write(`Credential verified for ${providerLabel(provider)}; no changes saved.\n`);
+    return 0;
+  }
+}
+
 function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
   stderr.write(`\u001b[0m${response.endsWith("\n") ? "\n" : "\n\n"}`);
 }
@@ -298,6 +391,9 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     }
 
     const interactive = isInteractive(deps.stdin, deps.stderr);
+    if (deps.args.length === 0 && interactive) {
+      return await runSetup(deps, diagnostic);
+    }
     const prompt = await resolvePrompt(parsed.input, deps.stdin);
     const selection = await resolveSelection(deps, parsed.selection, interactive, diagnostic);
     if (typeof selection === "number") return selection;
@@ -335,7 +431,15 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       diagnostic(`config: ${error.message}`);
       return 1;
     }
-    diagnostic(error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    const setupGuidance = isInteractive(deps.stdin, deps.stderr)
+      && (message.includes("missing credential")
+        || message.includes("native credential storage unavailable"));
+    diagnostic(
+      setupGuidance
+        ? `${message}\nRun llm-now with no arguments to manage API keys.`
+        : message,
+    );
     return 1;
   }
 }

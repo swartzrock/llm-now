@@ -23,11 +23,13 @@ export function renderHelpText(
   return `Send a prompt to a selected model.
 
 ${heading("Usage:")}
+  ${literal("llm-now")}
   ${literal("llm-now")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${metadata("<alias>")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${literal("--provider")} ${metadata("<id>")} ${literal("--model")} ${metadata("<id|default>")} ${literal("--input")} ${metadata("<text>")}
 
 ${heading("Rules:")}
+  Run ${literal("llm-now")} with no arguments in a terminal to set up providers and API keys.
   Input comes from exactly one of ${literal("--input")} or stdin.
   Omit selection for interactive choice; otherwise use an alias or provider/model.
   Model "default" is available only for codex-cli and claude-cli.

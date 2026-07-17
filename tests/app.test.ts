@@ -38,8 +38,10 @@ function prompts(options: {
   choices?: Array<PromptValue | null>;
   confirms?: Array<boolean | null>;
   names?: Array<string | null>;
+  passwords?: Array<string | null>;
   seen?: Array<{ message: string; options: PromptOption[] }>;
   inputMessages?: string[];
+  passwordMessages?: string[];
   confirmMessages?: string[];
   confirmInitialValues?: Array<boolean | undefined>;
 } = {}): ApplicationPrompter {
@@ -56,6 +58,10 @@ function prompts(options: {
     input: async (message) => {
       options.inputMessages?.push(message);
       return options.names?.shift() ?? null;
+    },
+    password: async (message) => {
+      options.passwordMessages?.push(message);
+      return options.passwords?.shift() ?? null;
     },
   };
 }
@@ -226,6 +232,168 @@ describe("help output", () => {
 });
 
 describe("one-shot application", () => {
+  test("routes a bare TTY invocation into setup before reading generation input", async () => {
+    const seen: Array<{ message: string; options: PromptOption[] }> = [];
+    const stdin = {
+      isTTY: true,
+      async *[Symbol.asyncIterator]() {
+        throw new Error("setup must not resolve a generation prompt");
+      },
+    };
+    const app = dependencies({
+      args: [],
+      stdin,
+      stderrTty: true,
+      prompter: prompts({ choices: [null], seen }),
+      loadAliases: async () => ({
+        version: 1,
+        aliases: { daily: { provider: "openai", model: "gpt-5" } },
+      }),
+      runtime: runtime({ providers: ["ollama", "codex-cli"] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(app.stdout.text()).toBe("");
+    expect(app.runtime.calls.generate).toBe(0);
+    expect(seen[0]?.message).toBe("What would you like to set up?");
+    expect(seen[0]?.options.map(({ label }) => label)).toEqual([
+      "daily",
+      "Codex CLI",
+      "Ollama",
+      "Add or manage API keys…",
+    ]);
+  });
+
+  test("uses the static cloud catalog for API-key management and cancels without validation", async () => {
+    const seen: Array<{ message: string; options: PromptOption[] }> = [];
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({ choices: ["setup:manage-api-keys", null], seen }),
+      runtime: runtime({ providers: [] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(app.stdout.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 1, list: 0, generate: 0 });
+    expect(seen[1]?.options.map(({ value }) => value)).toEqual([
+      "anthropic",
+      "deepinfra",
+      "deepseek",
+      "google",
+      "groq",
+      "mistral",
+      "openai",
+      "openrouter",
+      "xai",
+    ]);
+  });
+
+  test("rejects invalid hidden candidates without echoing or validating them", async () => {
+    const invalid = " u3-secret-sentinel ";
+    const passwordMessages: string[] = [];
+    let validations = 0;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({
+        choices: ["setup:manage-api-keys", "openai"],
+        passwords: [invalid, null],
+        passwordMessages,
+      }),
+      runtime: runtime({
+        providers: [],
+        validateCredential: async () => {
+          validations += 1;
+          return [];
+        },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(validations).toBe(0);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).not.toContain(invalid);
+    expect(app.stderr.text()).not.toContain(invalid.trim());
+    expect(passwordMessages.every((message) => !message.includes(invalid.trim()))).toBe(true);
+  });
+
+  test("validates the exact hidden candidate while keeping setup stderr-only and secret-free", async () => {
+    const candidate = "u3-valid-hidden-sentinel";
+    const passwordMessages: string[] = [];
+    const validated: string[] = [];
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({
+        choices: ["setup:manage-api-keys", "openai"],
+        passwords: [candidate],
+        passwordMessages,
+      }),
+      runtime: runtime({
+        providers: [],
+        validateCredential: async (_provider, apiKey) => {
+          validated.push(apiKey);
+          return [];
+        },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(validated).toEqual([candidate]);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toContain("Credential verified for OpenAI");
+    expect(`${app.stdout.text()}${app.stderr.text()}${passwordMessages.join("\n")}`).not.toContain(
+      candidate,
+    );
+  });
+
+  test("adds bare setup guidance only to interactive missing-credential failures", async () => {
+    const failure = new RuntimeStageError(
+      "generation",
+      "openai",
+      "missing credential; set OPENAI_API_KEY",
+    );
+    const interactive = dependencies({
+      args: ["--input", "hello", "--provider", "openai", "--model", "gpt"],
+      stdin: input("", true),
+      stderrTty: true,
+      runtime: runtime({ generate: async () => { throw failure; } }),
+    });
+    expect(await runApplication(interactive.value)).toBe(1);
+    expect(interactive.stderr.text()).toContain("set OPENAI_API_KEY");
+    expect(interactive.stderr.text()).toContain("Run llm-now with no arguments");
+
+    const headless = dependencies({
+      args: ["--input", "hello", "--provider", "openai", "--model", "gpt"],
+      runtime: runtime({ generate: async () => { throw failure; } }),
+    });
+    expect(await runApplication(headless.value)).toBe(1);
+    expect(headless.stderr.text()).toContain("set OPENAI_API_KEY");
+    expect(headless.stderr.text()).not.toContain("no arguments");
+  });
+
+  test("keeps --input and piped stdin on generation instead of setup", async () => {
+    const explicit = dependencies({
+      args: ["--input", "flag prompt", "--provider", "ollama", "--model", "qwen"],
+      stdin: input("", true),
+      stderrTty: true,
+    });
+    expect(await runApplication(explicit.value)).toBe(0);
+    expect(explicit.runtime.calls.generate).toBe(1);
+
+    const piped = dependencies({
+      args: ["daily"],
+      stdin: input("piped prompt"),
+      resolveAlias: async () => ({ provider: "ollama", model: "qwen" }),
+    });
+    expect(await runApplication(piped.value)).toBe(0);
+    expect(piped.runtime.calls.generate).toBe(1);
+  });
+
   test("offers sorted saved aliases first and bypasses discovery for the selected alias", async () => {
     const seen: Array<{ message: string; options: PromptOption[] }> = [];
     let loads = 0;
