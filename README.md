@@ -87,7 +87,7 @@ Run the bare command in an interactive terminal to open setup:
 llm-now
 ```
 
-Setup lists saved aliases, discovered providers, and cloud-provider API-key management. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
+Setup offers saved aliases, on-demand provider discovery, and cloud-provider API-key management. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
 
 Choose a discovered provider and model interactively:
 
@@ -134,6 +134,14 @@ Recognized environment variables are always authoritative. They are the recommen
 Use bare `llm-now` to add, replace, or delete a stored fallback. Replacement verifies the new key before changing the existing record, and save/delete confirmations default to No. Deleting a stored fallback does not remove an active environment credential. Aliases remain version 1 provider/model records and never contain keys or credential identifiers.
 
 Native storage is capability-gated per compiled release target. If it is not enabled for the current target, setup performs no credential-store read and directs you to the provider's environment variable instead. There is no plaintext or self-encrypted fallback.
+
+| Compiled target | Native store | Bun 1.3.14 policy |
+| --- | --- | --- |
+| macOS x64 / ARM64 | Keychain | Enabled after compiled lifecycle gate |
+| Linux x64 / ARM64 glibc | Secret Service | Enabled after compiled lifecycle gate; requires an available user-session service |
+| Windows x64 baseline | Credential Manager | Enabled after compiled lifecycle gate |
+
+The target and pinned Bun version must both match the tested policy. Linux servers, containers, SSH sessions, WSL, and locked desktop sessions may not expose Secret Service; use environment variables there.
 
 ## Discovery and diagnostics
 

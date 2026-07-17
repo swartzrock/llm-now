@@ -10,7 +10,16 @@ import {
   createExecutableArchive,
   createChecksumManifest,
 } from "../scripts/build.ts";
-import { assembleReleaseAssets, runProcess } from "../scripts/release-validate.ts";
+import {
+  NATIVE_VAULT_BUN_VERSION,
+  NATIVE_VAULT_COMPATIBILITY,
+  isNativeVaultEnabled,
+} from "../src/credentials.ts";
+import {
+  assembleReleaseAssets,
+  assertNativeVaultGateTarget,
+  runProcess,
+} from "../scripts/release-validate.ts";
 
 const temporaryDirectories: string[] = [];
 const testArchiveMtime = new Date("2026-07-13T12:34:56Z");
@@ -21,6 +30,48 @@ afterEach(async () => {
 });
 
 describe("native release build", () => {
+  test("keeps an explicit Bun-pinned vault policy in exact release-target parity", () => {
+    expect(NATIVE_VAULT_BUN_VERSION).toBe("1.3.14");
+    expect(NATIVE_VAULT_COMPATIBILITY.map((target) => target.id)).toEqual(
+      RELEASE_TARGETS.map((target) => target.id),
+    );
+    for (const target of NATIVE_VAULT_COMPATIBILITY) {
+      expect(isNativeVaultEnabled({
+        bunVersion: NATIVE_VAULT_BUN_VERSION,
+        platform: target.platform,
+        arch: target.arch,
+      })).toBe(target.enabled);
+      expect(isNativeVaultEnabled({
+        bunVersion: "1.3.15",
+        platform: target.platform,
+        arch: target.arch,
+      })).toBe(false);
+    }
+  });
+
+  test("fails the native lifecycle gate closed for a Bun or target mismatch", () => {
+    expect(() => assertNativeVaultGateTarget({
+      bunVersion: "1.3.15",
+      platform: "darwin",
+      arch: "arm64",
+    }, "macos-arm64")).toThrow("requires Bun 1.3.14");
+    expect(() => assertNativeVaultGateTarget({
+      bunVersion: NATIVE_VAULT_BUN_VERSION,
+      platform: "freebsd",
+      arch: "x64",
+    }, "macos-x64")).toThrow("requires darwin/x64; received freebsd/x64");
+    expect(() => assertNativeVaultGateTarget({
+      bunVersion: NATIVE_VAULT_BUN_VERSION,
+      platform: "darwin",
+      arch: "x64",
+    }, "unknown-x64")).toThrow("disabled for target unknown-x64");
+    expect(assertNativeVaultGateTarget({
+      bunVersion: NATIVE_VAULT_BUN_VERSION,
+      platform: "darwin",
+      arch: "x64",
+    }, "macos-x64").bunTarget).toBe("bun-darwin-x64-baseline");
+  });
+
   test("defines exactly the five supported glibc and baseline targets", () => {
     expect(RELEASE_TARGETS).toEqual([
       { id: "macos-x64", bunTarget: "bun-darwin-x64-baseline", runner: "macos-15-intel", executable: "llm-now" },

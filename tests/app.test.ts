@@ -122,7 +122,6 @@ function dependencies(options: {
   resolveAlias?: (path: string, name: string) => Promise<{ provider: ByokProviderId; model: string | null }>;
   saveAlias?: (...args: Parameters<NonNullable<Parameters<typeof runApplication>[0]["saveAlias"]>>) => Promise<SaveAliasResult>;
   generationTimeoutMs?: number;
-  discoveryTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault?: CredentialVault;
   credentialResolver?: CredentialResolver;
@@ -163,7 +162,6 @@ function dependencies(options: {
       resolveAlias: options.resolveAlias,
       saveAlias: options.saveAlias,
       generationTimeoutMs: options.generationTimeoutMs,
-      discoveryTimeoutMs: options.discoveryTimeoutMs,
       modelListTimeoutMs: options.modelListTimeoutMs,
       credentialVault,
       credentialResolver,
@@ -929,17 +927,23 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).toContain("generation (ollama): timed out");
   });
 
-  test("bounds discovery and model-list stages", async () => {
+  test("does not put a synthetic timeout around discovery that may read the native vault", async () => {
     const discovery = dependencies({
       args: ["--input", "hello"],
       stdin: input("", true),
       stderrTty: true,
-      discoveryTimeoutMs: 5,
-      runtime: runtime({ discover: () => new Promise(() => {}) }),
+      runtime: runtime({
+        discover: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return ["ollama"];
+        },
+      }),
+      prompter: prompts({ choices: ["ollama", "qwen"], names: [""] }),
     });
-    expect(await runApplication(discovery.value)).toBe(1);
-    expect(discovery.stderr.text()).toContain("discovery: timed out");
+    expect(await runApplication(discovery.value)).toBe(0);
+  });
 
+  test("bounds model-list stages", async () => {
     const models = dependencies({
       args: ["--input", "hello"],
       stdin: input("", true),

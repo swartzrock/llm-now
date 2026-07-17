@@ -8,6 +8,7 @@ A candidate is ready when:
 
 - all five native executables launch without Bun or Node.js installed;
 - help, version, prompt input, provider selection, aliases, output separation, diagnostics, and exit codes match the documented CLI contract;
+- every target with native credential storage enabled passes the compiled production-adapter lifecycle gate in its representative user session;
 - each supported provider completes at least one successful generation on a reference platform;
 - no credential appears in stdout, stderr, alias files, or captured shell logs;
 - no unexplained release-blocking manual failure remains.
@@ -27,6 +28,8 @@ Homebrew and Chocolatey are intentionally outside the current release scope. Do 
 | Windows x64 baseline | Full functional pass |
 
 A native smoke consists of checksum verification, extraction, `--help`, `--version`, invalid-usage behavior, one real generation, and operation without Bun or Node.js.
+
+Native credential storage is additionally gated on all five targets for Bun 1.3.14. macOS uses Keychain, Windows uses Credential Manager, and Linux uses Secret Service. Linux coverage requires a real isolated D-Bus user session and unlocked test collection; a platform name without that session is not evidence of availability.
 
 ### Providers
 
@@ -505,6 +508,38 @@ Use a disposable repository with the same workflow and protection settings; neve
 
 Each run must fail before public mutation with a diagnostic that identifies the conflicting state. Confirm the workflow never moves or deletes a tag, replaces an asset, edits the existing Release, or creates a lower-version tag. Maintainers must investigate and repair public state explicitly; rerunning automation must not overwrite it.
 
+## Native credential storage
+
+Use disposable OS accounts or VMs for these tests. Never test lifecycle mutations in a developer's normal account, and never put an API key in arguments, generation stdin, shell history, screenshots, reports, or workflow output.
+
+### MT-26: Run the compiled production-adapter gate
+
+On each matching native runner, from the exact candidate commit, run:
+
+```bash
+bun scripts/release-validate.ts secrets TARGET_ID
+```
+
+Replace `TARGET_ID` with the exact candidate target, such as `macos-arm64` or `linux-x64`. The gate must use Bun 1.3.14, reject a host/target mismatch, compile the production adapter with the same Bun target as the archive, and pass missing, set/get, replace/get, delete, and final-missing checks. It may print lifecycle stage names but no value. Confirm cleanup runs after success and after a deliberately injected intermediate failure. Linux must run inside the same isolated D-Bus/Secret Service session used by CI. A skip, warning-only failure, target mismatch, Bun mismatch, or leftover probe record is a release blocker.
+
+### MT-27: Add, replace, and delete a provider fallback
+
+In a disposable logged-in user account, obtain a temporary revocable provider credential and keep it out of the shell environment. Run bare `"$BIN"`, choose “Add or manage API keys…”, select the provider, and paste the value only into the hidden field.
+
+Confirm that invalid input and failed authentication write nothing; final save defaults to No; acceptance creates one provider record; and stdout, stderr, terminal capture, aliases, and config files contain no credential. Repeat with a second temporary credential. Declining or failing replacement must preserve the old record; accepting a verified replacement must change it once. Finally delete the record, confirming deletion defaults to No and a concurrent/already-absent delete remains successful. Revoke both temporary credentials after testing.
+
+### MT-28: Verify environment precedence and fallback behavior
+
+With both a stored fallback and a recognized environment credential present, make the two credentials distinguishable through provider-side test-account evidence without printing either value. Generation must use the environment credential and make no vault read. Remove the environment variable and repeat; generation must use the stored fallback. Restore the environment variable, delete the stored fallback through setup, and confirm the CLI explains that the provider remains available through the environment source.
+
+An authentication failure from the selected source must fail closed. The CLI must not retry the other source, switch provider, or overwrite/delete a stored record.
+
+### MT-29: Verify unavailable-store behavior and cleanup
+
+On Linux, repeat setup in a session without Secret Service. On other platforms, use a disposable test session where access to the native store is unavailable or denied. The operation must exit `1`, identify the credential-store operation as unavailable without exposing backend detail, create no plaintext/self-encrypted fallback, and preserve existing aliases and provider records. A recognized environment credential must remain usable.
+
+After every session, verify that the probe identity and every `llm-now` test-provider record are absent, the temporary credentials are revoked, the isolated alias/config directory is removed, and the disposable OS session is destroyed.
+
 ## Automation-backed coverage
 
 Keep the Bun test suite as the authority for behavior that is difficult or unreliable to verify manually:
@@ -531,6 +566,12 @@ OS and version:
 Architecture:
 Install method:
 Provider/model:
+Native target ID and Bun version:
+Credential-store backend:
+User/session isolation:
+Credential lifecycle stages:
+Environment-precedence evidence:
+Store-unavailable evidence:
 Test IDs:
 Pass/fail:
 Observed exit code:
@@ -539,9 +580,10 @@ stderr evidence:
 Alias-file evidence:
 Duration:
 Cleanup completed:
+Credential-store cleanup evidence:
 Notes/issues:
 ```
 
-Any secret leakage, wrong-provider fallback, stdout contamination, corrupt-alias replacement, checksum mismatch, or inability to run without Bun or Node.js blocks release.
+Any secret leakage, wrong-source/provider fallback, stdout contamination, corrupt-alias replacement, credential-store unavailability misclassification, missing store cleanup, absent compiled lifecycle evidence, checksum mismatch, or inability to run without Bun or Node.js blocks release.
 
 See the [README](../README.md), [CLI argument contract](../src/args.ts), and [release workflow](../.github/workflows/release.yml) for the source-of-truth behavior.

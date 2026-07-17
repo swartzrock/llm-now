@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { NATIVE_VAULT_COMPATIBILITY } from "../src/credentials.ts";
 
 const releaseWorkflow = await Bun.file(
   new URL("../.github/workflows/release.yml", import.meta.url),
@@ -12,6 +13,59 @@ const releaseCoordinatorExists = await Bun.file(
 ).exists();
 
 describe("release workflow policy", () => {
+  test("gates every enabled native archive on its exact compiled credential lifecycle", () => {
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      const nativeJob = workflow.slice(workflow.indexOf("\n  native:"));
+      const gate = nativeJob.indexOf("bun scripts/release-validate.ts secrets");
+      const upload = nativeJob.indexOf("uses: actions/upload-artifact@v7.0.1");
+      expect(gate).toBeGreaterThan(-1);
+      expect(upload).toBeGreaterThan(gate);
+      expect(workflow.match(/bun scripts\/release-validate\.ts secrets/g)).toHaveLength(2);
+      expect(workflow).toContain("bun scripts/release-validate.ts secrets ${{ matrix.target }}");
+    }
+  });
+
+  test("keeps all target IDs buildable and enabled IDs in gate parity", () => {
+    const enabled = NATIVE_VAULT_COMPATIBILITY
+      .filter((target) => target.enabled)
+      .map((target) => target.id);
+    const allTargets = NATIVE_VAULT_COMPATIBILITY.map((target) => target.id);
+    const ciNativeJob = ciWorkflow.slice(
+      ciWorkflow.indexOf("\n  native:"),
+      ciWorkflow.indexOf("\n  release-assets:"),
+    );
+    expect([...ciNativeJob.matchAll(/^\s+- target:\s+(\S+)$/gm)].map((match) => match[1]))
+      .toEqual(allTargets);
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      const gateLists = [...workflow.matchAll(
+        /contains\(fromJSON\('(\[[^']+\])'\), matrix\.target\)/g,
+      )].map((match) => JSON.parse(match[1]!));
+      expect(gateLists).toHaveLength(3);
+      expect(gateLists.every((targets) => JSON.stringify(targets) === JSON.stringify(enabled)))
+        .toBe(true);
+    }
+  });
+
+  test("provisions a real isolated Secret Service session for both Linux targets", () => {
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      expect(workflow).toContain("matrix.target == 'linux-x64' || matrix.target == 'linux-arm64'");
+      expect(workflow).toContain("dbus-run-session");
+      expect(workflow).toContain('export XDG_RUNTIME_DIR="$1/runtime"');
+      expect(workflow).toContain("gnome-keyring-daemon --unlock --components=secrets");
+      expect(workflow).toContain("libsecret-1-0");
+      expect(workflow).not.toContain("continue-on-error");
+    }
+  });
+
+  test("keeps the native-vault gate coupled to the pinned Bun version", () => {
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      const versions = [...workflow.matchAll(/^\s+bun-version:\s+(.+)$/gm)]
+        .map((match) => match[1]);
+      expect(versions.length).toBeGreaterThan(0);
+      expect(versions.every((version) => version === "1.3.14")).toBe(true);
+    }
+  });
+
   test("pins every build checkout to the validated source input", () => {
     const refs = [...releaseWorkflow.matchAll(/^\s+ref:\s+(.+)$/gm)].map((match) => match[1]);
     expect(refs).toEqual([

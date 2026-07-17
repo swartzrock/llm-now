@@ -48,7 +48,6 @@ import {
 import { RuntimeStageError, type RuntimeGateway } from "./runtime.ts";
 
 const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
-const DEFAULT_DISCOVERY_TIMEOUT_MS = 5_000;
 const DEFAULT_MODEL_LIST_TIMEOUT_MS = 10_000;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
 const MANAGE_API_KEYS_VALUE = "setup:manage-api-keys";
@@ -73,7 +72,6 @@ export interface ApplicationDependencies {
   resolveAlias?: typeof resolveStoredAlias;
   saveAlias?: typeof saveStoredAlias;
   generationTimeoutMs?: number;
-  discoveryTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault: CredentialVault;
   credentialResolver: CredentialResolver;
@@ -252,7 +250,7 @@ async function generateWithTimeout(
 async function withStageTimeout<T>(
   operation: Promise<T>,
   timeoutMs: number,
-  stage: "discovery" | "model-list",
+  stage: "model-list",
   provider: ByokProviderId | null,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -311,12 +309,6 @@ async function resolveSelection(
   const result = await selectProviderAndModel({
     runtime: {
       ...deps.runtime,
-      discover: () => withStageTimeout(
-        deps.runtime.discover(),
-        deps.discoveryTimeoutMs ?? DEFAULT_DISCOVERY_TIMEOUT_MS,
-        "discovery",
-        null,
-      ),
       listModels: (provider) => withStageTimeout(
         deps.runtime.listModels(provider),
         deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
