@@ -351,43 +351,80 @@ Force an OpenAI failure and capture stderr. The sentinel must not appear in stdo
 
 ## Release workflow
 
-These tests are maintainer-only and occur after the implementation branches merge in order.
+These tests are maintainer-only. Run them in order while commissioning the reviewed release train, and do not merge another `chore: release` pull request until the previous promotion finishes.
 
 ### MT-24: Unsigned release candidate
 
-1. Confirm the package version.
-2. Create an existing `vX.Y.Z` tag reachable from `main`.
-3. Dispatch the `Release candidate` workflow with `tag: vX.Y.Z` and `publish: false`.
-4. Download `release-assets` and repeat the checksum and native smoke tests.
+1. Fetch protected `main` and select any full commit SHA reachable from it. No tag is needed.
+2. Dispatch `release.yml` with that SHA and `publish: false`:
 
-The workflow must validate the tag/version/main ancestry, build all five targets, generate `SHA256SUMS`, and publish no GitHub Release or signed artifact.
+   ```bash
+   git fetch origin main
+   RELEASE_SHA="$(git rev-parse origin/main~0)"
+   test "$(printf '%s' "$RELEASE_SHA" | wc -c | tr -d ' ')" = 40
+   git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+   gh workflow run release.yml --ref main \
+     -f release-sha="$RELEASE_SHA" \
+     -f publish=false
+   ```
+
+3. Download `release-assets` from the completed run and repeat the checksum and native smoke tests.
+
+The workflow must validate the SHA and protected-`main` ancestry, build all five targets, generate `SHA256SUMS`, and request neither protected environment. It must create no tag, attestation, or GitHub Release.
 
 The macOS executable must have a valid ad-hoc signature, but it is not trusted by Gatekeeper as a public download. After checksum verification, use the quarantine-removal step in the preparation section for this unsigned test artifact.
 
-### MT-25: First public cross-platform release
+### MT-25: First generated release PR CI
+
+1. In repository Actions settings, allow GitHub Actions to create pull requests with the repository token.
+2. Merge a feature pull request containing a non-empty `.changeset/*.md` file.
+3. Confirm the `Changesets` workflow creates or updates exactly one `chore: release` pull request.
+4. Review its `package.json` bump, matching `CHANGELOG.md` section, and deletion of the consumed Changeset. Confirm it contains no npm publication or release tag.
+5. Confirm the repository-token-created pull request checks appear as approval-required. Have a maintainer explicitly approve the workflow runs.
+6. Wait for the normal source checks, all five native target checks, and exact-asset assembly to pass. Confirm branch protection treats them like the checks on an ordinary pull request.
+
+Leave the reviewed release pull request open until MT-26 is ready. If its checks do not appear, cannot be approved, or do not satisfy branch protection, stop and correct repository settings before merging it.
+
+### MT-26: First tag-last public release
 
 Run only when publication is explicitly authorized. Before dispatch:
 
 1. Confirm the repository is public and eligible to issue GitHub artifact attestations.
-2. Fetch `origin/main` and tags. Record `RELEASE_SHA` as the protected `main` commit that will dispatch the workflow.
-3. Confirm the `vX.Y.Z` tag resolves to exactly `RELEASE_SHA`, not merely an older ancestor:
+2. Confirm the `release-signing` and `release-publication` environments have the intended required reviewers and only the signing environment contains Apple credentials.
+3. Commission the `v*` tag rule: the protected publication actor may create a new tag, while other actors cannot move or delete release tags.
+4. Confirm the intended `vX.Y.Z` tag and Release do not exist and no higher stable Release is public.
+5. Merge the approved `chore: release` pull request from MT-25. Record its exact merge SHA and version:
 
    ```bash
-   git fetch origin main --tags
-   TAG=vX.Y.Z
+   git fetch origin main
    RELEASE_SHA="$(git rev-parse origin/main)"
-   test "$(git rev-parse "${TAG}^{commit}")" = "$RELEASE_SHA"
+   VERSION="$(git show "$RELEASE_SHA:package.json" | bun -p 'JSON.parse(await Bun.stdin.text()).version')"
+   TAG="v$VERSION"
    ```
 
-4. Dispatch `publish: true` from that protected `main` commit and complete the `release-publication` approval.
+6. Confirm the push starts `Release coordinator`, and its classifier passes the exact release SHA to `Release` with `publish: true`. The event's `before` SHA must be the release commit's first parent, and the diff must contain the stable version increase, matching changelog section, and a consumed Changeset deletion.
+7. Confirm both macOS jobs wait for and receive `release-signing` approval. Before granting `release-publication` approval, confirm the release tag still does not exist.
+8. Grant `release-publication` approval. Confirm checksum verification and artifact attestation finish before the workflow creates the tag, verifies it at `RELEASE_SHA`, and creates the GitHub Release.
 
-After publication, download the release assets to an empty directory and confirm there are exactly five ZIPs plus `SHA256SUMS`:
+If automatic promotion fails before creating the tag and newer commits later reach `main`, rerun the original automatic workflow run. Do not manually dispatch from the newer `main` ref: a public run requires `release-sha` to equal the selected ref's `GITHUB_SHA`, preserving attestation provenance.
+
+After publication, confirm the tag peels to the exact release commit:
+
+```bash
+git fetch origin --tags
+test "$(git rev-parse "${TAG}^{commit}")" = "$RELEASE_SHA"
+```
+
+Download the public assets to an empty directory and confirm there are exactly six: five ZIPs plus `SHA256SUMS`.
 
 - `llm-now-vX.Y.Z-macos-x64.zip`
 - `llm-now-vX.Y.Z-macos-arm64.zip`
 - `llm-now-vX.Y.Z-linux-x64.zip`
 - `llm-now-vX.Y.Z-linux-arm64.zip`
 - `llm-now-vX.Y.Z-windows-x64.zip`
+- `SHA256SUMS`
+
+`RELEASE_NOTES.md` must not be a public asset; it is the private workflow artifact used as the GitHub Release body.
 
 Complete these trust and integrity gates:
 
@@ -421,6 +458,52 @@ Finally, record:
 - operation without Bun or Node.js on every tested target.
 
 The Linux artifacts do not claim Alpine or other musl compatibility. Windows signing, Homebrew, and Chocolatey remain deferred.
+
+### MT-27: Completed release no-op
+
+After MT-26 succeeds, dispatch the same exact tag and peeled commit again with `publish: true`:
+
+```bash
+RELEASE_SHA="$(git rev-parse "${TAG}^{commit}")"
+gh workflow run release.yml --ref "$TAG" \
+  -f release-sha="$RELEASE_SHA" \
+  -f publish=true
+```
+
+The preflight must download exactly the five ZIPs and `SHA256SUMS`, validate all checksums, and verify every archive attestation against this repository, `.github/workflows/release.yml`, and `RELEASE_SHA`. It must then report a completed no-op: no native build, signing, publication approval, tag mutation, asset replacement, or duplicate Release.
+
+### MT-28: Exact-tag/no-Release resume
+
+Exercise this state only after a real interrupted publication leaves an exact tag without a Release, or in a disposable repository that mirrors the production environments and tag rules. Do not manufacture it by deleting a production Release.
+
+1. Confirm the tag peels to the intended release-shaped commit and no Release exists for it.
+2. Dispatch at the tag ref, passing its peeled commit exactly:
+
+   ```bash
+   TAG=vX.Y.Z
+   RELEASE_SHA="$(git rev-parse "${TAG}^{commit}")"
+   gh workflow run release.yml --ref "$TAG" \
+     -f release-sha="$RELEASE_SHA" \
+     -f publish=true
+   ```
+
+3. Complete the protected approvals and verify the workflow rebuilds, signs, checksums, and attests the same source, leaves the tag unmoved, and creates the Release with exactly the six public assets from MT-26.
+
+The selected tag ref and `release-sha` must both resolve to the same exact commit. An older tag that points elsewhere is not a recovery mechanism.
+
+### MT-29: Conflict refusal
+
+Use a disposable repository with the same workflow and protection settings; never create conflicting public state in production. Exercise each of these cases:
+
+- `vX.Y.Z` points to a commit other than `release-sha`;
+- a Release exists without the matching tag;
+- a Release is draft or prerelease;
+- the Release has a missing or extra asset;
+- `SHA256SUMS` does not verify every archive;
+- an archive attestation does not bind to this repository, release workflow, and source SHA; and
+- no tag exists for the requested version while a higher stable Release is already public.
+
+Each run must fail before public mutation with a diagnostic that identifies the conflicting state. Confirm the workflow never moves or deletes a tag, replaces an asset, edits the existing Release, or creates a lower-version tag. Maintainers must investigate and repair public state explicitly; rerunning automation must not overwrite it.
 
 ## Automation-backed coverage
 
