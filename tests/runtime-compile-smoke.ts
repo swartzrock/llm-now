@@ -1,5 +1,6 @@
 import { chmod, mkdtemp, rm } from "node:fs/promises";
 import { delimiter, join } from "node:path";
+import packageMetadata from "../package.json" with { type: "json" };
 import { resolveAliasPath, saveAlias } from "../src/aliases";
 
 const directory = await mkdtemp(join(process.cwd(), ".tmp-runtime-"));
@@ -82,7 +83,7 @@ try {
       executable: spike,
       args: ["--version"],
       exitCode: 0,
-      stdout: "0.1.0\n",
+      stdout: `${packageMetadata.version}\n`,
       stderr: "",
     },
     {
