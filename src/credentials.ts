@@ -19,20 +19,7 @@ export class CredentialVaultError extends Error {
   }
 }
 
-interface NativeSecretIdentity {
-  service: string;
-  name: string;
-}
-
-interface NativeSecretValue extends NativeSecretIdentity {
-  value: string;
-}
-
-export interface NativeSecretStore {
-  get(options: NativeSecretIdentity): Promise<string | null>;
-  set(options: NativeSecretValue): Promise<void>;
-  delete(options: NativeSecretIdentity): Promise<boolean>;
-}
+export type NativeSecretStore = Pick<typeof Bun.secrets, "get" | "set" | "delete">;
 
 export interface CredentialVault {
   get(provider: ByokCloudProviderId): Promise<string | null>;
@@ -44,7 +31,7 @@ export function nativeVaultName(provider: ByokCloudProviderId): string {
   return `api-key:${provider}`;
 }
 
-function nativeSecretIdentity(provider: ByokCloudProviderId): NativeSecretIdentity {
+function nativeSecretIdentity(provider: ByokCloudProviderId) {
   return { service: NATIVE_VAULT_SERVICE, name: nativeVaultName(provider) };
 }
 
@@ -88,20 +75,22 @@ export function createSensitiveValueRegistry(
   initialValues: readonly string[] = [],
 ): SensitiveValueRegistry {
   const values = new Set<string>();
+  let sortedValues: string[] = [];
   const register = (value: string) => {
-    if (value.length > 0) values.add(value);
+    if (value.length > 0 && !values.has(value)) {
+      values.add(value);
+      sortedValues = [...values].sort((left, right) => right.length - left.length);
+    }
   };
   for (const value of initialValues) register(value);
 
   return {
     register,
     redact(text) {
-      return [...values]
-        .sort((left, right) => right.length - left.length)
-        .reduce(
-          (redacted, value) => redacted.replaceAll(value, "[REDACTED]"),
-          text,
-        );
+      return sortedValues.reduce(
+        (redacted, value) => redacted.replaceAll(value, "[REDACTED]"),
+        text,
+      );
     },
   };
 }
@@ -113,37 +102,45 @@ export type ResolvedCredential =
     envName: (typeof BYOK_PROVIDER_API_KEY_ENV_VARS)[ByokCloudProviderId][number];
   }
   | { source: "vault"; apiKey: string }
+  | { source: "unavailable"; reason: "target-disabled" }
   | { source: "missing" };
 
 export interface CredentialResolver {
   resolve(provider: ByokCloudProviderId): Promise<ResolvedCredential>;
+  invalidate?(provider: ByokCloudProviderId): void;
 }
 
 export interface CredentialResolverDependencies {
   env: ByokEnvironment;
   vault: CredentialVault;
   vaultEnabled: boolean;
-  sensitive: SensitiveValueRegistry;
 }
 
 export function createCredentialResolver(
   deps: CredentialResolverDependencies,
 ): CredentialResolver {
+  const vaultValues = new Map<ByokCloudProviderId, string>();
   return {
     async resolve(provider) {
       for (const envName of BYOK_PROVIDER_API_KEY_ENV_VARS[provider]) {
         const apiKey = deps.env[envName];
         if (apiKey) {
-          deps.sensitive.register(apiKey);
           return { source: "environment", apiKey, envName };
         }
       }
 
-      if (!deps.vaultEnabled) return { source: "missing" };
+      if (!deps.vaultEnabled) {
+        return { source: "unavailable", reason: "target-disabled" };
+      }
+      const cached = vaultValues.get(provider);
+      if (cached !== undefined) return { source: "vault", apiKey: cached };
       const apiKey = await deps.vault.get(provider);
       if (apiKey === null) return { source: "missing" };
-      deps.sensitive.register(apiKey);
+      vaultValues.set(provider, apiKey);
       return { source: "vault", apiKey };
+    },
+    invalidate(provider) {
+      vaultValues.delete(provider);
     },
   };
 }

@@ -90,6 +90,27 @@ describe("native credential vault", () => {
     }
   });
 
+  test("wraps rejected set and delete operations without exposing backend detail", async () => {
+    for (const operation of ["set", "delete"] as const) {
+      const cause = new Error(`${operation} backend detail`);
+      const vault = createBunCredentialVault(memoryStore({
+        [operation]: async () => {
+          throw cause;
+        },
+      }));
+
+      try {
+        if (operation === "set") await vault.set("openai", "candidate");
+        else await vault.delete("openai");
+        throw new Error(`expected ${operation} to fail`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(CredentialVaultError);
+        expect(error).toMatchObject({ operation, provider: "openai", cause });
+        expect(String(error)).not.toContain(cause.message);
+      }
+    }
+  });
+
   test("defines a record for every cloud provider and starts target support disabled", () => {
     expect(Object.keys(BYOK_PROVIDER_API_KEY_ENV_VARS).map((id) => nativeVaultName(
       id as keyof typeof BYOK_PROVIDER_API_KEY_ENV_VARS,
@@ -119,7 +140,6 @@ describe("credential resolution and redaction", () => {
       GOOGLE_API_KEY: "google-secret",
       GEMINI_API_KEY: "gemini-secret",
     };
-    const sensitive = createSensitiveValueRegistry();
     const resolver = createCredentialResolver({
       env,
       vaultEnabled: true,
@@ -130,7 +150,6 @@ describe("credential resolution and redaction", () => {
           return "vault-secret";
         },
       },
-      sensitive,
     });
 
     expect(await resolver.resolve("google")).toEqual({
@@ -139,14 +158,32 @@ describe("credential resolution and redaction", () => {
       envName: "GOOGLE_API_KEY",
     });
     expect(gets).toBe(0);
-    expect(sensitive.redact("google-secret gemini-secret vault-secret")).toBe(
-      "[REDACTED] gemini-secret vault-secret",
-    );
+  });
+
+  test("skips a blank primary alias and preserves the fallback value byte-for-byte", async () => {
+    let gets = 0;
+    const resolver = createCredentialResolver({
+      env: { GOOGLE_API_KEY: "", GEMINI_API_KEY: "  gemini-secret  " },
+      vaultEnabled: true,
+      vault: {
+        ...createBunCredentialVault(memoryStore()),
+        get: async () => {
+          gets += 1;
+          return "vault-secret";
+        },
+      },
+    });
+
+    expect(await resolver.resolve("google")).toEqual({
+      source: "environment",
+      apiKey: "  gemini-secret  ",
+      envName: "GEMINI_API_KEY",
+    });
+    expect(gets).toBe(0);
   });
 
   test("treats empty environment values as absent and resolves one vault fallback", async () => {
     let gets = 0;
-    const sensitive = createSensitiveValueRegistry();
     const resolver = createCredentialResolver({
       env: { OPENAI_API_KEY: "" },
       vaultEnabled: true,
@@ -158,7 +195,6 @@ describe("credential resolution and redaction", () => {
           return "vault-secret";
         },
       },
-      sensitive,
     });
 
     expect(await resolver.resolve("openai")).toEqual({
@@ -166,14 +202,11 @@ describe("credential resolution and redaction", () => {
       apiKey: "vault-secret",
     });
     expect(gets).toBe(1);
-    expect(sensitive.redact("upstream echoed vault-secret")).toBe(
-      "upstream echoed [REDACTED]",
-    );
   });
 
-  test("returns missing without a vault read when target support is disabled", async () => {
+  test("distinguishes a disabled target from an enabled vault with no record", async () => {
     let gets = 0;
-    const resolver = createCredentialResolver({
+    const disabled = createCredentialResolver({
       env: {},
       vaultEnabled: false,
       vault: {
@@ -183,11 +216,43 @@ describe("credential resolution and redaction", () => {
           return "vault-secret";
         },
       },
-      sensitive: createSensitiveValueRegistry(),
     });
 
-    expect(await resolver.resolve("openai")).toEqual({ source: "missing" });
+    expect(await disabled.resolve("openai")).toEqual({
+      source: "unavailable",
+      reason: "target-disabled",
+    });
     expect(gets).toBe(0);
+
+    const missing = createCredentialResolver({
+      env: {},
+      vaultEnabled: true,
+      vault: createBunCredentialVault(memoryStore()),
+    });
+    expect(await missing.resolve("openai")).toEqual({ source: "missing" });
+  });
+
+  test("invalidates a cached vault value after credential mutation", async () => {
+    let value = "first-secret";
+    let gets = 0;
+    const resolver = createCredentialResolver({
+      env: {},
+      vaultEnabled: true,
+      vault: {
+        ...createBunCredentialVault(memoryStore()),
+        get: async () => {
+          gets += 1;
+          return value;
+        },
+      },
+    });
+
+    expect(await resolver.resolve("openai")).toMatchObject({ apiKey: "first-secret" });
+    value = "replacement-secret";
+    expect(await resolver.resolve("openai")).toMatchObject({ apiKey: "first-secret" });
+    resolver.invalidate?.("openai");
+    expect(await resolver.resolve("openai")).toMatchObject({ apiKey: "replacement-secret" });
+    expect(gets).toBe(2);
   });
 
   test("redacts overlapping registered values longest-first", () => {
