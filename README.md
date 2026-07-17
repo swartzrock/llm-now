@@ -2,6 +2,83 @@
 
 `llm-now` makes one text-generation call through an LLM provider already available on your machine. It uses [`@swartzrock/byok-runtime`](https://github.com/swartzrock/byok-runtime) for discovery, model listing, and generation; it does not install providers or store credentials.
 
+## Install a release
+
+Choose the archive for your machine:
+
+| Platform | Archive | Trust and compatibility |
+| --- | --- | --- |
+| macOS Intel | `llm-now-v<version>-macos-x64.zip` | Signed and notarized |
+| macOS Apple silicon | `llm-now-v<version>-macos-arm64.zip` | Signed and notarized |
+| Linux x64 | `llm-now-v<version>-linux-x64.zip` | glibc build; not Alpine/musl |
+| Linux ARM64 | `llm-now-v<version>-linux-arm64.zip` | glibc build; not Alpine/musl |
+| Windows x64 | `llm-now-v<version>-windows-x64.zip` | **Unsigned early access** |
+
+For macOS, set `TARGET` to `macos-arm64` or `macos-x64`. Download, verify, and extract one archive:
+
+```bash
+VERSION=0.1.0
+TARGET=macos-arm64
+ARCHIVE="llm-now-v${VERSION}-${TARGET}.zip"
+BASE="https://github.com/swartzrock/llm-now/releases/download/v${VERSION}"
+SOURCE_DIGEST="<release source digest shown in the release notes>"
+
+curl -LO "$BASE/$ARCHIVE" -LO "$BASE/SHA256SUMS"
+CHECKSUM="$(grep "  $ARCHIVE$" SHA256SUMS)"
+test -n "$CHECKSUM" && printf '%s\n' "$CHECKSUM" | shasum -a 256 -c -
+gh attestation verify "$ARCHIVE" --repo swartzrock/llm-now \
+  --signer-workflow swartzrock/llm-now/.github/workflows/release.yml \
+  --source-digest "$SOURCE_DIGEST"
+mkdir -p "$HOME/.local/bin"
+unzip -o "$ARCHIVE" -d "$HOME/.local/bin"
+chmod +x "$HOME/.local/bin/llm-now"
+```
+
+For Linux, set `TARGET` to `linux-x64` or `linux-arm64`. These are glibc builds; Alpine and other musl systems are not supported.
+
+```bash
+VERSION=0.1.0
+TARGET=linux-x64
+ARCHIVE="llm-now-v${VERSION}-${TARGET}.zip"
+BASE="https://github.com/swartzrock/llm-now/releases/download/v${VERSION}"
+SOURCE_DIGEST="<release source digest shown in the release notes>"
+
+curl -LO "$BASE/$ARCHIVE" -LO "$BASE/SHA256SUMS"
+CHECKSUM="$(grep "  $ARCHIVE$" SHA256SUMS)"
+test -n "$CHECKSUM" && printf '%s\n' "$CHECKSUM" | sha256sum --check -
+gh attestation verify "$ARCHIVE" --repo swartzrock/llm-now \
+  --signer-workflow swartzrock/llm-now/.github/workflows/release.yml \
+  --source-digest "$SOURCE_DIGEST"
+mkdir -p "$HOME/.local/bin"
+unzip -o "$ARCHIVE" -d "$HOME/.local/bin"
+chmod +x "$HOME/.local/bin/llm-now"
+```
+
+The Windows x64 executable is **unsigned early access**. Windows may show a SmartScreen warning and, where policy permits, offer **Run anyway**. Smart App Control or enterprise policy may block the executable with no supported user bypass. Do not disable or weaken security controls to run `llm-now`.
+
+If your policy permits the executable, download and verify it before the first run:
+
+```powershell
+$Version = "0.1.0"
+$Archive = "llm-now-v$Version-windows-x64.zip"
+$Base = "https://github.com/swartzrock/llm-now/releases/download/v$Version"
+$SourceDigest = "<release source digest shown in the release notes>"
+
+Invoke-WebRequest "$Base/$Archive" -OutFile $Archive
+Invoke-WebRequest "$Base/SHA256SUMS" -OutFile SHA256SUMS
+$ChecksumLines = @(Get-Content SHA256SUMS | Where-Object { $_.EndsWith("  $Archive") })
+if ($ChecksumLines.Count -ne 1) { throw "Expected one checksum for $Archive" }
+$Expected = ($ChecksumLines[0] -split '\s+')[0].ToLowerInvariant()
+$Actual = (Get-FileHash $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($Expected -ne $Actual) { throw "SHA-256 mismatch for $Archive" }
+"SHA-256 verified: $Actual"
+gh attestation verify $Archive --repo swartzrock/llm-now `
+  --signer-workflow swartzrock/llm-now/.github/workflows/release.yml `
+  --source-digest $SourceDigest
+Expand-Archive $Archive -DestinationPath .\llm-now-windows -Force
+& .\llm-now-windows\llm-now.exe --help
+```
+
 ## Usage
 
 Choose a discovered provider and model interactively:

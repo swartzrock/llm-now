@@ -17,9 +17,27 @@ Use the [manual testing guide](manual-testing.md) to validate native artifacts, 
 
 ## Distribution status
 
-The repository builds and tests self-contained archives for macOS x64/ARM64, glibc Linux x64/ARM64, and Windows x64. Each archive contains one executable and is covered by the release checksum manifest.
+Public releases contain these five self-contained archives:
 
-Public distribution currently includes only signed and notarized macOS x64 and ARM64 archives. Linux and Windows remain CI-covered and are included in unsigned release-candidate testing, but are not public release assets yet.
+- `llm-now-v<version>-macos-x64.zip`
+- `llm-now-v<version>-macos-arm64.zip`
+- `llm-now-v<version>-linux-x64.zip` (glibc, not Alpine/musl)
+- `llm-now-v<version>-linux-arm64.zip` (glibc, not Alpine/musl)
+- `llm-now-v<version>-windows-x64.zip` (unsigned early access)
+
+Each archive contains one executable. macOS archives are signed and notarized; Linux and Windows archives are unsigned. All five pass their native checks, match `SHA256SUMS`, and receive GitHub artifact attestations for the final downloadable bytes.
+
+A public dispatch is allowed only when the repository is public and eligible to issue GitHub artifact attestations. The version tag must resolve to the exact protected-`main` commit used to dispatch the workflow; being an older ancestor of `main` is insufficient. Publication retains the protected environment approval, remote tag verification, duplicate-release refusal, and macOS signing boundary.
+
+Verify each downloaded archive against the release workflow and the exact tag/dispatch commit recorded as the release source digest:
+
+```bash
+gh attestation verify <archive.zip> \
+  --repo swartzrock/llm-now \
+  --signer-workflow swartzrock/llm-now/.github/workflows/release.yml \
+  --source-digest <release-source-digest>
+```
+
+Before authorizing the first public release that includes Linux and Windows, complete [MT-25](manual-testing.md#mt-25-first-public-cross-platform-release).
 
 Homebrew and Chocolatey integration is intentionally deferred. A custom Homebrew tap and a Chocolatey package may be added later if adoption justifies their ongoing maintenance; neither package manager is part of the current CI or release workflow.
-

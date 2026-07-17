@@ -35,6 +35,23 @@ describe("native release build", () => {
     expect(archiveName("0.1.0", RELEASE_TARGETS[4]!)).toBe("llm-now-v0.1.0-windows-x64.zip");
   });
 
+  test("keeps release documentation aligned with archive names", async () => {
+    const readme = await Bun.file(new URL("../README.md", import.meta.url)).text();
+    const releasing = await Bun.file(new URL("../docs/RELEASING.md", import.meta.url)).text();
+    const manualTesting = await Bun.file(
+      new URL("../docs/manual-testing.md", import.meta.url),
+    ).text();
+
+    for (const target of RELEASE_TARGETS) {
+      expect(readme).toContain(archiveName("<version>", target));
+      expect(releasing).toContain(archiveName("<version>", target));
+      expect(manualTesting).toContain(archiveName("X.Y.Z", target));
+    }
+    expect(readme.match(/ARCHIVE="llm-now-v\$\{VERSION\}-\$\{TARGET\}\.zip"/g))
+      .toHaveLength(2);
+    expect(readme).toContain('$Archive = "llm-now-v$Version-windows-x64.zip"');
+  });
+
   test("creates a deterministic archive containing one executable", () => {
     const bytes = Uint8Array.from([1, 2, 3, 4]);
     const first = createExecutableArchive("llm-now", bytes, testArchiveMtime);
@@ -77,6 +94,29 @@ describe("native release build", () => {
     for (const target of RELEASE_TARGETS) {
       expect(await Bun.file(join(output, archiveName("0.1.0", target))).exists()).toBe(true);
     }
+  });
+
+  test("rejects duplicate archive basenames across nested artifact directories", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".tmp-build-tests-"));
+    temporaryDirectories.push(root);
+    const input = join(root, "input");
+    for (const target of RELEASE_TARGETS) {
+      const archive = createExecutableArchive(
+        target.executable,
+        Uint8Array.from([target.id.length]),
+        testArchiveMtime,
+      );
+      await mkdir(join(input, target.id), { recursive: true });
+      await Bun.write(join(input, target.id, archiveName("0.1.0", target)), archive);
+      if (target.id === "linux-x64") {
+        await mkdir(join(input, "duplicate", target.id), { recursive: true });
+        await Bun.write(join(input, "duplicate", target.id, archiveName("0.1.0", target)), archive);
+      }
+    }
+
+    await expect(assembleReleaseAssets(input, join(root, "output"))).rejects.toThrow(
+      "release archive set mismatch",
+    );
   });
 
   test("assembles a selected release target set", async () => {

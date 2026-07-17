@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: Linux and Windows release executables</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7f4;
+      --surface: #ffffff;
+      --surface-soft: #eef3ed;
+      --ink: #182018;
+      --muted: #536057;
+      --line: #d5ddd4;
+      --accent: #236b3a;
+      --accent-soft: #dff1e3;
+      --accent-text: #174b2a;
+      --info-soft: #e7eff8;
+      --info-text: #264c72;
+      --warn-soft: #f7edcf;
+      --warn-text: #695119;
+      --shadow: 0 10px 28px rgba(31, 47, 35, .08);
+      --radius: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1410;
+        --surface: #171d18;
+        --surface-soft: #1e2820;
+        --ink: #edf4ed;
+        --muted: #aab8ac;
+        --line: #344137;
+        --accent: #9bdc83;
+        --accent-soft: #233d29;
+        --accent-text: #baf0a7;
+        --info-soft: #1d3144;
+        --info-text: #b8d7f4;
+        --warn-soft: #40371e;
+        --warn-text: #f2d98b;
+        --shadow: 0 12px 34px rgba(0, 0, 0, .28);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 15px/1.62 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: min(940px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 72px; }
+    header { padding: 8px 0 30px; }
+    .eyebrow { color: var(--accent); font-size: .76rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 8px 0 12px; max-width: 18ch; font-size: clamp(2.1rem, 6vw, 4rem); line-height: 1.02; letter-spacing: -.045em; }
+    h2 { margin: 0 0 16px; font-size: 1.45rem; line-height: 1.2; letter-spacing: -.02em; }
+    h3 { margin: 0; font-size: 1.25rem; line-height: 1.25; letter-spacing: -.015em; }
+    p { max-width: 72ch; margin: 10px 0; }
+    strong { color: inherit; }
+    code { font: .92em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    .lede { max-width: 68ch; color: var(--muted); font-size: 1.08rem; }
+    .meta, .stats, .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .meta { margin-top: 18px; }
+    .chip {
+      display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px;
+      border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+      color: var(--muted); font-size: .78rem; font-weight: 700;
+    }
+    .chip.accent { border-color: transparent; background: var(--accent-soft); color: var(--accent-text); }
+    .stats { margin: 4px 0 34px; }
+    .stat { min-width: 130px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .stat b { display: block; font-size: 1.55rem; line-height: 1.1; }
+    .stat span { color: var(--muted); font-size: .78rem; }
+    section { margin-top: 38px; }
+    .panel { padding: 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+    .axes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+    .axes li { padding: 12px 14px; border-radius: 10px; background: var(--surface-soft); color: var(--muted); }
+    .axes li:last-child { grid-column: 1 / -1; }
+    .jump-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 18px; padding: 0; list-style: none; }
+    .jump-list a { display: block; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); text-decoration: none; }
+    .idea { margin: 16px 0; padding: 24px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+    .idea-head { display: flex; align-items: flex-start; gap: 14px; }
+    .rank { flex: 0 0 auto; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-text); font-weight: 900; }
+    .chips { margin-top: 9px; }
+    .field { margin-top: 18px; }
+    .field dt { margin-bottom: 3px; color: var(--muted); font-size: .72rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
+    .field dd { max-width: 76ch; margin: 0; }
+    .field dd + dt { margin-top: 15px; }
+    .callout { margin-top: 18px; padding: 14px 16px; border-radius: 10px; background: var(--accent-soft); color: var(--accent-text); }
+    .callout .eyebrow { color: inherit; }
+    figure { margin: 22px 0 0; padding: 14px; overflow-x: auto; border-radius: 12px; background: var(--surface-soft); }
+    figure svg { display: block; min-width: 760px; width: 100%; height: auto; }
+    figcaption { margin-top: 9px; color: var(--muted); font-size: .8rem; }
+    .svg-box { fill: var(--surface); stroke: var(--line); stroke-width: 2; }
+    .svg-box-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+    .svg-text { fill: var(--ink); font: 700 13px ui-sans-serif, system-ui, sans-serif; }
+    .svg-sub { fill: var(--muted); font: 11px ui-sans-serif, system-ui, sans-serif; }
+    .svg-line { fill: none; stroke: var(--muted); stroke-width: 2; }
+    table { width: 100%; border-collapse: separate; border-spacing: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    th, td { padding: 11px 13px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    th { background: var(--surface-soft); color: var(--muted); font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    td:first-child { width: 44px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .sources { columns: 2; column-gap: 30px; }
+    .sources li { margin: 0 0 8px; break-inside: avoid; }
+    footer { margin-top: 54px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }
+    @media (max-width: 680px) {
+      main { width: min(100% - 22px, 940px); padding-top: 28px; }
+      .axes, .jump-list { grid-template-columns: 1fr; }
+      .axes li:last-child { grid-column: auto; }
+      .idea { padding: 18px; }
+      .sources { columns: 1; }
+      table { display: block; overflow-x: auto; white-space: normal; }
+    }
+    @media print {
+      :root { color-scheme: light; }
+      body { background: #fff; }
+      main { width: 100%; padding: 0; }
+      .idea, .panel, .stat { box-shadow: none; break-inside: avoid; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Ideation · repo-grounded</div>
+    <h1>Linux and Windows release executables</h1>
+    <p class="lede">Seven grounded directions for turning llm-now’s three already-tested Linux and Windows archives into trustworthy public release assets—without pulling package-manager publication into the same change.</p>
+    <div class="meta" aria-label="Document metadata">
+      <span class="chip"><time datetime="2026-07-16">2026-07-16</time></span>
+      <span class="chip">Topic: linux-windows-release-executables</span>
+      <span class="chip">Focus: public Linux and Windows executables</span>
+      <span class="chip">Mode: repo-grounded</span>
+    </div>
+  </header>
+
+  <div class="stats" aria-label="Ideation summary">
+    <div class="stat"><b>26</b><span>directions considered</span></div>
+    <div class="stat"><b>7</b><span>ranked survivors</span></div>
+    <div class="stat"><b>5</b><span>topic axes covered</span></div>
+  </div>
+
+  <section id="grounding-context">
+    <h2>Grounding Context</h2>
+    <div class="panel">
+      <p><strong>Codebase Context.</strong> llm-now already defines, builds, and target-natively smoke-tests five deterministic standalone ZIPs: macOS x64/ARM64, glibc Linux x64/ARM64, and Windows x64 baseline. Unsigned release-candidate mode already exact-assembles all five archives and one sorted <code>SHA256SUMS</code>.</p>
+      <p>The public workflow deliberately narrows that matrix to macOS, signs and notarizes only those two binaries, and requires exactly two final archives. A complete isolated Windows Authenticode job and Linux promotion jobs existed before that narrowing; current policy tests now enforce their absence. The strongest move is therefore restoration and hardening of an existing shape, not invention of a second release system.</p>
+      <p>Homebrew and Chocolatey templates already consume stable target-specific URLs and checksums, but package-manager publication is explicitly deferred. The useful boundary for this increment is direct GitHub Release assets with clear compatibility and verification guidance.</p>
+    </div>
+  </section>
+
+  <section id="topic-axes">
+    <h2>Topic Axes</h2>
+    <ul class="axes">
+      <li>Public asset promotion and final assembly orchestration</li>
+      <li>Windows signing and end-user trust</li>
+      <li>Linux compatibility promise and artifact formats</li>
+      <li>Release verification, provenance, and clean-machine confidence</li>
+      <li>Rollout scope and package-manager handoff</li>
+    </ul>
+  </section>
+
+  <section id="ranked-ideas">
+    <h2>Ranked Ideas</h2>
+    <ol class="jump-list" aria-label="Jump to ranked idea">
+      <li><a href="#idea-1">1. Five-target release batch</a></li>
+      <li><a href="#idea-2">2. OIDC-managed Windows signing</a></li>
+      <li><a href="#idea-3">3. Protected full-graph rehearsal</a></li>
+      <li><a href="#idea-4">4. Explicit Linux compatibility</a></li>
+      <li><a href="#idea-5">5. First-release commissioning</a></li>
+      <li><a href="#idea-6">6. Final-asset attestations</a></li>
+      <li><a href="#idea-7">7. GitHub assets first</a></li>
+    </ol>
+
+    <article class="idea" id="idea-1">
+      <div class="idea-head">
+        <span class="rank">1</span>
+        <div>
+          <h3>Five-target release batch with trust adapters</h3>
+          <div class="chips">
+            <span class="chip accent">Recommended</span>
+            <span class="chip">Axis: public promotion</span>
+            <span class="chip">Confidence: 95%</span>
+            <span class="chip">Complexity: Medium</span>
+          </div>
+        </div>
+      </div>
+      <dl class="field">
+        <dt>Description</dt>
+        <dd>Use the same five-target native build matrix in candidate and public modes. After native smoke, route macOS archives through signing/notarization, Windows through its signer, and Linux through a verification-only promotion step. Every path emits the same target-explicit <code>release-*</code> artifact contract. One platform-blind finalizer downloads that exact set, regenerates checksums, and publishes only when all five are present.</dd>
+        <dt>Basis</dt>
+        <dd><code>direct:</code> The target registry, native smoke matrix, all-five candidate assembly, prior Windows/Linux finishing jobs, and exact-set validator already establish every component. Public mode differs mainly by narrowing the matrix and downloading only <code>release-macos-*</code>.</dd>
+        <dt>Rationale</dt>
+        <dd>This is the smallest coherent release architecture: build once per supported target, finish according to platform trust rules, then apply one existing completeness invariant. It avoids both a Linux-only special case and a second release pipeline.</dd>
+        <dt>Downsides</dt>
+        <dd>The final publication becomes a hard five-platform quorum, so a Windows signing outage can block a release that would otherwise succeed on macOS and Linux. The workflow policy tests must change from enforcing macOS-only publication to enforcing the new uniform contract.</dd>
+      </dl>
+      <div class="callout"><div class="eyebrow">Decision it surfaces</div>Should public publication remain atomic across all supported platforms, or may a platform graduate independently?</div>
+      <figure>
+        <svg viewBox="0 0 850 280" role="img" aria-labelledby="batch-title batch-desc">
+          <title id="batch-title">Five-target release batch and trust adapters</title>
+          <desc id="batch-desc">A validated commit produces five native artifacts. macOS, Linux, and Windows finishing adapters emit uniform release artifacts consumed by one exact-set finalizer and public release.</desc>
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--muted)"/></marker>
+          </defs>
+          <rect class="svg-box" x="20" y="105" width="125" height="64" rx="10"/>
+          <text class="svg-text" x="82" y="132" text-anchor="middle">Validated SHA</text>
+          <text class="svg-sub" x="82" y="151" text-anchor="middle">tag + ancestry gate</text>
+          <path class="svg-line" d="M145 137 H180" marker-end="url(#arrow)"/>
+          <rect class="svg-box-accent" x="182" y="96" width="150" height="82" rx="10"/>
+          <text class="svg-text" x="257" y="126" text-anchor="middle">5 native builds</text>
+          <text class="svg-sub" x="257" y="146" text-anchor="middle">target-native smoke</text>
+          <text class="svg-sub" x="257" y="162" text-anchor="middle">same matrix in every mode</text>
+          <path class="svg-line" d="M332 137 H365 V47 H390" marker-end="url(#arrow)"/>
+          <path class="svg-line" d="M365 137 H390" marker-end="url(#arrow)"/>
+          <path class="svg-line" d="M365 137 V227 H390" marker-end="url(#arrow)"/>
+          <rect class="svg-box" x="392" y="18" width="155" height="58" rx="10"/>
+          <text class="svg-text" x="469" y="43" text-anchor="middle">macOS adapter</text>
+          <text class="svg-sub" x="469" y="60" text-anchor="middle">sign + notarize</text>
+          <rect class="svg-box" x="392" y="108" width="155" height="58" rx="10"/>
+          <text class="svg-text" x="469" y="133" text-anchor="middle">Linux adapter</text>
+          <text class="svg-sub" x="469" y="150" text-anchor="middle">verify + promote</text>
+          <rect class="svg-box" x="392" y="198" width="155" height="58" rx="10"/>
+          <text class="svg-text" x="469" y="223" text-anchor="middle">Windows adapter</text>
+          <text class="svg-sub" x="469" y="240" text-anchor="middle">sign + verify</text>
+          <path class="svg-line" d="M547 47 H575 V137 H600" marker-end="url(#arrow)"/>
+          <path class="svg-line" d="M547 137 H600" marker-end="url(#arrow)"/>
+          <path class="svg-line" d="M547 227 H575 V137"/>
+          <rect class="svg-box-accent" x="602" y="96" width="118" height="82" rx="10"/>
+          <text class="svg-text" x="661" y="125" text-anchor="middle">Exact finalizer</text>
+          <text class="svg-sub" x="661" y="145" text-anchor="middle">5 archives</text>
+          <text class="svg-sub" x="661" y="161" text-anchor="middle">+ SHA256SUMS</text>
+          <path class="svg-line" d="M720 137 H750" marker-end="url(#arrow)"/>
+          <rect class="svg-box" x="752" y="105" width="80" height="64" rx="10"/>
+          <text class="svg-text" x="792" y="132" text-anchor="middle">Public</text>
+          <text class="svg-sub" x="792" y="151" text-anchor="middle">release</text>
+        </svg>
+        <figcaption>Conceptual release shape: platform differences end before final assembly.</figcaption>
+      </figure>
+    </article>
+
+    <article class="idea" id="idea-2">
+      <div class="idea-head"><span class="rank">2</span><div><h3>OIDC-managed Windows signing</h3><div class="chips"><span class="chip">Axis: Windows trust</span><span class="chip">Confidence: 82%</span><span class="chip">Complexity: Medium</span></div></div></div>
+      <dl class="field">
+        <dt>Description</dt>
+        <dd>Use Microsoft Artifact Signing with GitHub OIDC so the protected release job receives temporary signing authority rather than decoding an exportable PFX and password. Keep the signer isolated from repository scripts, verify Authenticode after signing, and repack only the verified <code>llm-now.exe</code>.</dd>
+        <dt>Basis</dt>
+        <dd><code>external:</code> Microsoft’s Artifact Signing action supports GitHub OIDC and managed certificates. <code>direct:</code> llm-now’s removed Windows job already established the required protected environment, SHA-256 timestamping, verification, cleanup, and secret isolation.</dd>
+        <dt>Rationale</dt>
+        <dd>Windows trust is the only new public path that needs publisher identity. Managed signing removes long-lived certificate custody from the repository while restoring the trust boundary that was previously designed.</dd>
+        <dt>Downsides</dt>
+        <dd>Azure onboarding, certificate-profile eligibility, cost, and regional availability need confirmation. Authenticode improves publisher identity but does not instantly eliminate SmartScreen reputation warnings. If managed signing is unavailable, the prior isolated PFX path is the pragmatic fallback.</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="idea-3">
+      <div class="idea-head"><span class="rank">3</span><div><h3>Protected full-graph rehearsal</h3><div class="chips"><span class="chip">Axis: verification</span><span class="chip">Confidence: 90%</span><span class="chip">Complexity: Medium</span></div></div></div>
+      <dl class="field">
+        <dt>Description</dt>
+        <dd>Add a protected, non-publishing rehearsal that exercises macOS signing/notarization, Windows signing, Linux promotion, exact five-archive assembly, and final verification. It should use the real protected environments and identities but stop before creating a GitHub Release.</dd>
+        <dt>Basis</dt>
+        <dd><code>direct:</code> Current <code>publish:false</code> runs prove all five unsigned artifacts but skip every protected finishing path. Recent release fixes involved notarization verification, signed-archive upload, tag fetch authentication, and publication authorization—failures that ordinary candidate mode could not expose.</dd>
+        <dt>Rationale</dt>
+        <dd>Adding Windows and Linux increases the number of protected-path edges. A rehearsal turns those edges into pre-release evidence instead of making the next public tag the first integrated test.</dd>
+        <dt>Downsides</dt>
+        <dd>Signing services may charge per operation, notarization is slow, and a non-publishing run still needs careful version/tag semantics. The rehearsal must not weaken the separate explicit publication authorization gate.</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="idea-4">
+      <div class="idea-head"><span class="rank">4</span><div><h3>Explicit Linux compatibility contract</h3><div class="chips"><span class="chip">Axis: Linux compatibility</span><span class="chip">Confidence: 94%</span><span class="chip">Complexity: Low</span></div></div></div>
+      <dl class="field">
+        <dt>Description</dt>
+        <dd>Publish Linux assets with precise labels: glibc 2.17 or newer, x64 baseline CPU for broad compatibility, Linux ARM64, and no musl/Alpine support in this release. Put those facts beside the download and in installation guidance rather than relying on internal target names.</dd>
+        <dt>Basis</dt>
+        <dd><code>direct:</code> The target registry deliberately selects <code>bun-linux-x64-baseline</code> and <code>bun-linux-arm64</code>, and tests explicitly exclude musl. <code>external:</code> Bun documents glibc 2.17+ and exposes musl as a distinct target family.</dd>
+        <dt>Rationale</dt>
+        <dd>“Linux support” is too broad to be trustworthy. An explicit artifact-level promise prevents Alpine users from receiving a misleading binary and gives future compatibility testing a concrete floor.</dd>
+        <dt>Downsides</dt>
+        <dd>Documentation alone does not prove the oldest supported glibc environment. If that floor becomes an important support promise, an older-runtime execution gate should follow.</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="idea-5">
+      <div class="idea-head"><span class="rank">5</span><div><h3>First-release commissioning pass</h3><div class="chips"><span class="chip">Axis: rollout</span><span class="chip">Confidence: 93%</span><span class="chip">Complexity: Low</span></div></div></div>
+      <dl class="field">
+        <dt>Description</dt>
+        <dd>Treat the first cross-platform public release as commissioning: perform the documented full functional pass on Linux x64 and Windows x64, native smoke on Linux ARM64, checksum verification, execution outside the repository, execution from a path containing spaces, and operation with Bun and Node absent. Record the result before switching the steady-state public matrix to five targets.</dd>
+        <dt>Basis</dt>
+        <dd><code>direct:</code> <code>docs/manual-testing.md</code> already assigns those exact platform coverage levels and clean-machine conditions.</dd>
+        <dt>Rationale</dt>
+        <dd>This gives the new public paths a deeper one-time acceptance test without permanently turning every release into a manual project. It is the safer rollout wrapper around the recommended steady-state architecture.</dd>
+        <dt>Downsides</dt>
+        <dd>It requires access to clean native environments and a named maintainer checkpoint. The evidence can become stale if platform-finishing behavior changes later, so major signing or packaging changes should trigger recommissioning.</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="idea-6">
+      <div class="idea-head"><span class="rank">6</span><div><h3>Artifact attestations for final assets</h3><div class="chips"><span class="chip">Axis: provenance</span><span class="chip">Confidence: 86%</span><span class="chip">Complexity: Low</span></div></div></div>
+      <dl class="field">
+        <dt>Description</dt>
+        <dd>Generate GitHub artifact attestations for each final, downloadable archive and the checksum manifest after platform finishing. Keep <code>SHA256SUMS</code> as the simple integrity check; use attestations to bind those bytes to the repository, workflow, and validated commit.</dd>
+        <dt>Basis</dt>
+        <dd><code>external:</code> GitHub artifact attestations provide build provenance for release binaries. <code>direct:</code> llm-now already binds releases to a validated tag commit and publishes checksums, but repository search found no provenance or attestation layer.</dd>
+        <dt>Rationale</dt>
+        <dd>Checksums answer “did these bytes change?” Attestations answer “did the authorized llm-now workflow produce these bytes?” That distinction becomes more valuable as three additional platform assets and future package consumers appear.</dd>
+        <dt>Downsides</dt>
+        <dd>Attestations add workflow permissions and verification concepts users may not yet recognize. They must cover the post-signing archives, not only unsigned build intermediates, or the provenance story will be incomplete.</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="idea-7">
+      <div class="idea-head"><span class="rank">7</span><div><h3>GitHub assets first; package managers later</h3><div class="chips"><span class="chip">Axis: package handoff</span><span class="chip">Confidence: 97%</span><span class="chip">Complexity: Low</span></div></div></div>
+      <dl class="field">
+        <dt>Description</dt>
+        <dd>Limit this release increment to three new GitHub Release ZIPs and platform-specific install/verify guidance. Preserve stable asset names and checksums so the existing Homebrew and Chocolatey renderers remain valid downstream consumers, but do not add package-manager credentials, repositories, review queues, or publication jobs yet.</dd>
+        <dt>Basis</dt>
+        <dd><code>direct:</code> The repository explicitly defers Homebrew and Chocolatey integration while retaining tested templates that consume immutable release URLs and SHA-256 values.</dd>
+        <dt>Rationale</dt>
+        <dd>This separates the user value—downloadable standalone executables—from a second operational problem: maintaining external registries. Stable direct assets are the prerequisite for package-manager work, not a reason to bundle it into the same milestone.</dd>
+        <dt>Downsides</dt>
+        <dd>Installation is more manual, and users do not get automatic updates. The README and release notes must therefore make direct download, verification, extraction, and PATH setup easy.</dd>
+      </dl>
+    </article>
+  </section>
+
+  <section id="rejection-summary">
+    <h2>Rejection Summary</h2>
+    <table>
+      <thead><tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr></thead>
+      <tbody>
+        <tr><td>2</td><td>One matrix, one platform-blind finalizer</td><td>Sound, but fully subsumed by the stronger five-target trust-adapter batch.</td></tr>
+        <tr><td>3</td><td>Restore isolated PFX signing</td><td>Sound fallback, but managed OIDC signing is the preferred trust direction if onboarding is feasible.</td></tr>
+        <tr><td>5</td><td>Hard five-platform quorum</td><td>The central invariant already belongs inside idea 1; it is not a distinct direction.</td></tr>
+        <tr><td>6</td><td>Staged platform cohorts</td><td>Weak: GitHub prerelease state applies to the whole release, and no platform-specific failure evidence justifies fragmenting the launch.</td></tr>
+        <tr><td>8</td><td>Oldest-supported Linux gate</td><td>Sound follow-up after adopting a compatibility promise, but lower leverage than defining that promise first.</td></tr>
+        <tr><td>9</td><td>Keep ZIP as the archive contract</td><td>Already covered by the deterministic build, smoke tests, and package templates; it is a constraint, not a new direction.</td></tr>
+        <tr><td>10</td><td>Switch Unix assets to tar.gz</td><td>Scope overrun and migration churn without evidence that ZIP blocks the requested release expansion.</td></tr>
+        <tr><td>11</td><td>Automated clean-machine smoke</td><td>Useful verification criterion, but overlaps the rehearsal and commissioning directions rather than standing alone.</td></tr>
+        <tr><td>13</td><td>Draft/download-back verification</td><td>Adds release state, cleanup, and promotion choreography without direct evidence of an upload-boundary failure.</td></tr>
+        <tr><td>15</td><td>Per-target trust receipt</td><td>Duplicates checksums, attestations, compatibility guidance, and workflow evidence.</td></tr>
+        <tr><td>16</td><td>Machine-readable release index</td><td>Introduces a new schema before a current package consumer requires it.</td></tr>
+        <tr><td>17</td><td>Generated install guidance</td><td>Static concise guidance satisfies the immediate need without making an index generator part of the release.</td></tr>
+        <tr><td>19</td><td>Package templates as workflow gates</td><td>Conflicts with the explicit policy deferring package-manager integration outside GitHub Actions.</td></tr>
+        <tr><td>20</td><td>Promotion policy in the target registry</td><td>Supportable but premature abstraction; the current five-target change does not need a generalized policy schema.</td></tr>
+        <tr><td>21</td><td>Promote prior CI bytes</td><td>Artifact retention and cross-workflow authorization redesign the pipeline without evidence that release rebuilds cause failures.</td></tr>
+        <tr><td>22</td><td>Cross-build centrally, verify natively</td><td>Bun supports it, but no runner-cost problem justifies changing a proven target-native build model during this expansion.</td></tr>
+        <tr><td>24</td><td>Unsigned Windows preview</td><td>Knowingly creates SmartScreen friction and weakens the public trust bar.</td></tr>
+        <tr><td>25</td><td>Add musl and Windows ARM64</td><td>Expands beyond the repository’s existing five-target support contract.</td></tr>
+        <tr><td>26</td><td>Release bundle before tag</td><td>Conflicts with the verified-tag, version, and main-ancestry authorization contract.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="sources-references">
+    <h2>Sources &amp; References</h2>
+    <ul class="sources">
+      <li><a href="https://github.com/swartzrock/llm-now/blob/main/.github/workflows/release.yml"><code>.github/workflows/release.yml</code></a></li>
+      <li><a href="https://github.com/swartzrock/llm-now/blob/main/.github/workflows/ci.yml"><code>.github/workflows/ci.yml</code></a></li>
+      <li><a href="https://github.com/swartzrock/llm-now/blob/main/scripts/build.ts"><code>scripts/build.ts</code></a></li>
+      <li><a href="https://github.com/swartzrock/llm-now/blob/main/scripts/release-validate.ts"><code>scripts/release-validate.ts</code></a></li>
+      <li><a href="https://github.com/swartzrock/llm-now/blob/main/tests/release-policy.test.ts"><code>tests/release-policy.test.ts</code></a></li>
+      <li><a href="https://github.com/swartzrock/llm-now/blob/main/docs/RELEASING.md"><code>docs/RELEASING.md</code></a></li>
+      <li><a href="https://github.com/swartzrock/llm-now/blob/main/docs/manual-testing.md"><code>docs/manual-testing.md</code></a></li>
+      <li><a href="https://bun.com/docs/bundler/executables">Bun standalone executables and targets</a></li>
+      <li><a href="https://bun.com/docs/installation">Bun platform requirements</a></li>
+      <li><a href="https://github.com/Azure/artifact-signing-action">Microsoft Artifact Signing action</a></li>
+      <li><a href="https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation">Microsoft SmartScreen reputation guidance</a></li>
+      <li><a href="https://docs.github.com/en/actions/concepts/security/artifact-attestations">GitHub artifact attestations</a></li>
+    </ul>
+  </section>
+
+  <footer class="composition-signal">Composed 2026-07-16T21:33:36Z by ce-ideate from the user prompt context and the llm-now repository.</footer>
+</main>
+</body>
+</html>

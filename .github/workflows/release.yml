@@ -23,6 +23,8 @@ jobs:
       release-sha: ${{ steps.release-sha.outputs.value }}
     steps:
       - run: test "$GITHUB_REF" = "refs/heads/main"
+      - if: ${{ inputs.publish }}
+        run: test "${{ github.event.repository.visibility }}" = "public"
       - uses: actions/checkout@v7.0.0
         with:
           ref: ${{ inputs.tag }}
@@ -36,6 +38,10 @@ jobs:
       - run: git merge-base --is-ancestor HEAD origin/main
       - id: release-sha
         run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - if: ${{ inputs.publish }}
+        env:
+          RELEASE_SHA: ${{ steps.release-sha.outputs.value }}
+        run: test "$RELEASE_SHA" = "$GITHUB_SHA"
 
   native:
     needs: validate-ref
@@ -43,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(inputs.publish && '["macos-x64","macos-arm64"]' || '["macos-x64","macos-arm64","linux-x64","linux-arm64","windows-x64"]') }}
+        target: [macos-x64, macos-arm64, linux-x64, linux-arm64, windows-x64]
     runs-on: ${{ fromJSON('{"macos-x64":"macos-15-intel","macos-arm64":"macos-15","linux-x64":"ubuntu-24.04","linux-arm64":"ubuntu-24.04-arm","windows-x64":"windows-2025"}')[matrix.target] }}
     steps:
       - uses: actions/checkout@v7.0.0
@@ -159,6 +165,8 @@ jobs:
           archive="$(find .release-artifacts -name '*.zip' -type f -print -quit)"
           xcrun notarytool submit "$archive" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
           codesign -vvvv -R="notarized" --check-notarization signed/llm-now
+      - shell: bash
+        run: bun scripts/release-validate.ts smoke .release-artifacts/*.zip
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-${{ matrix.target }}
@@ -166,9 +174,9 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
 
-  signed-assets:
+  final-assets:
     if: ${{ inputs.publish }}
-    needs: [sign-macos, validate-ref]
+    needs: [native, sign-macos, validate-ref]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.0
@@ -181,9 +189,16 @@ jobs:
       - uses: actions/download-artifact@v8.0.1
         with:
           pattern: release-macos-*
-          path: .release-artifacts
-          merge-multiple: true
-      - run: bun scripts/release-validate.ts assemble .release-artifacts dist macos-x64 macos-arm64
+          path: .release-artifacts/macos
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: native-linux-*
+          path: .release-artifacts/linux
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: native-windows-*
+          path: .release-artifacts/windows
+      - run: bun scripts/release-validate.ts assemble .release-artifacts dist
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-assets
@@ -194,11 +209,13 @@ jobs:
 
   publish:
     if: ${{ inputs.publish }}
-    needs: [signed-assets, validate-ref]
+    needs: [final-assets, validate-ref]
     runs-on: ubuntu-24.04
     environment: release-publication
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7.0.0
         with:
@@ -234,7 +251,64 @@ jobs:
             *) echo "Could not verify whether release $TAG exists (HTTP $status)" >&2; exit 1 ;;
           esac
       - shell: bash
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
+      - uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
-        run: gh release create "$TAG" dist/*.zip dist/SHA256SUMS --verify-tag --notes-from-tag --title "$TAG"
+          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
+          NOTES_FILE: release-notes.md
+        run: |
+          cat > "$NOTES_FILE" <<'EOF'
+          ## Choose an asset
+
+          - macOS x64 and ARM64 archives are signed and notarized.
+          - Linux x64 and ARM64 archives require glibc; musl and Alpine are not supported.
+          - Windows x64 is unsigned early access.
+
+          Windows may show a SmartScreen warning and, where policy permits, offer a manual **Run anyway** path. Smart App Control or enterprise policy may block execution with no user bypass. Do not weaken or disable security controls to run llm-now.
+
+          ## Verify the download
+
+          Download one archive and `SHA256SUMS`, then verify only that archive's manifest entry.
+
+          macOS:
+
+          ```sh
+          ARCHIVE=<downloaded-archive.zip>
+          grep "  $ARCHIVE$" SHA256SUMS | shasum -a 256 -c -
+          ```
+
+          Linux:
+
+          ```sh
+          ARCHIVE=<downloaded-archive.zip>
+          grep "  $ARCHIVE$" SHA256SUMS | sha256sum --check -
+          ```
+
+          Windows PowerShell:
+
+          ```powershell
+          $Archive = "<downloaded-archive.zip>"
+          $ChecksumLines = @(Get-Content SHA256SUMS | Where-Object { $_.EndsWith("  $Archive") })
+          if ($ChecksumLines.Count -ne 1) { throw "Expected one checksum for $Archive" }
+          $Expected = ($ChecksumLines[0] -split '\s+')[0].ToLowerInvariant()
+          $Actual = (Get-FileHash $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($Expected -ne $Actual) { throw "SHA-256 mismatch for $Archive" }
+          ```
+
+          Verify each archive's provenance against this repository, release workflow, and exact source digest:
+
+          ```sh
+          EOF
+          printf 'gh attestation verify <downloaded-archive.zip> --repo swartzrock/llm-now --signer-workflow swartzrock/llm-now/.github/workflows/release.yml --source-digest %s\n' "$RELEASE_SHA" >> "$NOTES_FILE"
+          cat >> "$NOTES_FILE" <<'EOF'
+          ```
+          EOF
+          printf '\nRelease source digest: `%s`\n\n## Release notes\n\n' "$RELEASE_SHA" >> "$NOTES_FILE"
+          git for-each-ref --format='%(contents)' "refs/tags/${TAG}" >> "$NOTES_FILE"
+          gh release create "$TAG" dist/*.zip dist/SHA256SUMS --verify-tag --notes-file "$NOTES_FILE" --title "$TAG"
