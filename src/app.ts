@@ -1,7 +1,9 @@
 import {
   BYOK_API_KEY_ENV_VARS,
+  BYOK_PROVIDER_API_KEY_ENV_VARS,
   type ByokCloudProviderId,
   type ByokEnvironment,
+  type ByokModelOption,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
 import pc from "picocolors";
@@ -23,14 +25,21 @@ import {
   type Selection,
 } from "./args.ts";
 import { isInteractive, resolvePrompt, type PromptInput, type TextOutput } from "./io.ts";
+import type {
+  CredentialResolver,
+  CredentialVault,
+  SensitiveValueRegistry,
+} from "./credentials.ts";
 import {
   cloudCredentialProviderOptions,
   createSearchablePrompter,
   createTerminalColors,
   formatSelection,
+  NO_PROVIDER_DIAGNOSTIC,
   providerLabel,
   selectAliasOrFresh,
   selectProviderAndModel,
+  sanitizePromptText,
   sortPromptOptions,
   stripTerminalSequences,
   validateCredentialCandidate,
@@ -43,8 +52,8 @@ const DEFAULT_DISCOVERY_TIMEOUT_MS = 5_000;
 const DEFAULT_MODEL_LIST_TIMEOUT_MS = 10_000;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
 const MANAGE_API_KEYS_VALUE = "setup:manage-api-keys";
+const DISCOVER_PROVIDERS_VALUE = "setup:discover-providers";
 const ALIAS_SETUP_PREFIX = "setup:alias:";
-const PROVIDER_SETUP_PREFIX = "setup:provider:";
 
 export type ApplicationPrompter = SearchablePrompter;
 
@@ -66,6 +75,10 @@ export interface ApplicationDependencies {
   generationTimeoutMs?: number;
   discoveryTimeoutMs?: number;
   modelListTimeoutMs?: number;
+  credentialVault: CredentialVault;
+  credentialResolver: CredentialResolver;
+  sensitive: SensitiveValueRegistry;
+  nativeVaultEnabled: boolean;
 }
 
 interface ResolvedSelection {
@@ -82,9 +95,14 @@ function recognizedCredentialValues(env: ByokEnvironment): string[] {
   )].sort((left, right) => right.length - left.length);
 }
 
-function sanitizeDiagnostic(text: string, env: ByokEnvironment): string {
+function sanitizeDiagnostic(
+  text: string,
+  env: ByokEnvironment,
+  sensitive: SensitiveValueRegistry,
+): string {
   let sanitized = stripTerminalSequences(text.replace(/\r\n?|\u2028|\u2029/g, "\n"));
   sanitized = sanitized.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
+  sanitized = sensitive.redact(sanitized);
   for (const value of recognizedCredentialValues(env)) {
     sanitized = sanitized.replaceAll(value, "[REDACTED]");
   }
@@ -95,9 +113,107 @@ function sanitizeDiagnostic(text: string, env: ByokEnvironment): string {
 
 function diagnosticWriter(deps: ApplicationDependencies): (text: string) => void {
   return (text) => {
-    const sanitized = sanitizeDiagnostic(text, deps.env);
+    const sanitized = sanitizeDiagnostic(text, deps.env, deps.sensitive);
     deps.stderr.write(`${sanitized}${sanitized.endsWith("\n") ? "" : "\n"}`);
   };
+}
+
+function safeFormatSelection(deps: ApplicationDependencies, selection: AliasRecord): string {
+  return sanitizeDiagnostic(formatSelection(selection), deps.env, deps.sensitive);
+}
+
+function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
+  return left.provider === right.provider && left.model === right.model;
+}
+
+function selectedCredentialModel(
+  value: string | number | boolean | null,
+  models: readonly ByokModelOption[],
+): string | false | null {
+  if (value === null) return null;
+  if (value === false) return false;
+  if (typeof value !== "string" || !models.some((model) => model.id === value)) {
+    throw new RangeError("Prompter returned an invalid credential model choice.");
+  }
+  return value;
+}
+
+interface PendingAlias {
+  name: string;
+  selection: AliasRecord;
+  expectedCurrent?: AliasRecord;
+}
+
+async function prepareCredentialAlias(
+  deps: ApplicationDependencies,
+  aliases: Readonly<Record<string, AliasRecord>>,
+  provider: ByokCloudProviderId,
+  models: readonly ByokModelOption[],
+  diagnostic: (text: string) => void,
+): Promise<PendingAlias | null | 130> {
+  const safeModels = models.filter((model) =>
+    sanitizePromptText(model.id) === model.id
+    && deps.sensitive.redact(model.id) === model.id
+  );
+  if (safeModels.length === 0) {
+    diagnostic(
+      `model-list (${provider}): provider returned ${models.length === 0 ? "no models" : "no alias-safe models"}; the API key can still be saved without an alias.`,
+    );
+    return null;
+  }
+
+  const modelOptions = sortPromptOptions(safeModels.map((model) => {
+    const id = deps.sensitive.redact(sanitizePromptText(model.id));
+    const label = deps.sensitive.redact(sanitizePromptText(model.label)) || id;
+    return {
+      value: model.id,
+      label,
+      ...(label !== id ? { hint: id } : {}),
+    };
+  }));
+  const model = selectedCredentialModel(
+    await deps.prompter.select("Choose a model for an optional alias", [
+      ...modelOptions,
+      { value: false, label: "Skip alias" },
+    ]),
+    safeModels,
+  );
+  if (model === null) return 130;
+  if (model === false) return null;
+  const selection = { provider, model } satisfies AliasRecord;
+
+  while (true) {
+    const name = await deps.prompter.input("Enter an optional alias name (Enter to skip)", {
+      validate: (value) => {
+        if (value === undefined || value === "") return undefined;
+        if (deps.sensitive.redact(value) !== value) return "Alias names must not contain an API key.";
+        return isValidAliasName(value)
+          ? undefined
+          : "Use 1-64 ASCII letters, numbers, hyphens, or underscores.";
+      },
+    });
+    if (name === null) return 130;
+    if (name === "") return null;
+    if (deps.sensitive.redact(name) !== name) {
+      diagnostic("config: alias names must not contain an API key.");
+      continue;
+    }
+    if (!isValidAliasName(name)) {
+      diagnostic("config: invalid alias name; use 1-64 ASCII letters, numbers, hyphens, or underscores.");
+      continue;
+    }
+
+    const current = aliases[name];
+    if (current !== undefined && !sameAliasRecord(current, selection)) {
+      const overwrite = await deps.prompter.confirm(
+        `Overwrite alias ${name}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, selection)}`,
+        { initialValue: false },
+      );
+      if (overwrite === null) return 130;
+      if (!overwrite) continue;
+    }
+    return { name, selection, expectedCurrent: current };
+  }
 }
 
 function applicationAliasPath(deps: ApplicationDependencies): string {
@@ -233,7 +349,7 @@ async function offerAliasSave(
 ): Promise<boolean> {
   const save = deps.saveAlias ?? saveStoredAlias;
   const colors = createTerminalColors(deps.stderr, deps.env);
-  const target = formatSelection(selection);
+  const target = safeFormatSelection(deps, selection);
 
   while (true) {
     const name = await deps.prompter.input(
@@ -253,7 +369,7 @@ async function offerAliasSave(
       const result = await save(applicationAliasPath(deps), name, selection, {
         confirmOverwrite: async (_alias, current) =>
           (await deps.prompter.confirm(
-            `Overwrite alias ${name}?\nOld: ${current === undefined ? "(not present)" : formatSelection(current)}\nNew: ${target}`,
+            `Overwrite alias ${name}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}`,
             { initialValue: false },
           )) === true,
       });
@@ -276,6 +392,138 @@ async function offerAliasSave(
   }
 }
 
+async function runCredentialManagement(
+  deps: ApplicationDependencies,
+  provider: ByokCloudProviderId,
+  aliases: Readonly<Record<string, AliasRecord>>,
+  diagnostic: (text: string) => void,
+): Promise<number> {
+  const vault = deps.credentialVault;
+  const resolver = deps.credentialResolver;
+  const sensitive = deps.sensitive;
+
+  if (deps.nativeVaultEnabled !== true) {
+    diagnostic(
+      `native credential storage unavailable on this target; use environment variable ${BYOK_PROVIDER_API_KEY_ENV_VARS[provider].join(" or ")}.`,
+    );
+    return 1;
+  }
+
+  const stored = await vault.get(provider);
+  if (stored !== null) sensitive.register(stored);
+
+  if (stored !== null) {
+    const operation = await deps.prompter.select(
+      `Manage the saved ${providerLabel(provider)} API key`,
+      [
+        { value: "replace", label: "Replace saved API key" },
+        { value: "delete", label: "Delete saved API key" },
+      ],
+    );
+    if (operation === null) return 130;
+    if (operation !== "replace" && operation !== "delete") {
+      throw new RangeError("Prompter returned an invalid credential operation.");
+    }
+
+    if (operation === "delete") {
+      const confirmed = await deps.prompter.confirm(
+        `Delete the saved ${providerLabel(provider)} API key?`,
+        { initialValue: false },
+      );
+      if (confirmed === null) return 130;
+      if (!confirmed) return 0;
+      const deleted = await vault.delete(provider);
+      resolver.invalidate?.(provider);
+      const activeEnv = BYOK_PROVIDER_API_KEY_ENV_VARS[provider]
+        .find((name) => Boolean(deps.env[name]));
+      if (!deleted) {
+        deps.stderr.write(`The saved ${providerLabel(provider)} API key was already absent.\n`);
+      } else {
+        deps.stderr.write(`Deleted the saved ${providerLabel(provider)} API key.\n`);
+      }
+      if (activeEnv !== undefined) {
+        deps.stderr.write(
+          `${providerLabel(provider)} continues to be available through ${activeEnv}; environment credentials take precedence.\n`,
+        );
+      }
+      return 0;
+    }
+
+    const replace = await deps.prompter.confirm(
+      `Replace the saved ${providerLabel(provider)} API key? The old key remains until the replacement is verified and saved.`,
+      { initialValue: false },
+    );
+    if (replace === null) return 130;
+    if (!replace) return 0;
+  }
+
+  let candidate: string;
+  while (true) {
+    const value = await deps.prompter.password(`Enter the ${providerLabel(provider)} API key`, {
+      validate: validateCredentialCandidate,
+    });
+    if (value === null) return 130;
+    sensitive.register(value);
+    const validationMessage = validateCredentialCandidate(value);
+    if (validationMessage !== undefined) {
+      diagnostic(`credential: ${validationMessage}`);
+      continue;
+    }
+    candidate = value;
+    break;
+  }
+
+  const models = await withStageTimeout(
+    deps.runtime.validateCredential(provider, candidate),
+    deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
+    "model-list",
+    provider,
+  );
+  const pendingAlias = await prepareCredentialAlias(deps, aliases, provider, models, diagnostic);
+  if (pendingAlias === 130) return 130;
+
+  const save = await deps.prompter.confirm(
+    `Save this verified ${providerLabel(provider)} API key${pendingAlias === null ? "" : ` and alias ${pendingAlias.name}`}?`,
+    { initialValue: false },
+  );
+  if (save === null) return 130;
+  if (!save) return 0;
+
+  await vault.set(provider, candidate);
+  resolver.invalidate?.(provider);
+  deps.stderr.write(`Saved the ${providerLabel(provider)} API key.\n`);
+
+  if (pendingAlias === null) return 0;
+  try {
+    const saveAlias = deps.saveAlias ?? saveStoredAlias;
+    const result = await saveAlias(
+      applicationAliasPath(deps),
+      pendingAlias.name,
+      pendingAlias.selection,
+      pendingAlias.expectedCurrent === undefined
+        ? undefined
+        : {
+          confirmOverwrite: async (_name, current) =>
+            current !== undefined && sameAliasRecord(current, pendingAlias.expectedCurrent!),
+        },
+    );
+    if (result === "declined") {
+      diagnostic("API key was saved, but the alias was not saved because it changed concurrently.");
+      return 1;
+    }
+    deps.stderr.write(
+      `${result === "already-saved" ? "Alias already saved" : "Saved alias"} `
+      + `${pendingAlias.name} → ${safeFormatSelection(deps, pendingAlias.selection)}.\n`,
+    );
+    return 0;
+  } catch (error) {
+    diagnostic(
+      `API key was saved, but the alias was not saved: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return 1;
+  }
+}
+
 async function runSetup(
   deps: ApplicationDependencies,
   diagnostic: (text: string) => void,
@@ -283,25 +531,15 @@ async function runSetup(
   const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
     applicationAliasPath(deps),
   )).aliases;
-  let providers: readonly ByokProviderId[] = [];
-  try {
-    providers = await deps.runtime.discover();
-  } catch (error) {
-    diagnostic(error instanceof Error ? error.message : String(error));
-  }
 
   const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => ({
     value: `${ALIAS_SETUP_PREFIX}${alias}`,
-    label: sanitizeDiagnostic(alias, deps.env),
-    hint: formatSelection(selection),
-  })));
-  const providerOptions = sortPromptOptions([...new Set(providers)].map((provider) => ({
-    value: `${PROVIDER_SETUP_PREFIX}${provider}`,
-    label: providerLabel(provider),
+    label: sanitizeDiagnostic(alias, deps.env, deps.sensitive),
+    hint: safeFormatSelection(deps, selection),
   })));
   const selected = await deps.prompter.select("What would you like to set up?", [
     ...aliasOptions,
-    ...providerOptions,
+    { value: DISCOVER_PROVIDERS_VALUE, label: "Discover available providers…" },
     { value: MANAGE_API_KEYS_VALUE, label: "Add or manage API keys…" },
   ]);
   if (selected === null) return 130;
@@ -315,9 +553,25 @@ async function runSetup(
     deps.stderr.write(`Next: llm-now ${alias} --input "<prompt>"\n`);
     return 0;
   }
-  if (selected.startsWith(PROVIDER_SETUP_PREFIX)) {
-    const provider = selected.slice(PROVIDER_SETUP_PREFIX.length);
-    if (!providers.includes(provider as ByokProviderId)) {
+  if (selected === DISCOVER_PROVIDERS_VALUE) {
+    let providers: readonly ByokProviderId[];
+    try {
+      providers = [...new Set(await deps.runtime.discover())];
+    } catch (error) {
+      diagnostic(error instanceof Error ? error.message : String(error));
+      return 1;
+    }
+    if (providers.length === 0) {
+      diagnostic(NO_PROVIDER_DIAGNOSTIC);
+      return 1;
+    }
+    const providerOptions = sortPromptOptions(providers.map((provider) => ({
+      value: provider,
+      label: providerLabel(provider),
+    })));
+    const provider = await deps.prompter.select("Choose an available provider", providerOptions);
+    if (provider === null) return 130;
+    if (typeof provider !== "string" || !providers.includes(provider as ByokProviderId)) {
       throw new RangeError("Provider choice was unavailable.");
     }
     deps.stderr.write(
@@ -339,27 +593,12 @@ async function runSetup(
   ) {
     throw new RangeError("Prompter returned an invalid credential provider choice.");
   }
-  const provider = providerValue as ByokCloudProviderId;
-
-  while (true) {
-    const candidate = await deps.prompter.password(`Enter the ${providerLabel(provider)} API key`, {
-      validate: validateCredentialCandidate,
-    });
-    if (candidate === null) return 130;
-    const validationMessage = validateCredentialCandidate(candidate);
-    if (validationMessage !== undefined) {
-      diagnostic(`credential: ${validationMessage}`);
-      continue;
-    }
-    await withStageTimeout(
-      deps.runtime.validateCredential(provider, candidate),
-      deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
-      "model-list",
-      provider,
-    );
-    deps.stderr.write(`Credential verified for ${providerLabel(provider)}; no changes saved.\n`);
-    return 0;
-  }
+  return runCredentialManagement(
+    deps,
+    providerValue as ByokCloudProviderId,
+    aliases,
+    diagnostic,
+  );
 }
 
 function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
@@ -409,7 +648,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     if (interactive) writeInteractiveBoundary(deps.stderr, response);
     if (interactive && selection.existingAlias !== undefined) {
       const colors = createTerminalColors(deps.stderr, deps.env);
-      const target = formatSelection(selection.selection);
+      const target = safeFormatSelection(deps, selection.selection);
       deps.stderr.write(
         colors.green(
           `◆ ${target} is already saved as alias ${selection.existingAlias}\n`
