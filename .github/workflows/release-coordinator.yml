@@ -1,0 +1,43 @@
+name: Release coordinator
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    outputs:
+      should-release: ${{ steps.plan.outputs.should-release }}
+      release-sha: ${{ steps.plan.outputs.release-sha }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - id: plan
+        run: bun scripts/release-plan.ts "$BEFORE_SHA" "$RELEASE_SHA"
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          RELEASE_SHA: ${{ github.sha }}
+
+  promote:
+    needs: classify
+    if: needs.classify.outputs.should-release == 'true'
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: ./.github/workflows/release.yml
+    with:
+      release-sha: ${{ needs.classify.outputs.release-sha }}
+      publish: true
