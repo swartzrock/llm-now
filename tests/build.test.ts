@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { unzipSync } from "fflate";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
+import packageMetadata from "../package.json" with { type: "json" };
 import {
   RELEASE_TARGETS,
   archiveMtime,
@@ -13,6 +14,7 @@ import { assembleReleaseAssets, runProcess } from "../scripts/release-validate.t
 
 const temporaryDirectories: string[] = [];
 const testArchiveMtime = new Date("2026-07-13T12:34:56Z");
+const testPackageVersion = packageMetadata.version;
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -83,7 +85,7 @@ describe("native release build", () => {
     for (const target of RELEASE_TARGETS) {
       await mkdir(join(input, target.id), { recursive: true });
       await Bun.write(
-        join(input, target.id, archiveName("0.1.0", target)),
+        join(input, target.id, archiveName(testPackageVersion, target)),
         createExecutableArchive(target.executable, Uint8Array.from([target.id.length]), testArchiveMtime),
       );
     }
@@ -92,7 +94,7 @@ describe("native release build", () => {
     const manifest = await Bun.file(join(output, "SHA256SUMS")).text();
     expect(manifest.trim().split("\n")).toHaveLength(5);
     for (const target of RELEASE_TARGETS) {
-      expect(await Bun.file(join(output, archiveName("0.1.0", target))).exists()).toBe(true);
+      expect(await Bun.file(join(output, archiveName(testPackageVersion, target))).exists()).toBe(true);
     }
   });
 
@@ -107,10 +109,10 @@ describe("native release build", () => {
         testArchiveMtime,
       );
       await mkdir(join(input, target.id), { recursive: true });
-      await Bun.write(join(input, target.id, archiveName("0.1.0", target)), archive);
+      await Bun.write(join(input, target.id, archiveName(testPackageVersion, target)), archive);
       if (target.id === "linux-x64") {
         await mkdir(join(input, "duplicate", target.id), { recursive: true });
-        await Bun.write(join(input, "duplicate", target.id, archiveName("0.1.0", target)), archive);
+        await Bun.write(join(input, "duplicate", target.id, archiveName(testPackageVersion, target)), archive);
       }
     }
 
@@ -128,7 +130,7 @@ describe("native release build", () => {
     for (const target of macosTargets) {
       await mkdir(join(input, target.id), { recursive: true });
       await Bun.write(
-        join(input, target.id, archiveName("0.1.0", target)),
+        join(input, target.id, archiveName(testPackageVersion, target)),
         createExecutableArchive(target.executable, Uint8Array.from([target.id.length]), testArchiveMtime),
       );
     }
@@ -137,13 +139,13 @@ describe("native release build", () => {
     const manifest = await Bun.file(join(output, "SHA256SUMS")).text();
     expect(manifest.trim().split("\n")).toHaveLength(2);
     for (const target of macosTargets) {
-      expect(await Bun.file(join(output, archiveName("0.1.0", target))).exists()).toBe(true);
+      expect(await Bun.file(join(output, archiveName(testPackageVersion, target))).exists()).toBe(true);
     }
 
     const windowsTarget = RELEASE_TARGETS.find((target) => target.id === "windows-x64")!;
     await mkdir(join(input, windowsTarget.id), { recursive: true });
     await Bun.write(
-      join(input, windowsTarget.id, archiveName("0.1.0", windowsTarget)),
+      join(input, windowsTarget.id, archiveName(testPackageVersion, windowsTarget)),
       createExecutableArchive(windowsTarget.executable, Uint8Array.of(1), testArchiveMtime),
     );
     await expect(
@@ -172,7 +174,7 @@ describe("native release build", () => {
     for (const target of RELEASE_TARGETS) {
       await mkdir(join(input, target.id), { recursive: true });
       await Bun.write(
-        join(input, target.id, archiveName("0.1.0", target)),
+        join(input, target.id, archiveName(testPackageVersion, target)),
         createExecutableArchive(
           target.id === "windows-x64" ? "llm-now" : target.executable,
           Uint8Array.of(1),
