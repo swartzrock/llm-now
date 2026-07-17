@@ -19,11 +19,11 @@ Use the [manual testing guide](manual-testing.md) to validate native artifacts, 
 
 Public releases contain these five self-contained archives:
 
-- `llm-now-<version>-macos-x64.zip`
-- `llm-now-<version>-macos-arm64.zip`
-- `llm-now-<version>-linux-x64.zip` (glibc, not Alpine/musl)
-- `llm-now-<version>-linux-arm64.zip` (glibc, not Alpine/musl)
-- `llm-now-<version>-windows-x64.zip` (unsigned early access)
+- `llm-now-v<version>-macos-x64.zip`
+- `llm-now-v<version>-macos-arm64.zip`
+- `llm-now-v<version>-linux-x64.zip` (glibc, not Alpine/musl)
+- `llm-now-v<version>-linux-arm64.zip` (glibc, not Alpine/musl)
+- `llm-now-v<version>-windows-x64.zip` (unsigned early access)
 
 Each archive contains one executable. macOS archives are signed and notarized; Linux and Windows archives are unsigned. All five pass their native checks, match `SHA256SUMS`, and receive GitHub artifact attestations for the final downloadable bytes.
 

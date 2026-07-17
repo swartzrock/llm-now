@@ -274,10 +274,31 @@ jobs:
 
           ## Verify the download
 
-          Download the archive and `SHA256SUMS`, then verify the final archive bytes from the download directory:
+          Download one archive and `SHA256SUMS`, then verify only that archive's manifest entry.
+
+          macOS:
 
           ```sh
-          sha256sum --check SHA256SUMS
+          ARCHIVE=<downloaded-archive.zip>
+          grep "  $ARCHIVE$" SHA256SUMS | shasum -a 256 -c -
+          ```
+
+          Linux:
+
+          ```sh
+          ARCHIVE=<downloaded-archive.zip>
+          grep "  $ARCHIVE$" SHA256SUMS | sha256sum --check -
+          ```
+
+          Windows PowerShell:
+
+          ```powershell
+          $Archive = "<downloaded-archive.zip>"
+          $ChecksumLines = @(Get-Content SHA256SUMS | Where-Object { $_.EndsWith("  $Archive") })
+          if ($ChecksumLines.Count -ne 1) { throw "Expected one checksum for $Archive" }
+          $Expected = ($ChecksumLines[0] -split '\s+')[0].ToLowerInvariant()
+          $Actual = (Get-FileHash $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($Expected -ne $Actual) { throw "SHA-256 mismatch for $Archive" }
           ```
 
           Verify each archive's provenance against this repository, release workflow, and exact source digest:

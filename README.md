@@ -8,18 +8,18 @@ Choose the archive for your machine:
 
 | Platform | Archive | Trust and compatibility |
 | --- | --- | --- |
-| macOS Intel | `llm-now-<version>-macos-x64.zip` | Signed and notarized |
-| macOS Apple silicon | `llm-now-<version>-macos-arm64.zip` | Signed and notarized |
-| Linux x64 | `llm-now-<version>-linux-x64.zip` | glibc build; not Alpine/musl |
-| Linux ARM64 | `llm-now-<version>-linux-arm64.zip` | glibc build; not Alpine/musl |
-| Windows x64 | `llm-now-<version>-windows-x64.zip` | **Unsigned early access** |
+| macOS Intel | `llm-now-v<version>-macos-x64.zip` | Signed and notarized |
+| macOS Apple silicon | `llm-now-v<version>-macos-arm64.zip` | Signed and notarized |
+| Linux x64 | `llm-now-v<version>-linux-x64.zip` | glibc build; not Alpine/musl |
+| Linux ARM64 | `llm-now-v<version>-linux-arm64.zip` | glibc build; not Alpine/musl |
+| Windows x64 | `llm-now-v<version>-windows-x64.zip` | **Unsigned early access** |
 
 For macOS, set `TARGET` to `macos-arm64` or `macos-x64`. Download, verify, and extract one archive:
 
 ```bash
 VERSION=0.1.0
 TARGET=macos-arm64
-ARCHIVE="llm-now-${VERSION}-${TARGET}.zip"
+ARCHIVE="llm-now-v${VERSION}-${TARGET}.zip"
 BASE="https://github.com/swartzrock/llm-now/releases/download/v${VERSION}"
 SOURCE_DIGEST="<release source digest shown in the release notes>"
 
@@ -39,7 +39,7 @@ For Linux, set `TARGET` to `linux-x64` or `linux-arm64`. These are glibc builds;
 ```bash
 VERSION=0.1.0
 TARGET=linux-x64
-ARCHIVE="llm-now-${VERSION}-${TARGET}.zip"
+ARCHIVE="llm-now-v${VERSION}-${TARGET}.zip"
 BASE="https://github.com/swartzrock/llm-now/releases/download/v${VERSION}"
 SOURCE_DIGEST="<release source digest shown in the release notes>"
 
@@ -60,7 +60,7 @@ If your policy permits the executable, download and verify it before the first r
 
 ```powershell
 $Version = "0.1.0"
-$Archive = "llm-now-$Version-windows-x64.zip"
+$Archive = "llm-now-v$Version-windows-x64.zip"
 $Base = "https://github.com/swartzrock/llm-now/releases/download/v$Version"
 $SourceDigest = "<release source digest shown in the release notes>"
 

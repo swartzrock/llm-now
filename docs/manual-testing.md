@@ -383,11 +383,11 @@ Run only when publication is explicitly authorized. Before dispatch:
 
 After publication, download the release assets to an empty directory and confirm there are exactly five ZIPs plus `SHA256SUMS`:
 
-- `llm-now-X.Y.Z-macos-x64.zip`
-- `llm-now-X.Y.Z-macos-arm64.zip`
-- `llm-now-X.Y.Z-linux-x64.zip`
-- `llm-now-X.Y.Z-linux-arm64.zip`
-- `llm-now-X.Y.Z-windows-x64.zip`
+- `llm-now-vX.Y.Z-macos-x64.zip`
+- `llm-now-vX.Y.Z-macos-arm64.zip`
+- `llm-now-vX.Y.Z-linux-x64.zip`
+- `llm-now-vX.Y.Z-linux-arm64.zip`
+- `llm-now-vX.Y.Z-windows-x64.zip`
 
 Complete these trust and integrity gates:
 

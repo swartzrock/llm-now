@@ -178,7 +178,13 @@ describe("release workflow policy", () => {
     expect(publishJob).toContain("SmartScreen");
     expect(publishJob).toContain("Smart App Control or enterprise policy may block execution");
     expect(publishJob).toContain("Do not weaken or disable security controls");
-    expect(publishJob).toContain("sha256sum --check SHA256SUMS");
+    expect(publishJob).toContain(
+      'grep "  $ARCHIVE$" SHA256SUMS | shasum -a 256 -c -',
+    );
+    expect(publishJob).toContain(
+      'grep "  $ARCHIVE$" SHA256SUMS | sha256sum --check -',
+    );
+    expect(publishJob).toContain("Get-FileHash $Archive -Algorithm SHA256");
     expect(publishJob).toContain(
       "gh attestation verify <downloaded-archive.zip> --repo swartzrock/llm-now --signer-workflow swartzrock/llm-now/.github/workflows/release.yml --source-digest %s\\n' \"$RELEASE_SHA\"",
     );
