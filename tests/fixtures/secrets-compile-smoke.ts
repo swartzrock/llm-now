@@ -1,7 +1,4 @@
-import {
-  createBunNativeSecretAdapter,
-  type NativeSecretAdapter,
-} from "../../src/credentials.ts";
+import type { NativeSecretAdapter } from "../../src/credentials.ts";
 
 type LifecycleStage =
   | "missing"
@@ -68,16 +65,4 @@ export async function runNativeSecretLifecycle(
   }
 
   if (failure !== undefined) throw failure;
-}
-
-if (import.meta.main) {
-  try {
-    await runNativeSecretLifecycle(
-      createBunNativeSecretAdapter(),
-      (stage) => console.log(`native credential lifecycle: ${stage}`),
-    );
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : "native credential lifecycle failed");
-    process.exitCode = 1;
-  }
 }

@@ -183,7 +183,7 @@ export interface NativeVaultCompatibility extends NativeVaultTarget {
 }
 
 export const NATIVE_VAULT_COMPATIBILITY: readonly NativeVaultCompatibility[] = [
-  { id: "macos-x64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "darwin", arch: "x64", enabled: true },
+  { id: "macos-x64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "darwin", arch: "x64", enabled: false },
   { id: "macos-arm64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "darwin", arch: "arm64", enabled: true },
   { id: "linux-x64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "linux", arch: "x64", enabled: true },
   { id: "linux-arm64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "linux", arch: "arm64", enabled: true },

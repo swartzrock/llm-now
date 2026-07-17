@@ -29,7 +29,7 @@ Homebrew and Chocolatey are intentionally outside the current release scope. Do 
 
 A native smoke consists of checksum verification, extraction, `--help`, `--version`, invalid-usage behavior, one real generation, and operation without Bun or Node.js.
 
-Native credential storage is additionally gated on all five targets for Bun 1.3.14. macOS uses Keychain, Windows uses Credential Manager, and Linux uses Secret Service. Linux coverage requires a real isolated D-Bus user session and unlocked test collection; a platform name without that session is not evidence of availability.
+Native credential storage is additionally gated on each explicitly enabled target for Bun 1.3.14. macOS uses Keychain, Windows uses Credential Manager, and Linux uses Secret Service. Linux coverage requires a real isolated D-Bus user session and unlocked test collection; a platform name without that session is not evidence of availability. macOS x64 remains buildable but environment-only because its Bun 1.3.14 lifecycle gate failed.
 
 ### Providers
 

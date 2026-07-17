@@ -57,11 +57,11 @@ jobs:
           bun-version: 1.3.14
           bun-download-url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-windows-x64-baseline.zip
       - run: bun install --frozen-lockfile
-      - if: contains(fromJSON('["macos-x64","macos-arm64","linux-x64","linux-arm64","windows-x64"]'), matrix.target) && (matrix.target == 'linux-x64' || matrix.target == 'linux-arm64')
+      - if: contains(fromJSON('["macos-arm64","linux-x64","linux-arm64","windows-x64"]'), matrix.target) && (matrix.target == 'linux-x64' || matrix.target == 'linux-arm64')
         run: sudo apt-get update && sudo apt-get install --yes dbus-x11 gnome-keyring libsecret-1-0
-      - if: contains(fromJSON('["macos-x64","macos-arm64","linux-x64","linux-arm64","windows-x64"]'), matrix.target) && matrix.target != 'linux-x64' && matrix.target != 'linux-arm64'
+      - if: contains(fromJSON('["macos-arm64","linux-x64","linux-arm64","windows-x64"]'), matrix.target) && matrix.target != 'linux-x64' && matrix.target != 'linux-arm64'
         run: bun scripts/release-validate.ts secrets ${{ matrix.target }}
-      - if: contains(fromJSON('["macos-x64","macos-arm64","linux-x64","linux-arm64","windows-x64"]'), matrix.target) && (matrix.target == 'linux-x64' || matrix.target == 'linux-arm64')
+      - if: contains(fromJSON('["macos-arm64","linux-x64","linux-arm64","windows-x64"]'), matrix.target) && (matrix.target == 'linux-x64' || matrix.target == 'linux-arm64')
         shell: bash
         run: |
           runtime="$(mktemp -d)"

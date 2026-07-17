@@ -137,7 +137,8 @@ Native storage is capability-gated per compiled release target. If it is not ena
 
 | Compiled target | Native store | Bun 1.3.14 policy |
 | --- | --- | --- |
-| macOS x64 / ARM64 | Keychain | Enabled after compiled lifecycle gate |
+| macOS ARM64 | Keychain | Enabled after compiled lifecycle gate |
+| macOS x64 | Keychain | Environment-only; Bun 1.3.14 failed the compiled lifecycle gate |
 | Linux x64 / ARM64 glibc | Secret Service | Enabled after compiled lifecycle gate; requires an available user-session service |
 | Windows x64 baseline | Credential Manager | Enabled after compiled lifecycle gate |
 

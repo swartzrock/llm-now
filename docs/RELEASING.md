@@ -108,7 +108,8 @@ If a native backend regresses, set that target's explicit compatibility entry to
 
 | Release target | Native backend | Policy |
 | --- | --- | --- |
-| macOS x64 / ARM64 | Keychain | Enabled behind the compiled lifecycle gate |
+| macOS ARM64 | Keychain | Enabled behind the compiled lifecycle gate |
+| macOS x64 | Keychain | Disabled after Bun 1.3.14 failed the compiled lifecycle gate; build environment-only |
 | Linux x64 / ARM64 glibc | Secret Service | Enabled behind the compiled lifecycle gate and an available user session |
 | Windows x64 baseline | Credential Manager | Enabled behind the compiled lifecycle gate |
 

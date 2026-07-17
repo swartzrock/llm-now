@@ -58,8 +58,13 @@ describe("native release build", () => {
     expect(() => assertNativeVaultGateTarget({
       bunVersion: NATIVE_VAULT_BUN_VERSION,
       platform: "freebsd",
+      arch: "arm64",
+    }, "macos-arm64")).toThrow("requires darwin/arm64; received freebsd/arm64");
+    expect(() => assertNativeVaultGateTarget({
+      bunVersion: NATIVE_VAULT_BUN_VERSION,
+      platform: "darwin",
       arch: "x64",
-    }, "macos-x64")).toThrow("requires darwin/x64; received freebsd/x64");
+    }, "macos-x64")).toThrow("disabled for target macos-x64");
     expect(() => assertNativeVaultGateTarget({
       bunVersion: NATIVE_VAULT_BUN_VERSION,
       platform: "darwin",
@@ -68,8 +73,8 @@ describe("native release build", () => {
     expect(assertNativeVaultGateTarget({
       bunVersion: NATIVE_VAULT_BUN_VERSION,
       platform: "darwin",
-      arch: "x64",
-    }, "macos-x64").bunTarget).toBe("bun-darwin-x64-baseline");
+      arch: "arm64",
+    }, "macos-arm64").bunTarget).toBe("bun-darwin-arm64");
   });
 
   test("defines exactly the five supported glibc and baseline targets", () => {

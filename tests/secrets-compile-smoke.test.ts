@@ -25,13 +25,18 @@ function adapter(options: { failReplace?: boolean } = {}) {
 
 describe("compiled native credential lifecycle", () => {
   test("imports the production adapter but never names a provider credential record", async () => {
-    const source = await Bun.file(
+    const lifecycleSource = await Bun.file(
       new URL("./fixtures/secrets-compile-smoke.ts", import.meta.url),
     ).text();
-    expect(source).toContain("createBunNativeSecretAdapter");
-    expect(source).toContain("crypto.randomUUID()");
-    expect(source).not.toContain("api-key:");
-    expect(source).not.toMatch(/anthropic|openai|google|xai|openrouter|groq|mistral|deepseek|deepinfra/);
+    const entrySource = await Bun.file(
+      new URL("./fixtures/secrets-compile-entry.ts", import.meta.url),
+    ).text();
+    const compiledSources = lifecycleSource + entrySource;
+    expect(entrySource).toContain("createBunNativeSecretAdapter");
+    expect(entrySource).toContain("runNativeSecretLifecycle");
+    expect(lifecycleSource).toContain("crypto.randomUUID()");
+    expect(compiledSources).not.toContain("api-key:");
+    expect(compiledSources).not.toMatch(/anthropic|openai|google|xai|openrouter|groq|mistral|deepseek|deepinfra/);
   });
 
   test("proves missing, set/get, replace/get, delete, missing without printing values", async () => {

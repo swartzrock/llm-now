@@ -115,7 +115,7 @@ export async function validateNativeSecrets(expectedTargetId: string): Promise<v
   );
   try {
     const build = await Bun.build({
-      entrypoints: [join(import.meta.dir, "../tests/fixtures/secrets-compile-smoke.ts")],
+      entrypoints: [join(import.meta.dir, "../tests/fixtures/secrets-compile-entry.ts")],
       compile: {
         target: releaseTarget.bunTarget,
         outfile: executable,
