@@ -26,6 +26,7 @@ function gateway(options: {
       if (result instanceof Error) throw result;
       return result;
     },
+    validateCredential: async () => [],
     generate: async () => "unused",
   };
   return { value, listed };

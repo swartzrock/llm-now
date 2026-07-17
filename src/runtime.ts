@@ -1,5 +1,7 @@
 import {
   BYOK_API_KEY_ENV_VARS,
+  BYOK_PROVIDER_API_KEY_ENV_VARS,
+  type ByokCloudProviderId,
   type ByokEnvironment,
   type ByokModelOption,
   type ByokProviderConfig,
@@ -10,6 +12,13 @@ import {
   createByokNodeProvider,
   findAvailableProviders,
 } from "@swartzrock/byok-runtime/node";
+import {
+  createBunCredentialVault,
+  createCredentialResolver,
+  createSensitiveValueRegistry,
+  type CredentialResolver,
+  type SensitiveValueRegistry,
+} from "./credentials.ts";
 
 export type RuntimeStage = "discovery" | "model-list" | "generation";
 
@@ -31,11 +40,17 @@ export interface RuntimeGatewayDependencies {
   env: ByokEnvironment;
   findProviders?: FindProviders;
   createProvider?: CreateProvider;
+  credentialResolver?: CredentialResolver;
+  sensitive?: SensitiveValueRegistry;
 }
 
 export interface RuntimeGateway {
   discover(): Promise<ByokProviderId[]>;
   listModels(provider: ByokProviderId): Promise<ByokModelOption[]>;
+  validateCredential(
+    provider: ByokCloudProviderId,
+    apiKey: string,
+  ): Promise<ByokModelOption[]>;
   generate(
     provider: ByokProviderId,
     model: string | null,
@@ -44,11 +59,11 @@ export interface RuntimeGateway {
   ): Promise<string>;
 }
 
-function providerConfig(
+async function providerConfig(
   provider: ByokProviderId,
   model: string | null,
-  env: ByokEnvironment,
-): ByokProviderConfig {
+  credentialResolver: CredentialResolver,
+): Promise<ByokProviderConfig> {
   switch (provider) {
     case "ollama":
     case "lm-studio":
@@ -74,11 +89,14 @@ function providerConfig(
     case "mistral":
     case "deepseek":
     case "deepinfra":
-      return {
-        provider,
-        credential: { source: "env", env },
-        model: model ?? "",
-      };
+      {
+        const credential = await credentialResolver.resolve(provider);
+        if (credential.source === "missing") {
+          const names = BYOK_PROVIDER_API_KEY_ENV_VARS[provider].join(" or ");
+          throw new Error(`missing credential; set ${names}`);
+        }
+        return { provider, apiKey: credential.apiKey, model: model ?? "" };
+      }
   }
 }
 
@@ -86,49 +104,80 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function redact(message: string, env: ByokEnvironment): string {
-  const values = [...new Set(
-    BYOK_API_KEY_ENV_VARS
-      .map((name) => env[name])
-      .filter((value): value is string => Boolean(value)),
-  )].sort((left, right) => right.length - left.length);
-  return values.reduce(
-    (redacted, value) => redacted.replaceAll(value, "[REDACTED]"),
-    message,
-  );
-}
-
 export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeGateway {
   const findProviders = deps.findProviders ?? findAvailableProviders;
   const createProvider: CreateProvider = deps.createProvider ?? createByokNodeProvider;
+  const sensitive = deps.sensitive ?? createSensitiveValueRegistry();
+  for (const name of BYOK_API_KEY_ENV_VARS) {
+    const value = deps.env[name];
+    if (value) sensitive.register(value);
+  }
+  const credentialResolver = deps.credentialResolver ?? createCredentialResolver({
+    env: deps.env,
+    vault: createBunCredentialVault(),
+    vaultEnabled: false,
+    sensitive,
+  });
+  const cloudProviders = Object.keys(
+    BYOK_PROVIDER_API_KEY_ENV_VARS,
+  ) as ByokCloudProviderId[];
 
-  function runtime(provider: ByokProviderId, model: string | null): ByokProviderRuntime {
-    return createProvider(providerConfig(provider, model, deps.env));
+  async function runtime(
+    provider: ByokProviderId,
+    model: string | null,
+  ): Promise<ByokProviderRuntime> {
+    return createProvider(await providerConfig(provider, model, credentialResolver));
   }
 
   return {
     async discover() {
       try {
-        return await findProviders({ env: deps.env });
+        const providers = [...await findProviders({ env: deps.env })];
+        const available = new Set(providers);
+        let vaultFailure: unknown;
+        for (const provider of cloudProviders) {
+          if (available.has(provider)) continue;
+          try {
+            const credential = await credentialResolver.resolve(provider);
+            if (credential.source !== "missing") {
+              providers.push(provider);
+              available.add(provider);
+            }
+          } catch (error) {
+            vaultFailure = error;
+            break;
+          }
+        }
+        if (providers.length === 0 && vaultFailure !== undefined) throw vaultFailure;
+        return providers;
       } catch (error) {
-        throw new RuntimeStageError("discovery", null, redact(errorMessage(error), deps.env));
+        throw new RuntimeStageError("discovery", null, sensitive.redact(errorMessage(error)));
       }
     },
 
     async listModels(provider) {
       try {
-        return await runtime(provider, null).listModels();
+        return await (await runtime(provider, null)).listModels();
       } catch (error) {
-        throw new RuntimeStageError("model-list", provider, redact(errorMessage(error), deps.env));
+        throw new RuntimeStageError("model-list", provider, sensitive.redact(errorMessage(error)));
+      }
+    },
+
+    async validateCredential(provider, apiKey) {
+      sensitive.register(apiKey);
+      try {
+        return await createProvider({ provider, apiKey, model: "" }).listModels();
+      } catch (error) {
+        throw new RuntimeStageError("model-list", provider, sensitive.redact(errorMessage(error)));
       }
     },
 
     async generate(provider, model, prompt, signal) {
       try {
-        const result = await runtime(provider, model).generateText({ prompt }, signal);
+        const result = await (await runtime(provider, model)).generateText({ prompt }, signal);
         return result.text;
       } catch (error) {
-        throw new RuntimeStageError("generation", provider, redact(errorMessage(error), deps.env));
+        throw new RuntimeStageError("generation", provider, sensitive.redact(errorMessage(error)));
       }
     },
   };

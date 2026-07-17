@@ -65,6 +65,7 @@ function runtime(options: {
   response?: string;
   discover?: RuntimeGateway["discover"];
   listModels?: RuntimeGateway["listModels"];
+  validateCredential?: RuntimeGateway["validateCredential"];
   generate?: RuntimeGateway["generate"];
 } = {}) {
   const calls = { discover: 0, list: 0, generate: 0 };
@@ -77,6 +78,10 @@ function runtime(options: {
     listModels: async (provider) => {
       calls.list += 1;
       if (options.listModels) return options.listModels(provider);
+      return [{ id: "qwen", label: "Qwen" }];
+    },
+    validateCredential: async (provider, apiKey) => {
+      if (options.validateCredential) return options.validateCredential(provider, apiKey);
       return [{ id: "qwen", label: "Qwen" }];
     },
     generate: async (...args) => {
