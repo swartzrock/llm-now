@@ -4,6 +4,9 @@ const releaseWorkflow = await Bun.file(
   new URL("../.github/workflows/release.yml", import.meta.url),
 ).text();
 const ciWorkflow = await Bun.file(new URL("../.github/workflows/ci.yml", import.meta.url)).text();
+const changesetsWorkflow = await Bun.file(
+  new URL("../.github/workflows/changesets.yml", import.meta.url),
+).text();
 
 describe("release workflow policy", () => {
   test("pins downstream checkouts to the validated commit", () => {
@@ -43,13 +46,49 @@ describe("release workflow policy", () => {
       "actions/download-artifact@v8.0.1",
       "actions/upload-artifact@v7.0.1",
     ]);
-    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+    for (const workflow of [ciWorkflow, releaseWorkflow, changesetsWorkflow]) {
       const actions = [...workflow.matchAll(/^\s+- uses:\s+([^\s#]+)/gm)].map((match) => match[1]!);
       expect(actions.length).toBeGreaterThan(0);
       expect(actions.every((action) => action.startsWith("actions/")
         ? githubActions.has(action)
         : /@[a-f0-9]{40}$/.test(action))).toBe(true);
     }
+  });
+
+  test("maintains one version-only release PR with narrow cancelable permissions", () => {
+    expect(changesetsWorkflow).toContain(`on:
+  push:
+    branches: [main]`);
+    expect(changesetsWorkflow).toContain(`permissions:
+  contents: read`);
+    expect(changesetsWorkflow).toContain(`concurrency:
+  group: changesets-\${{ github.ref }}
+  cancel-in-progress: true`);
+
+    const versionJob = changesetsWorkflow.slice(changesetsWorkflow.indexOf("\n  version:"));
+    expect(versionJob).toContain(`permissions:
+      contents: write
+      pull-requests: write`);
+    expect(
+      [...versionJob.matchAll(/^\s{6}([a-z-]+): write$/gm)].map((match) => match[1]),
+    ).toEqual(["contents", "pull-requests"]);
+    expect(versionJob).toContain(
+      "uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0",
+    );
+    expect(versionJob).toContain("version: bun run changeset:version");
+    expect(versionJob).toContain('commit: "chore: release"');
+    expect(versionJob).toContain('title: "chore: release"');
+    expect(versionJob).toContain("GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}");
+
+    expect(changesetsWorkflow).not.toContain("publish:");
+    expect(changesetsWorkflow).not.toContain("changeset publish");
+    expect(changesetsWorkflow).not.toContain("NPM_TOKEN");
+    expect(changesetsWorkflow).not.toContain("environment:");
+    expect(changesetsWorkflow).not.toContain("id-token:");
+    expect(changesetsWorkflow).not.toContain("attestations:");
+    expect(changesetsWorkflow).not.toContain("actions: write");
+    expect(changesetsWorkflow).not.toContain("pull_request:");
+    expect(changesetsWorkflow).not.toContain("workflow_run:");
   });
 
   test("uses baseline Bun to compile the baseline Windows executable", () => {
