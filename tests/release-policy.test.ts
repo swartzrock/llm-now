@@ -7,15 +7,16 @@ const ciWorkflow = await Bun.file(new URL("../.github/workflows/ci.yml", import.
 const changesetsWorkflow = await Bun.file(
   new URL("../.github/workflows/changesets.yml", import.meta.url),
 ).text();
-const releaseCoordinator = await Bun.file(
+const releaseCoordinatorExists = await Bun.file(
   new URL("../.github/workflows/release-coordinator.yml", import.meta.url),
-).text();
+).exists();
 
 describe("release workflow policy", () => {
   test("pins every build checkout to the validated source input", () => {
     const refs = [...releaseWorkflow.matchAll(/^\s+ref:\s+(.+)$/gm)].map((match) => match[1]);
     expect(refs).toEqual([
-      "${{ inputs.release-sha }}",
+      "${{ github.sha }}",
+      "${{ needs.classify.outputs.release-sha }}",
       ...Array(5).fill("${{ needs.validate-ref.outputs.release-sha }}"),
     ]);
     expect(releaseWorkflow).toContain('git rev-parse "refs/tags/${TAG}^{commit}"');
@@ -25,35 +26,49 @@ describe("release workflow policy", () => {
   });
 
   test("binds publication and provenance to one protected-main source commit", () => {
-    expect(releaseWorkflow).toContain("if: ${{ inputs.publish }}");
+    expect(releaseWorkflow).toContain("if: needs.classify.outputs.publish == 'true'");
     expect(releaseWorkflow).toContain(
       'test "${{ github.event.repository.visibility }}" = "public"',
     );
     expect(releaseWorkflow).toContain('test "$RELEASE_SHA" = "$GITHUB_SHA"');
     expect(releaseWorkflow).toContain('git merge-base --is-ancestor "$RELEASE_SHA" origin/main');
-    expect(releaseWorkflow).toContain("RELEASE_SHA: ${{ steps.metadata.outputs.release-sha }}");
+    expect(releaseWorkflow).toContain("RELEASE_SHA: ${{ needs.classify.outputs.release-sha }}");
     expect(releaseWorkflow).toContain("bun scripts/release-plan.ts \"$parent_sha\" \"$RELEASE_SHA\"");
     expect(releaseWorkflow).toContain("untagged publication requires a release-shaped first-parent transition");
   });
 
-  test("classifies a push read-only and calls the reusable engine only for a release", () => {
-    expect(releaseCoordinator).toContain(`on:
+  test("classifies pushes inside the top-level release workflow", () => {
+    expect(releaseCoordinatorExists).toBe(false);
+    expect(releaseWorkflow).toContain(`on:
   push:
     branches: [main]`);
-    expect(releaseCoordinator).toContain(`permissions:
+    expect(releaseWorkflow).toContain("workflow_dispatch:");
+    expect(releaseWorkflow).not.toContain("workflow_call:");
+    expect(releaseWorkflow).toContain(`permissions:
   contents: read`);
-    expect(releaseCoordinator).toContain("fetch-depth: 0");
-    expect(releaseCoordinator).toContain('bun scripts/release-plan.ts "$BEFORE_SHA" "$RELEASE_SHA"');
-    expect(releaseCoordinator).toContain("BEFORE_SHA: ${{ github.event.before }}");
-    expect(releaseCoordinator).toContain("RELEASE_SHA: ${{ github.sha }}");
-    expect(releaseCoordinator).toContain("if: needs.classify.outputs.should-release == 'true'");
-    expect(releaseCoordinator).toContain("uses: ./.github/workflows/release.yml");
-    expect(releaseCoordinator).toContain("release-sha: ${{ needs.classify.outputs.release-sha }}");
-    expect(releaseCoordinator).toContain("publish: true");
-    const callJob = releaseCoordinator.slice(releaseCoordinator.indexOf("\n  promote:"));
-    expect([...callJob.matchAll(/^\s{6}([a-z-]+): write$/gm)].map((match) => match[1]))
-      .toEqual(["contents", "id-token", "attestations", "artifact-metadata"]);
-    expect(callJob).not.toContain("secrets:");
+    const classifyJob = releaseWorkflow.slice(
+      releaseWorkflow.indexOf("\n  classify:"),
+      releaseWorkflow.indexOf("\n  validate-ref:"),
+    );
+    expect(classifyJob).toContain("fetch-depth: 0");
+    expect(classifyJob).toContain('bun scripts/release-plan.ts "$BEFORE_SHA" "$RELEASE_SHA"');
+    expect(classifyJob).toContain("BEFORE_SHA: ${{ github.event.before }}");
+    expect(classifyJob).toContain("RELEASE_SHA: ${{ github.sha }}");
+    expect(classifyJob).toContain('echo "publish=true" >> "$GITHUB_OUTPUT"');
+    expect(classifyJob).toContain("if: github.event_name == 'workflow_dispatch'");
+    expect(classifyJob).toContain('echo "should-release=true" >> "$GITHUB_OUTPUT"');
+    expect(classifyJob).toContain('echo "release-sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"');
+    expect(classifyJob).toContain('echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"');
+    expect(classifyJob).not.toContain("secrets:");
+    const validateJob = releaseWorkflow.slice(
+      releaseWorkflow.indexOf("\n  validate-ref:"),
+      releaseWorkflow.indexOf("\n  native:"),
+    );
+    expect(validateJob).toContain("needs: classify");
+    expect(validateJob).toContain("if: needs.classify.outputs.should-release == 'true'");
+    expect(validateJob).toContain("publish: ${{ steps.metadata.outputs.publish }}");
+    expect(releaseWorkflow).toContain("environment: release-signing");
+    expect(releaseWorkflow).not.toContain("uses: ./.github/workflows/release.yml");
   });
 
   test("does not run repository scripts in steps holding signing secrets", () => {
@@ -70,7 +85,7 @@ describe("release workflow policy", () => {
       "actions/download-artifact@v8.0.1",
       "actions/upload-artifact@v7.0.1",
     ]);
-    for (const workflow of [ciWorkflow, releaseWorkflow, changesetsWorkflow, releaseCoordinator]) {
+    for (const workflow of [ciWorkflow, releaseWorkflow, changesetsWorkflow]) {
       const actions = [...workflow.matchAll(/^\s+- uses:\s+([^\s#]+)/gm)].map((match) => match[1]!);
       expect(actions.length).toBeGreaterThan(0);
       expect(actions.every((action) => action.startsWith("actions/")
@@ -277,7 +292,7 @@ describe("release workflow policy", () => {
     expect(preflight.indexOf('published_tags="$(gh api --paginate'))
       .toBeLessThan(preflight.lastIndexOf('echo "should-build=true"'));
     expect(releaseWorkflow).toContain(`concurrency:
-  group: release-\${{ inputs.release-sha }}
+  group: release-\${{ inputs.release-sha || github.sha }}
   cancel-in-progress: false`);
   });
 
