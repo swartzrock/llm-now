@@ -34,9 +34,9 @@ Every push to `main` reconciles one bot-authored `chore: release` pull request f
 
 The repository token creates the version pull request, so its normal `pull_request` CI runs appear in an approval-required state. A maintainer must approve those workflow runs and wait for the source checks and all five target checks to pass before merging. Do not merge a newer release pull request while the previous promotion is still building, awaiting protected approval, or publishing.
 
-Merging the reviewed release pull request starts `.github/workflows/release-coordinator.yml`. Its read-only classification job accepts only the exact push commit whose event `before` SHA is its first parent, whose stable package version increased, whose changelog has the matching version section, and whose diff consumed at least one Changeset. A normal non-release push with an unchanged version is a no-op; an incomplete or malformed version transition fails before promotion.
+Merging the reviewed release pull request starts `.github/workflows/release.yml` directly. Its read-only classification job accepts only the exact push commit whose event `before` SHA is its first parent, whose stable package version increased, whose changelog has the matching version section, and whose diff consumed at least one Changeset. A normal non-release push with an unchanged version is a no-op; an incomplete or malformed version transition fails before promotion.
 
-The coordinator passes that exact release SHA to the reusable `.github/workflows/release.yml` engine. The engine:
+The same top-level workflow handles automatic promotion and manual recovery, so protected environment secrets resolve in the workflow context that owns the signing jobs. After classification, it:
 
 1. Builds macOS x64, macOS ARM64, Linux x64 glibc, Linux ARM64 glibc, and Windows x64.
 2. Uses the protected `release-signing` environment to sign and notarize both macOS executables.
