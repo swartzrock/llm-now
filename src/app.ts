@@ -25,10 +25,11 @@ import {
   type Selection,
 } from "./args.ts";
 import { isInteractive, resolvePrompt, type PromptInput, type TextOutput } from "./io.ts";
-import type {
-  CredentialResolver,
-  CredentialVault,
-  SensitiveValueRegistry,
+import {
+  CredentialVaultError,
+  type CredentialResolver,
+  type CredentialVault,
+  type SensitiveValueRegistry,
 } from "./credentials.ts";
 import {
   cloudCredentialProviderOptions,
@@ -114,6 +115,39 @@ function diagnosticWriter(deps: ApplicationDependencies): (text: string) => void
     const sanitized = sanitizeDiagnostic(text, deps.env, deps.sensitive);
     deps.stderr.write(`${sanitized}${sanitized.endsWith("\n") ? "" : "\n"}`);
   };
+}
+
+function credentialVaultUnavailableMessage(
+  error: CredentialVaultError,
+  platform: NodeJS.Platform,
+): string {
+  const envNames = BYOK_PROVIDER_API_KEY_ENV_VARS[error.provider];
+  const primaryEnvName = envNames[0];
+  const lines = [
+    error.message,
+    `Use ${envNames.join(" or ")} for this process instead.`,
+  ];
+
+  if (platform !== "win32") {
+    lines.push(
+      `In bash/zsh, enter it without echoing: read -r -s ${primaryEnvName} && export ${primaryEnvName}`,
+    );
+  }
+  if (platform === "linux") {
+    lines.push(
+      "On Linux, start and unlock a Secret Service provider (for example, GNOME Keyring or KWallet) in your user D-Bus session, then retry.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function credentialVaultError(error: unknown): CredentialVaultError | null {
+  if (error instanceof CredentialVaultError) return error;
+  if (error instanceof RuntimeStageError && error.cause instanceof CredentialVaultError) {
+    return error.cause;
+  }
+  return null;
 }
 
 function safeFormatSelection(deps: ApplicationDependencies, selection: AliasRecord): string {
@@ -660,6 +694,11 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     }
     if (error instanceof AliasStoreError) {
       diagnostic(`config: ${error.message}`);
+      return 1;
+    }
+    const vaultError = credentialVaultError(error);
+    if (vaultError !== null) {
+      diagnostic(credentialVaultUnavailableMessage(vaultError, deps.platform));
       return 1;
     }
     const message = error instanceof Error ? error.message : String(error);

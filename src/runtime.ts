@@ -12,10 +12,11 @@ import {
   createByokNodeProvider,
   findAvailableProviders,
 } from "@swartzrock/byok-runtime/node";
-import type {
-  CredentialResolver,
-  ResolvedCredential,
-  SensitiveValueRegistry,
+import {
+  CredentialVaultError,
+  type CredentialResolver,
+  type ResolvedCredential,
+  type SensitiveValueRegistry,
 } from "./credentials.ts";
 
 export type RuntimeStage = "discovery" | "model-list" | "generation";
@@ -25,6 +26,7 @@ export class RuntimeStageError extends Error {
     readonly stage: RuntimeStage,
     readonly provider: ByokProviderId | null,
     message: string,
+    override readonly cause?: unknown,
   ) {
     super(`${stage}${provider ? ` (${provider})` : ""}: ${message}`);
     this.name = "RuntimeStageError";
@@ -105,6 +107,20 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function runtimeStageError(
+  stage: RuntimeStage,
+  provider: ByokProviderId | null,
+  error: unknown,
+  sensitive: SensitiveValueRegistry,
+): RuntimeStageError {
+  return new RuntimeStageError(
+    stage,
+    provider,
+    sensitive.redact(errorMessage(error)),
+    error instanceof CredentialVaultError ? error : undefined,
+  );
+}
+
 export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeGateway {
   const findProviders = deps.findProviders ?? findAvailableProviders;
   const createProvider: CreateProvider = deps.createProvider ?? createByokNodeProvider;
@@ -149,7 +165,7 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
         }
         return providers;
       } catch (error) {
-        throw new RuntimeStageError("discovery", null, sensitive.redact(errorMessage(error)));
+        throw runtimeStageError("discovery", null, error, sensitive);
       }
     },
 
@@ -157,7 +173,7 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
       try {
         return await (await runtime(provider, null)).listModels();
       } catch (error) {
-        throw new RuntimeStageError("model-list", provider, sensitive.redact(errorMessage(error)));
+        throw runtimeStageError("model-list", provider, error, sensitive);
       }
     },
 
@@ -166,7 +182,7 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
       try {
         return await createProvider({ provider, apiKey, model: "" }).listModels();
       } catch (error) {
-        throw new RuntimeStageError("model-list", provider, sensitive.redact(errorMessage(error)));
+        throw runtimeStageError("model-list", provider, error, sensitive);
       }
     },
 
@@ -175,7 +191,7 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
         const result = await (await runtime(provider, model)).generateText({ prompt }, signal);
         return result.text;
       } catch (error) {
-        throw new RuntimeStageError("generation", provider, sensitive.redact(errorMessage(error)));
+        throw runtimeStageError("generation", provider, error, sensitive);
       }
     },
   };

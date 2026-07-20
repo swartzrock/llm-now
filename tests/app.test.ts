@@ -9,6 +9,7 @@ import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import { createRuntimeGateway } from "../src/runtime.ts";
 import { runApplication, type ApplicationPrompter } from "../src/app.ts";
 import {
+  CredentialVaultError,
   createCredentialResolver,
   createSensitiveValueRegistry,
   type CredentialResolver,
@@ -1152,13 +1153,14 @@ describe("one-shot application", () => {
 describe("API-key management", () => {
   function vaultFixture(
     initial: string | null = null,
-    options: { setError?: Error } = {},
+    options: { getError?: Error; setError?: Error } = {},
     events: string[] = [],
   ) {
     let stored = initial;
     const vault: CredentialVault = {
       async get(provider) {
         events.push(`get:${provider}`);
+        if (options.getError) throw options.getError;
         return stored;
       },
       async set(provider, value) {
@@ -1178,6 +1180,7 @@ describe("API-key management", () => {
 
   function management(options: {
     initial?: string | null;
+    getError?: Error;
     setError?: Error;
     env?: Record<string, string>;
     prompter: ApplicationPrompter;
@@ -1189,7 +1192,7 @@ describe("API-key management", () => {
   }) {
     const fixture = vaultFixture(
       options.initial ?? null,
-      { setError: options.setError },
+      { getError: options.getError, setError: options.setError },
       options.events,
     );
     const sensitive = createSensitiveValueRegistry();
@@ -1370,7 +1373,11 @@ describe("API-key management", () => {
     const replacement = "u4-replacement-set-failure-sentinel";
     const failed = management({
       initial: old,
-      setError: new Error(`backend included ${replacement}`),
+      setError: new CredentialVaultError(
+        "set",
+        "openai",
+        new Error(`backend included ${replacement}`),
+      ),
       prompter: prompts({
         choices: ["setup:manage-api-keys", "openai", "replace", "qwen"],
         confirms: [true, true],
@@ -1382,8 +1389,79 @@ describe("API-key management", () => {
     expect(await runApplication(failed.value)).toBe(1);
     expect(failed.stored()).toBe(old);
     expect(failed.events).toEqual(["get:openai", "set:openai"]);
+    expect(failed.stderr.text()).toContain("credential vault set (openai): unavailable");
+    expect(failed.stderr.text()).toContain("OPENAI_API_KEY");
+    expect(failed.stderr.text()).toContain("Secret Service");
     expect(failed.stderr.text()).not.toContain(old);
     expect(failed.stderr.text()).not.toContain(replacement);
+  });
+
+  test("offers safe Linux remediation when the credential vault is unavailable", async () => {
+    const backendDetail = "cannot open display: vault-backend-detail";
+    const app = management({
+      getError: new CredentialVaultError(
+        "get",
+        "openrouter",
+        new Error(backendDetail),
+      ),
+      prompter: prompts({ choices: ["setup:manage-api-keys", "openrouter"] }),
+      runtime: runtime({ providers: [] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.events).toEqual(["get:openrouter"]);
+    expect(app.stderr.text()).toContain("credential vault get (openrouter): unavailable");
+    expect(app.stderr.text()).toContain("OPENROUTER_API_KEY");
+    expect(app.stderr.text()).toContain(
+      "read -r -s OPENROUTER_API_KEY && export OPENROUTER_API_KEY",
+    );
+    expect(app.stderr.text()).toContain("Secret Service");
+    expect(app.stderr.text()).toContain("GNOME Keyring");
+    expect(app.stderr.text()).toContain("user D-Bus session");
+    expect(app.stderr.text()).not.toContain("OPENROUTER_API_KEY=");
+    expect(app.stderr.text()).not.toContain(backendDetail);
+  });
+
+  test("preserves vault remediation through the production runtime boundary", async () => {
+    const backendDetail = "runtime vault-backend-detail";
+    const sensitive = createSensitiveValueRegistry();
+    const gateway = createRuntimeGateway({
+      env: {},
+      credentialResolver: {
+        resolve: async (provider) => {
+          throw new CredentialVaultError(
+            "get",
+            provider,
+            new Error(backendDetail),
+          );
+        },
+      },
+      sensitive,
+      createProvider: () => {
+        throw new Error("provider construction must not run");
+      },
+    });
+    const app = dependencies({
+      args: [
+        "--input",
+        "hello",
+        "--provider",
+        "openrouter",
+        "--model",
+        "qwen/qwen3-32b",
+      ],
+      runtime: {
+        value: gateway,
+        calls: { discover: 0, list: 0, generate: 0 },
+      },
+      sensitive,
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stderr.text()).toContain("credential vault get (openrouter): unavailable");
+    expect(app.stderr.text()).toContain("OPENROUTER_API_KEY");
+    expect(app.stderr.text()).toContain("Secret Service");
+    expect(app.stderr.text()).not.toContain(backendDetail);
   });
 
   test("successfully replaces once, invalidates once, and never exposes either credential", async () => {
