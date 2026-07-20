@@ -1,5 +1,12 @@
 # llm-now
 
+[![CI](https://github.com/swartzrock/llm-now/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/swartzrock/llm-now/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/swartzrock/llm-now?sort=semver&display_name=tag)](https://github.com/swartzrock/llm-now/releases/latest)
+[![License](https://img.shields.io/github/license/swartzrock/llm-now)](https://github.com/swartzrock/llm-now/blob/main/LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-signed%20%26%20notarized-brightgreen)](#install-a-release)
+[![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64%20%28glibc%29-blue)](#install-a-release)
+[![Windows](https://img.shields.io/badge/Windows-x64%20unsigned%20early%20access-orange)](#install-a-release)
+
 `llm-now` makes one text-generation call through an LLM provider already available on your machine. It uses [`@swartzrock/byok-runtime`](https://github.com/swartzrock/byok-runtime) for discovery, model listing, and generation; it does not install providers. On supported release targets, it can store one fallback API key per cloud provider in the operating system's native credential store.
 
 ## Install a release
@@ -17,10 +24,12 @@ Choose the archive for your machine:
 For macOS, set `TARGET` to `macos-arm64` or `macos-x64`. Download, verify, and extract one archive:
 
 ```bash
-VERSION=0.1.0
+RELEASE_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/swartzrock/llm-now/releases/latest)"
+TAG="${RELEASE_URL##*/}"
+VERSION="${TAG#v}"
 TARGET=macos-arm64
 ARCHIVE="llm-now-v${VERSION}-${TARGET}.zip"
-BASE="https://github.com/swartzrock/llm-now/releases/download/v${VERSION}"
+BASE="https://github.com/swartzrock/llm-now/releases/download/${TAG}"
 SOURCE_DIGEST="<release source digest shown in the release notes>"
 
 curl -LO "$BASE/$ARCHIVE" -LO "$BASE/SHA256SUMS"
@@ -37,10 +46,12 @@ chmod +x "$HOME/.local/bin/llm-now"
 For Linux, set `TARGET` to `linux-x64` or `linux-arm64`. These are glibc builds; Alpine and other musl systems are not supported.
 
 ```bash
-VERSION=0.1.0
+RELEASE_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/swartzrock/llm-now/releases/latest)"
+TAG="${RELEASE_URL##*/}"
+VERSION="${TAG#v}"
 TARGET=linux-x64
 ARCHIVE="llm-now-v${VERSION}-${TARGET}.zip"
-BASE="https://github.com/swartzrock/llm-now/releases/download/v${VERSION}"
+BASE="https://github.com/swartzrock/llm-now/releases/download/${TAG}"
 SOURCE_DIGEST="<release source digest shown in the release notes>"
 
 curl -LO "$BASE/$ARCHIVE" -LO "$BASE/SHA256SUMS"
@@ -59,9 +70,10 @@ The Windows x64 executable is **unsigned early access**. Windows may show a Smar
 If your policy permits the executable, download and verify it before the first run:
 
 ```powershell
-$Version = "0.1.0"
+$Tag = (Invoke-RestMethod "https://api.github.com/repos/swartzrock/llm-now/releases/latest").tag_name
+$Version = $Tag.TrimStart("v")
 $Archive = "llm-now-v$Version-windows-x64.zip"
-$Base = "https://github.com/swartzrock/llm-now/releases/download/v$Version"
+$Base = "https://github.com/swartzrock/llm-now/releases/download/$Tag"
 $SourceDigest = "<release source digest shown in the release notes>"
 
 Invoke-WebRequest "$Base/$Archive" -OutFile $Archive
