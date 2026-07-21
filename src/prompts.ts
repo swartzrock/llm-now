@@ -1,10 +1,13 @@
 import {
+  BYOK_PROVIDER_API_KEY_ENV_VARS,
+  type ByokCloudProviderId,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
 import {
   autocomplete,
   confirm as clackConfirm,
   isCancel,
+  password as clackPassword,
   text as clackText,
 } from "@clack/prompts";
 import pc from "picocolors";
@@ -33,9 +36,13 @@ const PROVIDER_LABELS = {
   "claude-cli": "Claude CLI",
 } satisfies Record<ByokProviderId, string>;
 
-function providerLabel(provider: ByokProviderId): string {
+export function providerLabel(provider: ByokProviderId): string {
   return PROVIDER_LABELS[provider];
 }
+
+export const CLOUD_CREDENTIAL_PROVIDERS = Object.freeze(
+  Object.keys(BYOK_PROVIDER_API_KEY_ENV_VARS) as ByokCloudProviderId[],
+);
 
 export type PromptValue = string | number | boolean;
 
@@ -57,7 +64,30 @@ export interface ConfirmPromptOptions {
 export interface SearchablePrompter {
   select(message: string, options: readonly PromptOption[]): Promise<PromptValue | null>;
   input(message: string, options?: TextPromptOptions): Promise<string | null>;
+  password(message: string, options?: TextPromptOptions): Promise<string | null>;
   confirm(message: string, options?: ConfirmPromptOptions): Promise<boolean | null>;
+}
+
+export function validateCredentialCandidate(value: string | undefined): string | undefined {
+  if (value === undefined || value.length === 0) return "Enter an API key.";
+  if (value.trim() !== value) return "API keys cannot start or end with whitespace.";
+  if (Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || (codePoint >= 127 && codePoint <= 159);
+  })) {
+    return "API keys cannot contain control characters.";
+  }
+  if (new TextEncoder().encode(value).byteLength > 2_048) {
+    return "API keys must be at most 2,048 UTF-8 bytes.";
+  }
+  return undefined;
+}
+
+export function cloudCredentialProviderOptions(): PromptOption[] {
+  return sortPromptOptions(CLOUD_CREDENTIAL_PROVIDERS.map((provider) => ({
+    value: provider,
+    label: providerLabel(provider),
+  })));
 }
 
 export type InteractiveSelectionResult =
@@ -260,6 +290,15 @@ export function createSearchablePrompter(
       const result = await clackText({
         message,
         placeholder: options.placeholder,
+        validate: options.validate,
+        input,
+        output,
+      });
+      return isCancel(result) ? null : result;
+    },
+    async password(message, options = {}) {
+      const result = await clackPassword({
+        message,
         validate: options.validate,
         input,
         output,

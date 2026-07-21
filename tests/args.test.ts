@@ -14,11 +14,13 @@ import { stripTerminalSequences } from "../src/prompts.ts";
 const APPROVED_HELP_TEXT = `Send a prompt to a selected model.
 
 Usage:
+  llm-now
   llm-now --input <text>
   llm-now <alias> --input <text>
   llm-now --provider <id> --model <id|default> --input <text>
 
 Rules:
+  Run llm-now with no arguments in a terminal to set up providers and API keys.
   Input comes from exactly one of --input or stdin.
   Omit selection for interactive choice; otherwise use an alias or provider/model.
   Model "default" is available only for codex-cli and claude-cli.

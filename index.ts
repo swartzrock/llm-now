@@ -10,14 +10,16 @@ import {
 import { createRuntimeGateway } from "./src/runtime.ts";
 
 const sensitive = createSensitiveValueRegistry();
+const credentialVault = createBunCredentialVault();
+const nativeVaultEnabled = isNativeVaultEnabled({
+  bunVersion: Bun.version,
+  platform: process.platform,
+  arch: process.arch,
+});
 const credentialResolver = createCredentialResolver({
   env: process.env,
-  vault: createBunCredentialVault(),
-  vaultEnabled: isNativeVaultEnabled({
-    bunVersion: Bun.version,
-    platform: process.platform,
-    arch: process.arch,
-  }),
+  vault: credentialVault,
+  vaultEnabled: nativeVaultEnabled,
 });
 
 process.exitCode = await runApplication({
@@ -31,4 +33,8 @@ process.exitCode = await runApplication({
   platform: process.platform,
   home: homedir(),
   version: packageMetadata.version,
+  credentialVault,
+  credentialResolver,
+  sensitive,
+  nativeVaultEnabled,
 });

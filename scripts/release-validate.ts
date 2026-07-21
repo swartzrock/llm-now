@@ -152,7 +152,7 @@ async function smoke(archivePath: string): Promise<void> {
       PATH: [temporary, process.env.PATH].filter(Boolean).join(delimiter),
     };
     const cases = [
-      { args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now --input <text>", stderrIncludes: "" },
+      { args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --input <text>", stderrIncludes: "" },
       { args: ["--version"], code: 0, stdout: `${packageMetadata.version}\n`, stderrIncludes: "" },
       { args: ["--input", "smoke"], code: 2, stdout: "", stderrIncludes: "usage: non-interactive calls require" },
       { args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:smoke", stderrIncludes: "" },

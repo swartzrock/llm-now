@@ -1,6 +1,6 @@
 # llm-now
 
-`llm-now` makes one text-generation call through an LLM provider already available on your machine. It uses [`@swartzrock/byok-runtime`](https://github.com/swartzrock/byok-runtime) for discovery, model listing, and generation; it does not install providers or store credentials.
+`llm-now` makes one text-generation call through an LLM provider already available on your machine. It uses [`@swartzrock/byok-runtime`](https://github.com/swartzrock/byok-runtime) for discovery, model listing, and generation; it does not install providers. On supported release targets, it can store one fallback API key per cloud provider in the operating system's native credential store.
 
 ## Install a release
 
@@ -81,6 +81,14 @@ Expand-Archive $Archive -DestinationPath .\llm-now-windows -Force
 
 ## Usage
 
+Run the bare command in an interactive terminal to open setup:
+
+```bash
+llm-now
+```
+
+Setup lists saved aliases, discovered providers, and cloud-provider API-key management. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
+
 Choose a discovered provider and model interactively:
 
 ```bash
@@ -119,15 +127,23 @@ After a successful unnamed interactive call, `llm-now` shows a green contextual 
 
 Saving the same name and target reports that it is already saved. Reusing a name for a different target requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.
 
+## API keys
+
+Recognized environment variables are always authoritative. They are the recommended credential source for scripts, automation, and headless systems. When no recognized environment credential is set, an enabled release target may use one provider-specific key from the operating system's native credential store.
+
+Use bare `llm-now` to add, replace, or delete a stored fallback. Replacement verifies the new key before changing the existing record, and save/delete confirmations default to No. Deleting a stored fallback does not remove an active environment credential. Aliases remain version 1 provider/model records and never contain keys or credential identifiers.
+
+Native storage is capability-gated per compiled release target. If it is not enabled for the current target, setup performs no credential-store read and directs you to the provider's environment variable instead. There is no plaintext or self-encrypted fallback.
+
 ## Discovery and diagnostics
 
-Discovery checks already-running Ollama and LM Studio servers, installed `codex` and `claude` commands on `PATH`, and recognized cloud-provider environment variables. A candidate is verified only when selected. Discovery never starts software, downloads models, creates credentials, or changes machine configuration.
+Discovery checks already-running Ollama and LM Studio servers, installed `codex` and `claude` commands on `PATH`, recognized cloud-provider environment variables, and—on enabled targets—stored cloud-provider fallbacks. A candidate is verified only when selected. Discovery never starts software, downloads models, or changes machine configuration.
 
-If no provider is found, stderr lists every checked provider class and manual setup steps. Runtime failures identify the discovery, model-list, or generation stage. Diagnostic text removes terminal controls, normalizes line endings, bounds runtime detail, and redacts recognized credential values.
+If no provider is found, stderr lists every checked provider class and manual setup steps. Runtime failures identify the discovery, model-list, generation, or credential-store operation. Diagnostic text removes terminal controls, normalizes line endings, bounds runtime detail, and redacts recognized environment, stored, and candidate credential values.
 
 Exit codes:
 
-- `0`: successful generation, help, or version (including declined/cancelled post-success alias saving)
-- `1`: discovery, model-list, generation, or configuration failure
+- `0`: successful generation, help, version, or completed/declined setup action (including declined/cancelled post-success alias saving)
+- `1`: discovery, model-list, generation, configuration, credential-store, or post-credential alias failure
 - `2`: invalid usage
-- `130`: interactive alias/provider/model selection cancelled before generation
+- `130`: interactive setup or alias/provider/model selection cancelled before a durable action

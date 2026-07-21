@@ -8,6 +8,7 @@ import {
   formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
   selectProviderAndModel,
+  validateCredentialCandidate,
   type PromptOption,
   type PromptValue,
   type SearchablePrompter,
@@ -46,6 +47,9 @@ function choices(
     },
     input: async () => {
       throw new Error("unexpected input prompt");
+    },
+    password: async () => {
+      throw new Error("unexpected password prompt");
     },
     confirm: async () => {
       throw new Error("unexpected confirmation prompt");
@@ -282,6 +286,39 @@ describe("terminal provider and model selection", () => {
     const entered = createSearchablePrompter(input, output).input("Alias name");
     setTimeout(() => input.write("\r"), 1);
     expect(await entered).toBe("");
+  });
+
+  test("validates hidden credential candidates without transforming opaque values", () => {
+    expect(validateCredentialCandidate("opaque-key value")).toBeUndefined();
+    for (const value of [
+      undefined,
+      "",
+      " leading",
+      "trailing ",
+      "line\nbreak",
+      "nul\0byte",
+      "x".repeat(2_049),
+      "🙂".repeat(513),
+    ]) {
+      expect(validateCredentialCandidate(value)).toBeString();
+    }
+    expect(validateCredentialCandidate("🙂".repeat(512))).toBeUndefined();
+  });
+
+  test("real Clack password input returns the candidate without rendering it", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let rendered = "";
+    output.on("data", (chunk) => rendered += chunk.toString());
+    const candidate = "u3-hidden-sentinel";
+    const entered = createSearchablePrompter(input, output).password("API key", {
+      validate: validateCredentialCandidate,
+    });
+    setTimeout(() => input.write(`${candidate}\r`), 1);
+
+    expect(await entered).toBe(candidate);
+    expect(rendered).toContain("API key");
+    expect(rendered).not.toContain(candidate);
   });
 
   test("Picocolors follows stderr capability and NO_COLOR", () => {
