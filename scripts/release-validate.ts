@@ -2,6 +2,11 @@ import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { basename, delimiter, join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
 import {
+  NATIVE_VAULT_BUN_VERSION,
+  NATIVE_VAULT_COMPATIBILITY,
+  type NativeVaultTarget,
+} from "../src/credentials.ts";
+import {
   RELEASE_TARGETS,
   archiveName,
   createChecksumManifest,
@@ -75,6 +80,73 @@ function run(executable: string, args: string[], options: { cwd: string; env: Re
     env: options.env,
     stdin: new Uint8Array(),
   });
+}
+
+export function assertNativeVaultGateTarget(
+  target: NativeVaultTarget,
+  expectedTargetId: string,
+): (typeof RELEASE_TARGETS)[number] {
+  const releaseTarget = RELEASE_TARGETS.find((candidate) => candidate.id === expectedTargetId);
+  const policy = NATIVE_VAULT_COMPATIBILITY.find((candidate) => candidate.id === expectedTargetId);
+  if (releaseTarget === undefined || policy === undefined || !policy.enabled) {
+    throw new Error(`native credential lifecycle is disabled for target ${expectedTargetId}`);
+  }
+  if (target.bunVersion !== NATIVE_VAULT_BUN_VERSION || target.bunVersion !== policy.bunVersion) {
+    throw new Error(`native credential lifecycle requires Bun ${NATIVE_VAULT_BUN_VERSION}`);
+  }
+  if (target.platform !== policy.platform || target.arch !== policy.arch) {
+    throw new Error(
+      `native credential lifecycle target ${expectedTargetId} requires ${policy.platform}/${policy.arch}; received ${target.platform}/${target.arch}`,
+    );
+  }
+  return releaseTarget;
+}
+
+export async function validateNativeSecrets(expectedTargetId: string): Promise<void> {
+  const releaseTarget = assertNativeVaultGateTarget({
+    bunVersion: Bun.version,
+    platform: process.platform,
+    arch: process.arch,
+  }, expectedTargetId);
+  const temporary = await mkdtemp(join(process.cwd(), ".tmp-secret-smoke-"));
+  const executable = join(
+    temporary,
+    process.platform === "win32" ? "secrets-smoke.exe" : "secrets-smoke",
+  );
+  try {
+    const build = await Bun.build({
+      entrypoints: [join(import.meta.dir, "../tests/fixtures/secrets-compile-entry.ts")],
+      compile: {
+        target: releaseTarget.bunTarget,
+        outfile: executable,
+        autoloadDotenv: false,
+        autoloadBunfig: false,
+        autoloadTsconfig: false,
+        autoloadPackageJson: false,
+      },
+    });
+    if (!build.success) throw new AggregateError(build.logs, "failed to compile native credential lifecycle");
+    if (process.platform !== "win32") await chmod(executable, 0o755);
+
+    const result = run(executable, [], { cwd: temporary, env: process.env });
+    const expected = [
+      "missing",
+      "set",
+      "get",
+      "replace",
+      "get-replacement",
+      "delete",
+      "missing-after-delete",
+      "cleanup",
+    ].map((stage) => `native credential lifecycle: ${stage}`).join("\n") + "\n";
+    if (result.exitCode !== 0 || result.stdout.toString() !== expected || result.stderr.length !== 0) {
+      throw new Error(
+        `native credential lifecycle gate failed: exit=${result.exitCode} stdout=${JSON.stringify(result.stdout.toString())} stderr=${JSON.stringify(result.stderr.toString())}`,
+      );
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 }
 
 export async function runProcess(
@@ -195,12 +267,13 @@ async function smoke(archivePath: string): Promise<void> {
 
 async function main(): Promise<void> {
   const [command, ...args] = Bun.argv.slice(2);
-  if (command === "archives" && args[0]) await validateArchives(args[0]);
+  if (command === "secrets" && args.length === 1) await validateNativeSecrets(args[0]!);
+  else if (command === "archives" && args[0]) await validateArchives(args[0]);
   else if (command === "assemble" && args[0] && args[1]) {
     await assembleReleaseAssets(args[0], args[1], args.length > 2 ? args.slice(2) : undefined);
   }
   else if (command === "smoke" && args[0]) await smoke(args[0]);
-  else throw new Error("usage: release-validate <archives DIR | assemble INPUT OUTPUT [TARGET ...] | smoke ARCHIVE>");
+  else throw new Error("usage: release-validate <secrets TARGET | archives DIR | assemble INPUT OUTPUT [TARGET ...] | smoke ARCHIVE>");
 }
 
 if (import.meta.main) await main();

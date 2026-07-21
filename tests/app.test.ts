@@ -3,12 +3,14 @@ import {
   BYOK_API_KEY_ENV_VARS,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
+import pc from "picocolors";
 import { AliasStoreError, type SaveAliasResult } from "../src/aliases.ts";
-import { HELP_TEXT } from "../src/args.ts";
+import { renderHelpText } from "../src/args.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import { createRuntimeGateway } from "../src/runtime.ts";
 import { runApplication, type ApplicationPrompter } from "../src/app.ts";
 import {
+  CredentialVaultError,
   createCredentialResolver,
   createSensitiveValueRegistry,
   type CredentialResolver,
@@ -122,12 +124,12 @@ function dependencies(options: {
   resolveAlias?: (path: string, name: string) => Promise<{ provider: ByokProviderId; model: string | null }>;
   saveAlias?: (...args: Parameters<NonNullable<Parameters<typeof runApplication>[0]["saveAlias"]>>) => Promise<SaveAliasResult>;
   generationTimeoutMs?: number;
-  discoveryTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault?: CredentialVault;
   credentialResolver?: CredentialResolver;
   sensitive?: SensitiveValueRegistry;
   nativeVaultEnabled?: boolean;
+  platform?: NodeJS.Platform;
 }) {
   const stdout = output(options.stdoutTty ?? false);
   const stderr = output(options.stderrTty ?? false);
@@ -155,7 +157,7 @@ function dependencies(options: {
       runtime: selectedRuntime.value,
       prompter: options.prompter ?? prompts(),
       env: options.env ?? {},
-      platform: "linux" as const,
+      platform: options.platform ?? "linux",
       home: "/home/test",
       version: "1.2.3",
       aliasPath: "/config/aliases.json",
@@ -163,7 +165,6 @@ function dependencies(options: {
       resolveAlias: options.resolveAlias,
       saveAlias: options.saveAlias,
       generationTimeoutMs: options.generationTimeoutMs,
-      discoveryTimeoutMs: options.discoveryTimeoutMs,
       modelListTimeoutMs: options.modelListTimeoutMs,
       credentialVault,
       credentialResolver,
@@ -185,7 +186,9 @@ describe("help output", () => {
 
     expect(await runApplication(app.value)).toBe(0);
     expect(app.stdout.text()).toContain("\u001b[");
-    expect(stripTerminalSequences(app.stdout.text())).toBe(`${HELP_TEXT}\n`);
+    expect(stripTerminalSequences(app.stdout.text())).toBe(
+      `${renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, "linux")}\n`,
+    );
     expect(app.stderr.text()).toBe("");
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
   });
@@ -194,7 +197,8 @@ describe("help output", () => {
     const nonTty = dependencies({ args: ["--help"], stdoutTty: false });
 
     expect(await runApplication(nonTty.value)).toBe(0);
-    expect(nonTty.stdout.text()).toBe(`${HELP_TEXT}\n`);
+    const linuxHelp = renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, "linux");
+    expect(nonTty.stdout.text()).toBe(`${linuxHelp}\n`);
     expect(nonTty.stdout.text()).not.toContain("\u001b");
     expect(nonTty.stderr.text()).toBe("");
     expect(nonTty.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
@@ -206,7 +210,7 @@ describe("help output", () => {
       ...missingCapability.value,
       stdout: stdoutWithoutTty,
     })).toBe(0);
-    expect(missingCapability.stdout.text()).toBe(`${HELP_TEXT}\n`);
+    expect(missingCapability.stdout.text()).toBe(`${linuxHelp}\n`);
     expect(missingCapability.stdout.text()).not.toContain("\u001b");
     expect(missingCapability.stderr.text()).toBe("");
     expect(missingCapability.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
@@ -239,11 +243,26 @@ describe("help output", () => {
       });
 
       expect(await runApplication(app.value), scenario.name).toBe(0);
-      expect(app.stdout.text(), scenario.name).toBe(`${HELP_TEXT}\n`);
+      expect(app.stdout.text(), scenario.name).toBe(
+        `${renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, "linux")}\n`,
+      );
       expect(app.stdout.text(), scenario.name).not.toContain("\u001b");
       expect(app.stderr.text(), scenario.name).toBe("");
       expect(app.runtime.calls, scenario.name).toEqual({ discover: 0, list: 0, generate: 0 });
     }
+  });
+
+  test("renders secure credential guidance for the application platform", async () => {
+    const mac = dependencies({ args: ["--help"], platform: "darwin" });
+    const linux = dependencies({ args: ["--help"], platform: "linux" });
+
+    expect(await runApplication(mac.value)).toBe(0);
+    expect(mac.stdout.text()).toContain("macOS Keychain");
+    expect(mac.stdout.text()).not.toContain("GNOME Keyring");
+
+    expect(await runApplication(linux.value)).toBe(0);
+    expect(linux.stdout.text()).toContain("GNOME Keyring or KWallet");
+    expect(linux.stdout.text()).not.toContain("macOS Keychain");
   });
 
   test("keeps combined help as usage failure without rendering or runtime work", async () => {
@@ -306,6 +325,34 @@ describe("one-shot application", () => {
     expect(seen[1]?.message).toBe("Choose an available provider");
     expect(seen[1]?.options.map(({ label }) => label)).toEqual(["Codex CLI", "Ollama"]);
     expect(app.stderr.text()).toContain("Provider Ollama is available");
+  });
+
+  test("reuses secure vault remediation when provider discovery cannot read saved keys", async () => {
+    const vaultError = new CredentialVaultError(
+      "get",
+      "anthropic",
+      new Error("discovery backend detail"),
+    );
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({ choices: ["setup:discover-providers"] }),
+      runtime: runtime({
+        discover: async () => {
+          throw new RuntimeStageError("discovery", null, vaultError.message, vaultError);
+        },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    const plain = stripTerminalSequences(app.stderr.text());
+    expect(plain).toContain("Secure API-key storage isn’t available in this Linux session.");
+    expect(plain).toContain("llm-now couldn’t access the saved API key.");
+    expect(plain).toContain("ANTHROPIC_API_KEY");
+    expect(plain).toContain("Secret Service");
+    expect(plain).not.toContain("discovery: credential vault get (anthropic): unavailable");
+    expect(plain).not.toContain("discovery backend detail");
   });
 
   test("uses the static cloud catalog for API-key management and cancels without validation", async () => {
@@ -929,17 +976,23 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).toContain("generation (ollama): timed out");
   });
 
-  test("bounds discovery and model-list stages", async () => {
+  test("does not put a synthetic timeout around discovery that may read the native vault", async () => {
     const discovery = dependencies({
       args: ["--input", "hello"],
       stdin: input("", true),
       stderrTty: true,
-      discoveryTimeoutMs: 5,
-      runtime: runtime({ discover: () => new Promise(() => {}) }),
+      runtime: runtime({
+        discover: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return ["ollama"];
+        },
+      }),
+      prompter: prompts({ choices: ["ollama", "qwen"], names: [""] }),
     });
-    expect(await runApplication(discovery.value)).toBe(1);
-    expect(discovery.stderr.text()).toContain("discovery: timed out");
+    expect(await runApplication(discovery.value)).toBe(0);
+  });
 
+  test("bounds model-list stages", async () => {
     const models = dependencies({
       args: ["--input", "hello"],
       stdin: input("", true),
@@ -1148,13 +1201,14 @@ describe("one-shot application", () => {
 describe("API-key management", () => {
   function vaultFixture(
     initial: string | null = null,
-    options: { setError?: Error } = {},
+    options: { getError?: Error; setError?: Error; deleteError?: Error } = {},
     events: string[] = [],
   ) {
     let stored = initial;
     const vault: CredentialVault = {
       async get(provider) {
         events.push(`get:${provider}`);
+        if (options.getError) throw options.getError;
         return stored;
       },
       async set(provider, value) {
@@ -1164,6 +1218,7 @@ describe("API-key management", () => {
       },
       async delete(provider) {
         events.push(`delete:${provider}`);
+        if (options.deleteError) throw options.deleteError;
         const existed = stored !== null;
         stored = null;
         return existed;
@@ -1174,7 +1229,9 @@ describe("API-key management", () => {
 
   function management(options: {
     initial?: string | null;
+    getError?: Error;
     setError?: Error;
+    deleteError?: Error;
     env?: Record<string, string>;
     prompter: ApplicationPrompter;
     runtime?: ReturnType<typeof runtime>;
@@ -1185,7 +1242,11 @@ describe("API-key management", () => {
   }) {
     const fixture = vaultFixture(
       options.initial ?? null,
-      { setError: options.setError },
+      {
+        getError: options.getError,
+        setError: options.setError,
+        deleteError: options.deleteError,
+      },
       options.events,
     );
     const sensitive = createSensitiveValueRegistry();
@@ -1366,7 +1427,11 @@ describe("API-key management", () => {
     const replacement = "u4-replacement-set-failure-sentinel";
     const failed = management({
       initial: old,
-      setError: new Error(`backend included ${replacement}`),
+      setError: new CredentialVaultError(
+        "set",
+        "openai",
+        new Error(`backend included ${replacement}`),
+      ),
       prompter: prompts({
         choices: ["setup:manage-api-keys", "openai", "replace", "qwen"],
         confirms: [true, true],
@@ -1378,8 +1443,153 @@ describe("API-key management", () => {
     expect(await runApplication(failed.value)).toBe(1);
     expect(failed.stored()).toBe(old);
     expect(failed.events).toEqual(["get:openai", "set:openai"]);
+    expect(failed.stderr.text()).toContain(
+      "Secure API-key storage isn’t available in this Linux session.",
+    );
+    expect(failed.stderr.text()).toContain(
+      "llm-now couldn’t save the API key securely.",
+    );
+    expect(failed.stderr.text()).toContain("Use an api key (not saved by llm-now):");
+    expect(failed.stderr.text()).toContain("To save API keys securely:");
+    expect(failed.stderr.text()).not.toContain(
+      "credential vault set (openai): unavailable",
+    );
+    expect(failed.stderr.text()).toContain("OPENAI_API_KEY");
+    expect(failed.stderr.text()).toContain("Secret Service");
     expect(failed.stderr.text()).not.toContain(old);
     expect(failed.stderr.text()).not.toContain(replacement);
+  });
+
+  test("offers safe Linux remediation when the credential vault is unavailable", async () => {
+    const backendDetail = "cannot open display: vault-backend-detail";
+    const app = management({
+      getError: new CredentialVaultError(
+        "get",
+        "openrouter",
+        new Error(backendDetail),
+      ),
+      prompter: prompts({ choices: ["setup:manage-api-keys", "openrouter"] }),
+      runtime: runtime({ providers: [] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.events).toEqual(["get:openrouter"]);
+    const colors = pc.createColors(true);
+    expect(app.stderr.text()).toContain(colors.bold(colors.red("Error:")));
+    expect(app.stderr.text()).toContain(colors.bold(colors.greenBright("Tip:")));
+    expect(app.stderr.text()).toContain(
+      "Secure API-key storage isn’t available in this Linux session.",
+    );
+    expect(app.stderr.text()).toContain(
+      "llm-now couldn’t access the saved API key.",
+    );
+    expect(app.stderr.text()).toContain("Use an api key (not saved by llm-now):");
+    expect(app.stderr.text()).toContain("OPENROUTER_API_KEY");
+    expect(app.stderr.text()).toContain(
+      "read -r -s OPENROUTER_API_KEY && export OPENROUTER_API_KEY",
+    );
+    expect(app.stderr.text()).toContain("Secret Service");
+    expect(app.stderr.text()).toContain("GNOME Keyring");
+    expect(app.stderr.text()).toContain("user session");
+    expect(app.stderr.text()).toContain("Then retry your command in this shell.");
+    expect(app.stderr.text()).toContain("To save API keys securely:");
+    expect(app.stderr.text()).toContain("retry the command that failed");
+    expect(app.stderr.text()).not.toContain(
+      "credential vault get (openrouter): unavailable",
+    );
+    expect(app.stderr.text()).not.toContain("OPENROUTER_API_KEY=");
+    expect(app.stderr.text()).not.toContain(backendDetail);
+
+    const plain = management({
+      getError: new CredentialVaultError("get", "openrouter", new Error("unavailable")),
+      env: { NO_COLOR: "1" },
+      prompter: prompts({ choices: ["setup:manage-api-keys", "openrouter"] }),
+      runtime: runtime({ providers: [] }),
+    });
+    expect(await runApplication(plain.value)).toBe(1);
+    expect(plain.stderr.text()).not.toContain("\u001b");
+    expect(plain.stderr.text()).toContain("Error:");
+    expect(plain.stderr.text()).toContain("Tip:");
+  });
+
+  test("preserves vault remediation through the production runtime boundary", async () => {
+    const backendDetail = "runtime vault-backend-detail";
+    const sensitive = createSensitiveValueRegistry();
+    const gateway = createRuntimeGateway({
+      env: {},
+      credentialResolver: {
+        resolve: async (provider) => {
+          throw new CredentialVaultError(
+            "get",
+            provider,
+            new Error(backendDetail),
+          );
+        },
+      },
+      sensitive,
+      createProvider: () => {
+        throw new Error("provider construction must not run");
+      },
+    });
+    const app = dependencies({
+      args: [
+        "--input",
+        "hello",
+        "--provider",
+        "openrouter",
+        "--model",
+        "qwen/qwen3-32b",
+      ],
+      runtime: {
+        value: gateway,
+        calls: { discover: 0, list: 0, generate: 0 },
+      },
+      sensitive,
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stderr.text()).toContain(
+      "Secure API-key storage isn’t available in this Linux session.",
+    );
+    expect(app.stderr.text()).toContain(
+      "llm-now couldn’t access the saved API key.",
+    );
+    expect(app.stderr.text()).toContain("OPENROUTER_API_KEY");
+    expect(app.stderr.text()).toContain("Secret Service");
+    expect(app.stderr.text()).not.toContain(backendDetail);
+  });
+
+  test("uses careful Linux recovery copy when saved-key removal fails", async () => {
+    const backendDetail = "delete vault-backend-detail";
+    const app = management({
+      initial: "u4-delete-failure-sentinel",
+      deleteError: new CredentialVaultError(
+        "delete",
+        "openai",
+        new Error(backendDetail),
+      ),
+      prompter: prompts({
+        choices: ["setup:manage-api-keys", "openai", "delete"],
+        confirms: [true],
+      }),
+      runtime: runtime({ providers: [] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.events).toEqual(["get:openai", "delete:openai"]);
+    expect(app.stderr.text()).toContain(
+      "Secure API-key storage isn’t available in this Linux session.",
+    );
+    expect(app.stderr.text()).toContain(
+      "llm-now couldn’t complete removal of the saved API key.",
+    );
+    expect(app.stderr.text()).toContain("OPENAI_API_KEY");
+    expect(app.stderr.text()).not.toContain(
+      "credential vault delete (openai): unavailable",
+    );
+    expect(app.stderr.text()).not.toContain(backendDetail);
+    expect(app.stderr.text()).not.toContain("No Linux Secret Service provider found");
+    expect(app.stderr.text()).not.toContain("no key was saved or changed");
   });
 
   test("successfully replaces once, invalidates once, and never exposes either credential", async () => {

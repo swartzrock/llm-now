@@ -25,10 +25,11 @@ import {
   type Selection,
 } from "./args.ts";
 import { isInteractive, resolvePrompt, type PromptInput, type TextOutput } from "./io.ts";
-import type {
-  CredentialResolver,
-  CredentialVault,
-  SensitiveValueRegistry,
+import {
+  CredentialVaultError,
+  type CredentialResolver,
+  type CredentialVault,
+  type SensitiveValueRegistry,
 } from "./credentials.ts";
 import {
   cloudCredentialProviderOptions,
@@ -48,7 +49,6 @@ import {
 import { RuntimeStageError, type RuntimeGateway } from "./runtime.ts";
 
 const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
-const DEFAULT_DISCOVERY_TIMEOUT_MS = 5_000;
 const DEFAULT_MODEL_LIST_TIMEOUT_MS = 10_000;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
 const MANAGE_API_KEYS_VALUE = "setup:manage-api-keys";
@@ -73,7 +73,6 @@ export interface ApplicationDependencies {
   resolveAlias?: typeof resolveStoredAlias;
   saveAlias?: typeof saveStoredAlias;
   generationTimeoutMs?: number;
-  discoveryTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault: CredentialVault;
   credentialResolver: CredentialResolver;
@@ -116,6 +115,61 @@ function diagnosticWriter(deps: ApplicationDependencies): (text: string) => void
     const sanitized = sanitizeDiagnostic(text, deps.env, deps.sensitive);
     deps.stderr.write(`${sanitized}${sanitized.endsWith("\n") ? "" : "\n"}`);
   };
+}
+
+function credentialVaultUnavailableMessage(
+  error: CredentialVaultError,
+  platform: NodeJS.Platform,
+  colors: ReturnType<typeof pc.createColors>,
+): string {
+  const envNames = BYOK_PROVIDER_API_KEY_ENV_VARS[error.provider];
+  const primaryEnvName = envNames[0];
+
+  if (platform === "linux") {
+    const action = {
+      get: "llm-now couldn’t access the saved API key.",
+      set: "llm-now couldn’t save the API key securely.",
+      delete: "llm-now couldn’t complete removal of the saved API key.",
+    }[error.operation];
+    const errorHeading = colors.bold(colors.red("Error:"));
+    const tipHeading = colors.bold(colors.greenBright("Tip:"));
+    const credentialNames = envNames.map((name) => colors.bold(colors.cyanBright(name)));
+    const shellCommand = `read -r -s ${primaryEnvName} && export ${primaryEnvName}`;
+
+    return [
+      `${errorHeading} Secure API-key storage isn’t available in this Linux session.`,
+      action,
+      "",
+      `${tipHeading} Use an api key (not saved by llm-now):`,
+      `  Use ${credentialNames.join(" or ")} in this shell.`,
+      "  In bash/zsh, enter it without echoing:",
+      `    ${colors.cyan(shellCommand)}`,
+      "  Then retry your command in this shell.",
+      "",
+      `${tipHeading} To save API keys securely:`,
+      "  Start or unlock a Secret Service provider (for example, GNOME Keyring or KWallet) in your user session, then retry the command that failed.",
+    ].join("\n");
+  }
+
+  const lines = [
+    error.message,
+    `Use ${envNames.join(" or ")} for this process instead.`,
+  ];
+
+  if (platform !== "win32") {
+    lines.push(
+      `In bash/zsh, enter it without echoing: read -r -s ${primaryEnvName} && export ${primaryEnvName}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function credentialVaultError(error: unknown): CredentialVaultError | null {
+  if (error instanceof CredentialVaultError) return error;
+  if (error instanceof RuntimeStageError && error.cause instanceof CredentialVaultError) {
+    return error.cause;
+  }
+  return null;
 }
 
 function safeFormatSelection(deps: ApplicationDependencies, selection: AliasRecord): string {
@@ -252,7 +306,7 @@ async function generateWithTimeout(
 async function withStageTimeout<T>(
   operation: Promise<T>,
   timeoutMs: number,
-  stage: "discovery" | "model-list",
+  stage: "model-list",
   provider: ByokProviderId | null,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -311,12 +365,6 @@ async function resolveSelection(
   const result = await selectProviderAndModel({
     runtime: {
       ...deps.runtime,
-      discover: () => withStageTimeout(
-        deps.runtime.discover(),
-        deps.discoveryTimeoutMs ?? DEFAULT_DISCOVERY_TIMEOUT_MS,
-        "discovery",
-        null,
-      ),
       listModels: (provider) => withStageTimeout(
         deps.runtime.listModels(provider),
         deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
@@ -554,13 +602,7 @@ async function runSetup(
     return 0;
   }
   if (selected === DISCOVER_PROVIDERS_VALUE) {
-    let providers: readonly ByokProviderId[];
-    try {
-      providers = [...new Set(await deps.runtime.discover())];
-    } catch (error) {
-      diagnostic(error instanceof Error ? error.message : String(error));
-      return 1;
-    }
+    const providers: readonly ByokProviderId[] = [...new Set(await deps.runtime.discover())];
     if (providers.length === 0) {
       diagnostic(NO_PROVIDER_DIAGNOSTIC);
       return 1;
@@ -621,7 +663,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         && !deps.env.NO_COLOR
         && deps.env.TERM !== "dumb",
       );
-      deps.stdout.write(`${renderHelpText(colors, BYOK_API_KEY_ENV_VARS)}\n`);
+      deps.stdout.write(`${renderHelpText(colors, BYOK_API_KEY_ENV_VARS, deps.platform)}\n`);
       return 0;
     }
     if (parsed.kind === "version") {
@@ -668,6 +710,14 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     }
     if (error instanceof AliasStoreError) {
       diagnostic(`config: ${error.message}`);
+      return 1;
+    }
+    const vaultError = credentialVaultError(error);
+    if (vaultError !== null) {
+      const colors = createTerminalColors(deps.stderr, deps.env);
+      deps.stderr.write(
+        `${credentialVaultUnavailableMessage(vaultError, deps.platform, colors)}\n`,
+      );
       return 1;
     }
     const message = error instanceof Error ? error.message : String(error);

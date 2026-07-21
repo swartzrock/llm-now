@@ -111,7 +111,7 @@ describe("native credential vault", () => {
     }
   });
 
-  test("defines a record for every cloud provider and starts target support disabled", () => {
+  test("defines a record for every cloud provider and enables a lifecycle-gated target", () => {
     expect(Object.keys(BYOK_PROVIDER_API_KEY_ENV_VARS).map((id) => nativeVaultName(
       id as keyof typeof BYOK_PROVIDER_API_KEY_ENV_VARS,
     ))).toEqual([
@@ -129,7 +129,7 @@ describe("native credential vault", () => {
       bunVersion: "1.3.14",
       platform: "darwin",
       arch: "arm64",
-    })).toBe(false);
+    })).toBe(true);
   });
 });
 

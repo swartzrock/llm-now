@@ -96,4 +96,22 @@ gh attestation verify <archive.zip> \
 
 Before authorizing the first public release through this train, complete the [release workflow commissioning tests](manual-testing.md#release-workflow).
 
+Native credential storage is enabled only for an explicit release-target entry pinned to Bun 1.3.14. Every matching CI and release-candidate native job must compile the production adapter and pass its real missing, set/get, replace/get, delete, and final-missing lifecycle before uploading an archive. Run the same gate locally with:
+
+```bash
+bun scripts/release-validate.ts secrets TARGET_ID
+```
+
+Use one exact target ID from the table below. The gate verifies that ID against the current host and compiles the probe for the same Bun target as the archive. The probe uses unique synthetic identities and values, prints stage names only, and must clean up even after an intermediate failure. Linux jobs must run it in an isolated D-Bus session with an unlocked Secret Service test collection. A missing gate, skipped failure, Bun pin mismatch, host/target mismatch, unsupported target entry, or incomplete cleanup blocks release; do not infer support from the operating-system name alone.
+
+If a native backend regresses, set that target's explicit compatibility entry to disabled and remove it from the workflow's enabled-gate list. Keep its native build job: the archive remains environment-only and existing native records are left untouched.
+
+| Release target | Native backend | Policy |
+| --- | --- | --- |
+| macOS ARM64 | Keychain | Enabled behind the compiled lifecycle gate |
+| macOS x64 | Keychain | Disabled after Bun 1.3.14 failed the compiled lifecycle gate; build environment-only |
+| Linux x64 / ARM64 glibc | Secret Service | Enabled behind the compiled lifecycle gate and an available user session |
+| Windows x64 baseline | Credential Manager | Enabled behind the compiled lifecycle gate |
+
+
 Homebrew and Chocolatey integration is intentionally deferred. A custom Homebrew tap and a Chocolatey package may be added later if adoption justifies their ongoing maintenance; neither package manager is part of the current CI or release workflow.

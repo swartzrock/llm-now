@@ -11,6 +11,7 @@ type TerminalColors = ReturnType<typeof pc.createColors>;
 export function renderHelpText(
   colors: TerminalColors,
   credentialNames: readonly string[],
+  platform: NodeJS.Platform,
 ): string {
   const heading = (text: string) => colors.bold(colors.greenBright(text));
   const literal = (text: string) => colors.bold(colors.cyanBright(text));
@@ -19,6 +20,11 @@ export function renderHelpText(
     .sort()
     .map((name) => `  ${metadata(name)}`)
     .join("\n");
+  const secureStorageDetail = platform === "darwin"
+    ? `  On macOS, llm-now stores API keys in ${metadata("macOS Keychain")}.`
+    : platform === "linux"
+      ? `  Linux requires ${metadata("GNOME Keyring")} or ${metadata("KWallet")} in your user session.`
+      : "  This platform must provide a supported native credential store.";
 
   return `Send a prompt to a selected model.
 
@@ -43,10 +49,18 @@ ${heading("Options:")}
   ${literal("--version")}            Show version
 
 ${heading("API key environment variables:")}
-${credentialRows}`;
+${credentialRows}
+
+${heading("Secure API-key storage:")}
+  llm-now can save provider API keys securely for reuse.
+${secureStorageDetail}`;
 }
 
-export const HELP_TEXT = renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS);
+export const HELP_TEXT = renderHelpText(
+  pc.createColors(false),
+  BYOK_API_KEY_ENV_VARS,
+  process.platform,
+);
 
 export class UsageError extends Error {
   readonly exitCode = 2;

@@ -21,6 +21,29 @@ export class CredentialVaultError extends Error {
 
 export type NativeSecretStore = Pick<typeof Bun.secrets, "get" | "set" | "delete">;
 
+export interface NativeSecretIdentity {
+  service: string;
+  name: string;
+}
+
+export interface NativeSecretAdapter {
+  get(identity: NativeSecretIdentity): Promise<string | null>;
+  set(identity: NativeSecretIdentity, value: string): Promise<void>;
+  delete(identity: NativeSecretIdentity): Promise<boolean>;
+}
+
+export function createBunNativeSecretAdapter(
+  store: NativeSecretStore = Bun.secrets,
+): NativeSecretAdapter {
+  return {
+    get: (identity) => store.get(identity),
+    set: async (identity, value) => {
+      await store.set({ ...identity, value });
+    },
+    delete: (identity) => store.delete(identity),
+  };
+}
+
 export interface CredentialVault {
   get(provider: ByokCloudProviderId): Promise<string | null>;
   set(provider: ByokCloudProviderId, value: string): Promise<void>;
@@ -38,10 +61,11 @@ function nativeSecretIdentity(provider: ByokCloudProviderId) {
 export function createBunCredentialVault(
   store: NativeSecretStore = Bun.secrets,
 ): CredentialVault {
+  const adapter = createBunNativeSecretAdapter(store);
   return {
     async get(provider) {
       try {
-        return await store.get(nativeSecretIdentity(provider));
+        return await adapter.get(nativeSecretIdentity(provider));
       } catch (error) {
         throw new CredentialVaultError("get", provider, error);
       }
@@ -50,7 +74,7 @@ export function createBunCredentialVault(
     async set(provider, value) {
       if (value.length === 0) throw new TypeError("credential must not be blank");
       try {
-        await store.set({ ...nativeSecretIdentity(provider), value });
+        await adapter.set(nativeSecretIdentity(provider), value);
       } catch (error) {
         throw new CredentialVaultError("set", provider, error);
       }
@@ -58,7 +82,7 @@ export function createBunCredentialVault(
 
     async delete(provider) {
       try {
-        return await store.delete(nativeSecretIdentity(provider));
+        return await adapter.delete(nativeSecretIdentity(provider));
       } catch (error) {
         throw new CredentialVaultError("delete", provider, error);
       }
@@ -151,11 +175,25 @@ export interface NativeVaultTarget {
   arch: string;
 }
 
-const NATIVE_VAULT_COMPATIBILITY: readonly NativeVaultTarget[] = [];
+export const NATIVE_VAULT_BUN_VERSION = "1.3.14";
+
+export interface NativeVaultCompatibility extends NativeVaultTarget {
+  id: "macos-x64" | "macos-arm64" | "linux-x64" | "linux-arm64" | "windows-x64";
+  enabled: boolean;
+}
+
+export const NATIVE_VAULT_COMPATIBILITY: readonly NativeVaultCompatibility[] = [
+  { id: "macos-x64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "darwin", arch: "x64", enabled: false },
+  { id: "macos-arm64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "darwin", arch: "arm64", enabled: true },
+  { id: "linux-x64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "linux", arch: "x64", enabled: true },
+  { id: "linux-arm64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "linux", arch: "arm64", enabled: true },
+  { id: "windows-x64", bunVersion: NATIVE_VAULT_BUN_VERSION, platform: "win32", arch: "x64", enabled: true },
+];
 
 export function isNativeVaultEnabled(target: NativeVaultTarget): boolean {
   return NATIVE_VAULT_COMPATIBILITY.some((candidate) =>
-    candidate.bunVersion === target.bunVersion
+    candidate.enabled
+    && candidate.bunVersion === target.bunVersion
     && candidate.platform === target.platform
     && candidate.arch === target.arch
   );
