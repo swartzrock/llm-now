@@ -43,7 +43,11 @@ API key environment variables:
   MISTRAL_API_KEY
   OPENAI_API_KEY
   OPENROUTER_API_KEY
-  XAI_API_KEY`;
+  XAI_API_KEY
+
+Secure API-key storage:
+  llm-now can save provider API keys securely for reuse.
+  Linux requires GNOME Keyring or KWallet in your user session.`;
 
 function input(text: string, isTTY = false) {
   return {
@@ -242,7 +246,15 @@ describe("arguments and input", () => {
   });
 
   test("renders the exact approved compact plain help", () => {
-    expect(HELP_TEXT).toBe(APPROVED_HELP_TEXT);
+    const linuxHelp = renderHelpText(
+      pc.createColors(false),
+      BYOK_API_KEY_ENV_VARS,
+      "linux",
+    );
+    expect(linuxHelp).toBe(APPROVED_HELP_TEXT);
+    expect(HELP_TEXT).toBe(
+      renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, process.platform),
+    );
     for (const rejectedCopy of [
       "printf",
       "Selection:",
@@ -252,8 +264,20 @@ describe("arguments and input", () => {
       "Exit codes:",
       "XDG_CONFIG_HOME",
     ]) {
-      expect(HELP_TEXT).not.toContain(rejectedCopy);
+      expect(linuxHelp).not.toContain(rejectedCopy);
     }
+  });
+
+  test("describes the native secure credential store for the running platform", () => {
+    const colors = pc.createColors(false);
+    const macHelp = renderHelpText(colors, BYOK_API_KEY_ENV_VARS, "darwin");
+    const linuxHelp = renderHelpText(colors, BYOK_API_KEY_ENV_VARS, "linux");
+
+    expect(macHelp).toContain("llm-now can save provider API keys securely for reuse.");
+    expect(macHelp).toContain("macOS Keychain");
+    expect(macHelp).not.toContain("GNOME Keyring");
+    expect(linuxHelp).toContain("GNOME Keyring or KWallet");
+    expect(linuxHelp).not.toContain("macOS Keychain");
   });
 
   test("copies and ASCII-sorts credential names without mutating the input", () => {
@@ -263,7 +287,7 @@ describe("arguments and input", () => {
       "MIDDLE_TOKEN",
     ]);
     const originalOrder = [...credentialNames];
-    const rendered = renderHelpText(pc.createColors(false), credentialNames);
+    const rendered = renderHelpText(pc.createColors(false), credentialNames, "linux");
 
     expect(credentialNames).toEqual(originalOrder);
     expect(rendered).toContain(
@@ -282,15 +306,18 @@ describe("arguments and input", () => {
 
   test("applies semantic ANSI roles without changing the plain layout", () => {
     const colors = pc.createColors(true);
-    const rendered = renderHelpText(colors, BYOK_API_KEY_ENV_VARS);
+    const rendered = renderHelpText(colors, BYOK_API_KEY_ENV_VARS, "linux");
 
     expect(rendered).toContain(colors.bold(colors.greenBright("Usage:")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("llm-now")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--input")));
     expect(rendered).toContain(colors.cyan("<text>"));
     expect(rendered).toContain(colors.cyan("ANTHROPIC_API_KEY"));
+    expect(rendered).toContain(
+      colors.bold(colors.greenBright("Secure API-key storage:")),
+    );
     expect(rendered).toContain("Prompt text");
-    expect(stripTerminalSequences(rendered)).toBe(HELP_TEXT);
+    expect(stripTerminalSequences(rendered)).toBe(APPROVED_HELP_TEXT);
   });
 
   test("rejects test-only runtime smoke arguments", () => {

@@ -120,6 +120,7 @@ function diagnosticWriter(deps: ApplicationDependencies): (text: string) => void
 function credentialVaultUnavailableMessage(
   error: CredentialVaultError,
   platform: NodeJS.Platform,
+  colors: ReturnType<typeof pc.createColors>,
 ): string {
   const envNames = BYOK_PROVIDER_API_KEY_ENV_VARS[error.provider];
   const primaryEnvName = envNames[0];
@@ -130,18 +131,23 @@ function credentialVaultUnavailableMessage(
       set: "llm-now couldn’t save the API key securely.",
       delete: "llm-now couldn’t complete removal of the saved API key.",
     }[error.operation];
+    const errorHeading = colors.bold(colors.red("Error:"));
+    const tipHeading = colors.bold(colors.greenBright("Tip:"));
+    const credentialNames = envNames.map((name) => colors.bold(colors.cyanBright(name)));
+    const shellCommand = `read -r -s ${primaryEnvName} && export ${primaryEnvName}`;
 
     return [
-      "Secure API-key storage isn’t available in this Linux session.",
+      `${errorHeading} Secure API-key storage isn’t available in this Linux session.`,
       action,
       "",
-      "Use a key now (not saved by llm-now):",
-      `Use ${envNames.join(" or ")} in this shell.`,
-      `In bash/zsh, enter it without echoing: read -r -s ${primaryEnvName} && export ${primaryEnvName}`,
-      "Then retry your command in this shell.",
+      `${tipHeading} Use a key now (not saved by llm-now):`,
+      `  Use ${credentialNames.join(" or ")} in this shell.`,
+      "  In bash/zsh, enter it without echoing:",
+      `    ${colors.cyan(shellCommand)}`,
+      "  Then retry your command in this shell.",
       "",
-      "To save API keys securely:",
-      "Start or unlock a Secret Service provider (for example, GNOME Keyring or KWallet) in your user session, then retry the command that failed.",
+      `${tipHeading} To save API keys securely:`,
+      "  Start or unlock a Secret Service provider (for example, GNOME Keyring or KWallet) in your user session, then retry the command that failed.",
     ].join("\n");
   }
 
@@ -596,13 +602,7 @@ async function runSetup(
     return 0;
   }
   if (selected === DISCOVER_PROVIDERS_VALUE) {
-    let providers: readonly ByokProviderId[];
-    try {
-      providers = [...new Set(await deps.runtime.discover())];
-    } catch (error) {
-      diagnostic(error instanceof Error ? error.message : String(error));
-      return 1;
-    }
+    const providers: readonly ByokProviderId[] = [...new Set(await deps.runtime.discover())];
     if (providers.length === 0) {
       diagnostic(NO_PROVIDER_DIAGNOSTIC);
       return 1;
@@ -663,7 +663,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         && !deps.env.NO_COLOR
         && deps.env.TERM !== "dumb",
       );
-      deps.stdout.write(`${renderHelpText(colors, BYOK_API_KEY_ENV_VARS)}\n`);
+      deps.stdout.write(`${renderHelpText(colors, BYOK_API_KEY_ENV_VARS, deps.platform)}\n`);
       return 0;
     }
     if (parsed.kind === "version") {
@@ -714,7 +714,10 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     }
     const vaultError = credentialVaultError(error);
     if (vaultError !== null) {
-      diagnostic(credentialVaultUnavailableMessage(vaultError, deps.platform));
+      const colors = createTerminalColors(deps.stderr, deps.env);
+      deps.stderr.write(
+        `${credentialVaultUnavailableMessage(vaultError, deps.platform, colors)}\n`,
+      );
       return 1;
     }
     const message = error instanceof Error ? error.message : String(error);

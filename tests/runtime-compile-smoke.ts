@@ -73,6 +73,7 @@ try {
         "API key environment variables:\n  ANTHROPIC_API_KEY",
         "  DEEPINFRA_TOKEN",
         "  XAI_API_KEY",
+        "Secure API-key storage:\n  llm-now can save provider API keys securely for reuse.",
       ],
       stdoutExcludes: "\u001b",
       stdoutHasOneFinalNewline: true,

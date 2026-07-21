@@ -3,8 +3,9 @@ import {
   BYOK_API_KEY_ENV_VARS,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
+import pc from "picocolors";
 import { AliasStoreError, type SaveAliasResult } from "../src/aliases.ts";
-import { HELP_TEXT } from "../src/args.ts";
+import { renderHelpText } from "../src/args.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import { createRuntimeGateway } from "../src/runtime.ts";
 import { runApplication, type ApplicationPrompter } from "../src/app.ts";
@@ -128,6 +129,7 @@ function dependencies(options: {
   credentialResolver?: CredentialResolver;
   sensitive?: SensitiveValueRegistry;
   nativeVaultEnabled?: boolean;
+  platform?: NodeJS.Platform;
 }) {
   const stdout = output(options.stdoutTty ?? false);
   const stderr = output(options.stderrTty ?? false);
@@ -155,7 +157,7 @@ function dependencies(options: {
       runtime: selectedRuntime.value,
       prompter: options.prompter ?? prompts(),
       env: options.env ?? {},
-      platform: "linux" as const,
+      platform: options.platform ?? "linux",
       home: "/home/test",
       version: "1.2.3",
       aliasPath: "/config/aliases.json",
@@ -184,7 +186,9 @@ describe("help output", () => {
 
     expect(await runApplication(app.value)).toBe(0);
     expect(app.stdout.text()).toContain("\u001b[");
-    expect(stripTerminalSequences(app.stdout.text())).toBe(`${HELP_TEXT}\n`);
+    expect(stripTerminalSequences(app.stdout.text())).toBe(
+      `${renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, "linux")}\n`,
+    );
     expect(app.stderr.text()).toBe("");
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
   });
@@ -193,7 +197,8 @@ describe("help output", () => {
     const nonTty = dependencies({ args: ["--help"], stdoutTty: false });
 
     expect(await runApplication(nonTty.value)).toBe(0);
-    expect(nonTty.stdout.text()).toBe(`${HELP_TEXT}\n`);
+    const linuxHelp = renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, "linux");
+    expect(nonTty.stdout.text()).toBe(`${linuxHelp}\n`);
     expect(nonTty.stdout.text()).not.toContain("\u001b");
     expect(nonTty.stderr.text()).toBe("");
     expect(nonTty.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
@@ -205,7 +210,7 @@ describe("help output", () => {
       ...missingCapability.value,
       stdout: stdoutWithoutTty,
     })).toBe(0);
-    expect(missingCapability.stdout.text()).toBe(`${HELP_TEXT}\n`);
+    expect(missingCapability.stdout.text()).toBe(`${linuxHelp}\n`);
     expect(missingCapability.stdout.text()).not.toContain("\u001b");
     expect(missingCapability.stderr.text()).toBe("");
     expect(missingCapability.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
@@ -238,11 +243,26 @@ describe("help output", () => {
       });
 
       expect(await runApplication(app.value), scenario.name).toBe(0);
-      expect(app.stdout.text(), scenario.name).toBe(`${HELP_TEXT}\n`);
+      expect(app.stdout.text(), scenario.name).toBe(
+        `${renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, "linux")}\n`,
+      );
       expect(app.stdout.text(), scenario.name).not.toContain("\u001b");
       expect(app.stderr.text(), scenario.name).toBe("");
       expect(app.runtime.calls, scenario.name).toEqual({ discover: 0, list: 0, generate: 0 });
     }
+  });
+
+  test("renders secure credential guidance for the application platform", async () => {
+    const mac = dependencies({ args: ["--help"], platform: "darwin" });
+    const linux = dependencies({ args: ["--help"], platform: "linux" });
+
+    expect(await runApplication(mac.value)).toBe(0);
+    expect(mac.stdout.text()).toContain("macOS Keychain");
+    expect(mac.stdout.text()).not.toContain("GNOME Keyring");
+
+    expect(await runApplication(linux.value)).toBe(0);
+    expect(linux.stdout.text()).toContain("GNOME Keyring or KWallet");
+    expect(linux.stdout.text()).not.toContain("macOS Keychain");
   });
 
   test("keeps combined help as usage failure without rendering or runtime work", async () => {
@@ -305,6 +325,34 @@ describe("one-shot application", () => {
     expect(seen[1]?.message).toBe("Choose an available provider");
     expect(seen[1]?.options.map(({ label }) => label)).toEqual(["Codex CLI", "Ollama"]);
     expect(app.stderr.text()).toContain("Provider Ollama is available");
+  });
+
+  test("reuses secure vault remediation when provider discovery cannot read saved keys", async () => {
+    const vaultError = new CredentialVaultError(
+      "get",
+      "anthropic",
+      new Error("discovery backend detail"),
+    );
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({ choices: ["setup:discover-providers"] }),
+      runtime: runtime({
+        discover: async () => {
+          throw new RuntimeStageError("discovery", null, vaultError.message, vaultError);
+        },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    const plain = stripTerminalSequences(app.stderr.text());
+    expect(plain).toContain("Secure API-key storage isn’t available in this Linux session.");
+    expect(plain).toContain("llm-now couldn’t access the saved API key.");
+    expect(plain).toContain("ANTHROPIC_API_KEY");
+    expect(plain).toContain("Secret Service");
+    expect(plain).not.toContain("discovery: credential vault get (anthropic): unavailable");
+    expect(plain).not.toContain("discovery backend detail");
   });
 
   test("uses the static cloud catalog for API-key management and cancels without validation", async () => {
@@ -1426,6 +1474,9 @@ describe("API-key management", () => {
 
     expect(await runApplication(app.value)).toBe(1);
     expect(app.events).toEqual(["get:openrouter"]);
+    const colors = pc.createColors(true);
+    expect(app.stderr.text()).toContain(colors.bold(colors.red("Error:")));
+    expect(app.stderr.text()).toContain(colors.bold(colors.greenBright("Tip:")));
     expect(app.stderr.text()).toContain(
       "Secure API-key storage isn’t available in this Linux session.",
     );
@@ -1448,6 +1499,17 @@ describe("API-key management", () => {
     );
     expect(app.stderr.text()).not.toContain("OPENROUTER_API_KEY=");
     expect(app.stderr.text()).not.toContain(backendDetail);
+
+    const plain = management({
+      getError: new CredentialVaultError("get", "openrouter", new Error("unavailable")),
+      env: { NO_COLOR: "1" },
+      prompter: prompts({ choices: ["setup:manage-api-keys", "openrouter"] }),
+      runtime: runtime({ providers: [] }),
+    });
+    expect(await runApplication(plain.value)).toBe(1);
+    expect(plain.stderr.text()).not.toContain("\u001b");
+    expect(plain.stderr.text()).toContain("Error:");
+    expect(plain.stderr.text()).toContain("Tip:");
   });
 
   test("preserves vault remediation through the production runtime boundary", async () => {
