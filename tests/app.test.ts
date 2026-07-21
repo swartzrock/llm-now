@@ -1153,7 +1153,7 @@ describe("one-shot application", () => {
 describe("API-key management", () => {
   function vaultFixture(
     initial: string | null = null,
-    options: { getError?: Error; setError?: Error } = {},
+    options: { getError?: Error; setError?: Error; deleteError?: Error } = {},
     events: string[] = [],
   ) {
     let stored = initial;
@@ -1170,6 +1170,7 @@ describe("API-key management", () => {
       },
       async delete(provider) {
         events.push(`delete:${provider}`);
+        if (options.deleteError) throw options.deleteError;
         const existed = stored !== null;
         stored = null;
         return existed;
@@ -1182,6 +1183,7 @@ describe("API-key management", () => {
     initial?: string | null;
     getError?: Error;
     setError?: Error;
+    deleteError?: Error;
     env?: Record<string, string>;
     prompter: ApplicationPrompter;
     runtime?: ReturnType<typeof runtime>;
@@ -1192,7 +1194,11 @@ describe("API-key management", () => {
   }) {
     const fixture = vaultFixture(
       options.initial ?? null,
-      { getError: options.getError, setError: options.setError },
+      {
+        getError: options.getError,
+        setError: options.setError,
+        deleteError: options.deleteError,
+      },
       options.events,
     );
     const sensitive = createSensitiveValueRegistry();
@@ -1389,7 +1395,17 @@ describe("API-key management", () => {
     expect(await runApplication(failed.value)).toBe(1);
     expect(failed.stored()).toBe(old);
     expect(failed.events).toEqual(["get:openai", "set:openai"]);
-    expect(failed.stderr.text()).toContain("credential vault set (openai): unavailable");
+    expect(failed.stderr.text()).toContain(
+      "Secure API-key storage isn’t available in this Linux session.",
+    );
+    expect(failed.stderr.text()).toContain(
+      "llm-now couldn’t save the API key securely.",
+    );
+    expect(failed.stderr.text()).toContain("Use a key now (not saved by llm-now):");
+    expect(failed.stderr.text()).toContain("To save API keys securely:");
+    expect(failed.stderr.text()).not.toContain(
+      "credential vault set (openai): unavailable",
+    );
     expect(failed.stderr.text()).toContain("OPENAI_API_KEY");
     expect(failed.stderr.text()).toContain("Secret Service");
     expect(failed.stderr.text()).not.toContain(old);
@@ -1410,14 +1426,26 @@ describe("API-key management", () => {
 
     expect(await runApplication(app.value)).toBe(1);
     expect(app.events).toEqual(["get:openrouter"]);
-    expect(app.stderr.text()).toContain("credential vault get (openrouter): unavailable");
+    expect(app.stderr.text()).toContain(
+      "Secure API-key storage isn’t available in this Linux session.",
+    );
+    expect(app.stderr.text()).toContain(
+      "llm-now couldn’t access the saved API key.",
+    );
+    expect(app.stderr.text()).toContain("Use a key now (not saved by llm-now):");
     expect(app.stderr.text()).toContain("OPENROUTER_API_KEY");
     expect(app.stderr.text()).toContain(
       "read -r -s OPENROUTER_API_KEY && export OPENROUTER_API_KEY",
     );
     expect(app.stderr.text()).toContain("Secret Service");
     expect(app.stderr.text()).toContain("GNOME Keyring");
-    expect(app.stderr.text()).toContain("user D-Bus session");
+    expect(app.stderr.text()).toContain("user session");
+    expect(app.stderr.text()).toContain("Then retry your command in this shell.");
+    expect(app.stderr.text()).toContain("To save API keys securely:");
+    expect(app.stderr.text()).toContain("retry the command that failed");
+    expect(app.stderr.text()).not.toContain(
+      "credential vault get (openrouter): unavailable",
+    );
     expect(app.stderr.text()).not.toContain("OPENROUTER_API_KEY=");
     expect(app.stderr.text()).not.toContain(backendDetail);
   });
@@ -1458,10 +1486,48 @@ describe("API-key management", () => {
     });
 
     expect(await runApplication(app.value)).toBe(1);
-    expect(app.stderr.text()).toContain("credential vault get (openrouter): unavailable");
+    expect(app.stderr.text()).toContain(
+      "Secure API-key storage isn’t available in this Linux session.",
+    );
+    expect(app.stderr.text()).toContain(
+      "llm-now couldn’t access the saved API key.",
+    );
     expect(app.stderr.text()).toContain("OPENROUTER_API_KEY");
     expect(app.stderr.text()).toContain("Secret Service");
     expect(app.stderr.text()).not.toContain(backendDetail);
+  });
+
+  test("uses careful Linux recovery copy when saved-key removal fails", async () => {
+    const backendDetail = "delete vault-backend-detail";
+    const app = management({
+      initial: "u4-delete-failure-sentinel",
+      deleteError: new CredentialVaultError(
+        "delete",
+        "openai",
+        new Error(backendDetail),
+      ),
+      prompter: prompts({
+        choices: ["setup:manage-api-keys", "openai", "delete"],
+        confirms: [true],
+      }),
+      runtime: runtime({ providers: [] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.events).toEqual(["get:openai", "delete:openai"]);
+    expect(app.stderr.text()).toContain(
+      "Secure API-key storage isn’t available in this Linux session.",
+    );
+    expect(app.stderr.text()).toContain(
+      "llm-now couldn’t complete removal of the saved API key.",
+    );
+    expect(app.stderr.text()).toContain("OPENAI_API_KEY");
+    expect(app.stderr.text()).not.toContain(
+      "credential vault delete (openai): unavailable",
+    );
+    expect(app.stderr.text()).not.toContain(backendDetail);
+    expect(app.stderr.text()).not.toContain("No Linux Secret Service provider found");
+    expect(app.stderr.text()).not.toContain("no key was saved or changed");
   });
 
   test("successfully replaces once, invalidates once, and never exposes either credential", async () => {

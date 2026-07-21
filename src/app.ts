@@ -123,6 +123,28 @@ function credentialVaultUnavailableMessage(
 ): string {
   const envNames = BYOK_PROVIDER_API_KEY_ENV_VARS[error.provider];
   const primaryEnvName = envNames[0];
+
+  if (platform === "linux") {
+    const action = {
+      get: "llm-now couldn’t access the saved API key.",
+      set: "llm-now couldn’t save the API key securely.",
+      delete: "llm-now couldn’t complete removal of the saved API key.",
+    }[error.operation];
+
+    return [
+      "Secure API-key storage isn’t available in this Linux session.",
+      action,
+      "",
+      "Use a key now (not saved by llm-now):",
+      `Use ${envNames.join(" or ")} in this shell.`,
+      `In bash/zsh, enter it without echoing: read -r -s ${primaryEnvName} && export ${primaryEnvName}`,
+      "Then retry your command in this shell.",
+      "",
+      "To save API keys securely:",
+      "Start or unlock a Secret Service provider (for example, GNOME Keyring or KWallet) in your user session, then retry the command that failed.",
+    ].join("\n");
+  }
+
   const lines = [
     error.message,
     `Use ${envNames.join(" or ")} for this process instead.`,
@@ -133,12 +155,6 @@ function credentialVaultUnavailableMessage(
       `In bash/zsh, enter it without echoing: read -r -s ${primaryEnvName} && export ${primaryEnvName}`,
     );
   }
-  if (platform === "linux") {
-    lines.push(
-      "On Linux, start and unlock a Secret Service provider (for example, GNOME Keyring or KWallet) in your user D-Bus session, then retry.",
-    );
-  }
-
   return lines.join("\n");
 }
 

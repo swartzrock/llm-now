@@ -150,6 +150,20 @@
     .visual { margin-top: 20px; border: 1px solid var(--line); border-radius: 12px; background: #0d131a; padding: 14px; overflow-x: auto; }
     .visual svg { display: block; width: 100%; min-width: 680px; height: auto; }
     .caption { color: var(--muted); font-size: .78rem; margin: 8px 2px 0; }
+    .message-preview {
+      margin-top: 18px;
+      padding: 18px;
+      border: 1px solid #3d7468;
+      border-radius: 12px;
+      background: #0b1219;
+      color: #e5f4f2;
+      overflow-x: auto;
+    }
+    .message-preview pre {
+      margin: 0;
+      font: .9rem/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
     .sources { margin: 18px 0 0; padding-left: 20px; color: var(--muted); }
     .sources li { margin: 6px 0; }
     footer { margin-top: 52px; border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); font-size: .78rem; }
@@ -180,14 +194,17 @@
     <div class="stats">
       <span class="chip accent"><b>46</b> raw ideas</span>
       <span class="chip accent"><b>16</b> after dedupe</span>
-      <span class="chip accent"><b>7</b> survivors</span>
+      <span class="chip accent"><b>7</b> original survivors</span>
       <span class="chip violet"><b>5</b> topic axes</span>
+      <span class="chip violet"><b>39</b> recovery-copy candidates</span>
+      <span class="chip violet"><b>6</b> recovery-copy survivors</span>
     </div>
   </header>
 
   <nav aria-label="Document sections">
     <a href="#grounding-context">Grounding Context</a>
     <a href="#storage-mvp">Storage MVP</a>
+    <a href="#linux-recovery-copy">Linux Recovery Copy</a>
     <a href="#topic-axes">Topic Axes</a>
     <a href="#ranked-ideas">Ranked Ideas</a>
     <a href="#rejection-summary">Rejection Summary</a>
@@ -348,6 +365,141 @@
     <div class="callout warn">
       <h3>Known limitation accepted for the MVP</h3>
       <p>Because aliases remain provider/model records, they do not pin account identity. A process-level environment key can intentionally override the saved provider key. Named profiles and alias-bound identity should return only when real multi-account demand justifies schema v2.</p>
+    </div>
+  </section>
+
+  <section id="linux-recovery-copy">
+    <p class="eyebrow">Focused refinement · Linux failure recovery</p>
+    <h2>Friendly Secret Service Failure Copy</h2>
+
+    <div class="callout">
+      <h3>Recommended direction</h3>
+      <p>Lead with the user-visible capability boundary—secure API-key storage is unavailable in this Linux session—then present two labeled paths: use a provider key temporarily in the current shell, or restore Secret Service for secure saved credentials. Do not assert that no provider exists: the same failure may mean missing session access, a stopped or locked provider, denial, or another backend failure.</p>
+    </div>
+
+    <div class="message-preview" aria-label="Illustrative recommended terminal message">
+      <pre>Secure API-key storage isn’t available in this Linux session.
+
+Use an OpenRouter key now (not saved by llm-now):
+  read -r -s OPENROUTER_API_KEY &amp;&amp; export OPENROUTER_API_KEY
+Then retry your command in this shell.
+
+To save API keys securely:
+  Start or unlock a Secret Service provider (for example, GNOME Keyring
+  or KWallet) in your user session, then retry the command that failed.</pre>
+    </div>
+    <p class="caption">Illustrative copy, not a final string specification. Provider name and environment variable are generated from existing provider metadata.</p>
+
+    <div class="grid" style="margin-top:22px">
+      <article class="ground-card">
+        <h3>What the app knows</h3>
+        <p>The provider, failed operation, platform, and recognized environment-variable names. It also knows only that the normalized secure-store operation was unavailable.</p>
+      </article>
+      <article class="ground-card">
+        <h3>What the app does not know</h3>
+        <p>Whether Secret Service is absent, stopped, locked, disabled, denied, unreachable through the session, or failed after partially changing durable state.</p>
+      </article>
+    </div>
+
+    <p style="color:var(--muted);margin-top:18px"><strong>Topic axes:</strong> Decomposition skipped — atomic subject.</p>
+
+    <h3 style="margin-top:28px">Ranked refinements</h3>
+    <ol class="jump-list" style="margin-top:14px">
+      <li><a href="#recovery-idea-1">1. Two-path recovery card</a></li>
+      <li><a href="#recovery-idea-2">2. Operation-aware human context</a></li>
+      <li><a href="#recovery-idea-3">3. Progressive Linux detail</a></li>
+      <li><a href="#recovery-idea-4">4. Explicit recovery loop</a></li>
+      <li><a href="#recovery-idea-5">5. Interactive recovery menu</a></li>
+      <li><a href="#recovery-idea-6">6. Quiet support code</a></li>
+    </ol>
+
+    <article class="idea top" id="recovery-idea-1">
+      <div class="idea-head"><span class="rank">1</span><div><p class="eyebrow">Recommended copy structure</p><h3>Two-path recovery card</h3></div></div>
+      <p>Replace the implementation-shaped error with a compact decision surface. The first path is “Use a key now (not saved by llm-now)” and shows the provider-specific hidden <code>read</code>/<code>export</code> command. The second is “Save API keys securely” and explains that a Secret Service provider must be running and unlocked in the user session.</p>
+      <dl class="fields">
+        <dt>Basis</dt><dd><strong>direct:</strong> The existing formatter already has platform, provider, and environment-variable metadata. <strong>external:</strong> Linux <code>Bun.secrets</code> uses libsecret and requires an available Secret Service daemon.</dd>
+        <dt>Rationale</dt><dd>Users see what is unavailable and two safe ways forward before encountering D-Bus or keyring vocabulary. The environment lane is presented as an intentional temporary mode, not an insecure persistence fallback.</dd>
+        <dt>Downsides</dt><dd>The environment value remains exported until unset or the shell ends and is inherited by child processes; copy must not describe it as limited to exactly one process.</dd>
+        <dt>Confidence</dt><dd>96%</dd>
+        <dt>Complexity</dt><dd>Low</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="recovery-idea-2">
+      <div class="idea-head"><span class="rank">2</span><div><p class="eyebrow">Human context without overclaiming</p><h3>Operation-aware human language</h3></div></div>
+      <p>Keep the shared secure-storage headline, but describe the failed action in product language: reading a saved key, saving a key securely, or completing saved-key removal. The raw <code>credential vault get/set/delete</code> string never leads the message.</p>
+      <dl class="fields">
+        <dt>Basis</dt><dd><strong>direct:</strong> <code>CredentialVaultError</code> carries normalized operation and provider fields, while the application owns the sanitized presentation boundary.</dd>
+        <dt>Rationale</dt><dd>Operation context remains available without asking users to understand an internal vault API. Careful verbs avoid promising that a failed OS operation left durable state unchanged.</dd>
+        <dt>Downsides</dt><dd>Three variants add copy and test surface. Set/delete messages must say the operation could not be completed or confirmed, not “nothing changed.”</dd>
+        <dt>Confidence</dt><dd>93%</dd>
+        <dt>Complexity</dt><dd>Low</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="recovery-idea-3">
+      <div class="idea-head"><span class="rank">3</span><div><p class="eyebrow">Progressive disclosure</p><h3>Put Linux mechanics under the durable path</h3></div></div>
+      <p>Keep “Secret Service,” “GNOME Keyring,” “KWallet,” and “user session” beneath the secure-saving option rather than in the headline. The guidance stays desktop-neutral: start or unlock a provider, then retry; it does not prescribe a universal daemon command.</p>
+      <dl class="fields">
+        <dt>Basis</dt><dd><strong>external:</strong> Secret Service is D-Bus- and session-based, supports locked collections and prompts, and varies across desktop, distribution, and PAM configuration.</dd>
+        <dt>Rationale</dt><dd>The default reading path stays approachable while Linux users still receive the protocol and provider names needed for troubleshooting.</dd>
+        <dt>Downsides</dt><dd>Some headless users will still need external distribution-specific documentation; one portable command cannot repair every environment.</dd>
+        <dt>Confidence</dt><dd>91%</dd>
+        <dt>Complexity</dt><dd>Low</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="recovery-idea-4">
+      <div class="idea-head"><span class="rank">4</span><div><p class="eyebrow">Close the loop</p><h3>End each path with re-entry</h3></div></div>
+      <p>The temporary-key lane ends with “retry your command in this shell.” The secure-storage lane ends with “retry the command that failed” after starting or unlocking Secret Service, preserving provider, model, and prompt context when the failure happened during generation. A future interactive retry may repeat only the failed vault operation after explicit user confirmation.</p>
+      <dl class="fields">
+        <dt>Basis</dt><dd><strong>direct:</strong> Vault failures exit cleanly and setup is re-entered through bare <code>llm-now</code>. <strong>reasoned:</strong> A remedy without a return action still leaves the onboarding flow at a dead end.</dd>
+        <dt>Rationale</dt><dd>Recovery becomes a short loop rather than a documentation detour, while source selection remains fail-closed and never switches silently.</dd>
+        <dt>Downsides</dt><dd>An in-process retry adds interaction and state-management complexity; the copy-only re-entry instruction is the lower-risk first step.</dd>
+        <dt>Confidence</dt><dd>88%</dd>
+        <dt>Complexity</dt><dd>Low for copy; Medium for interactive retry</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="recovery-idea-5">
+      <div class="idea-head"><span class="rank">5</span><div><p class="eyebrow">Optional guided recovery</p><h3>Interactive recovery menu</h3></div></div>
+      <p>On a TTY, the failure could offer four explicit actions: use an API key temporarily, show Secret Service setup guidance, retry secure storage, or exit. Noninteractive execution would retain deterministic guidance and exit status <code>1</code>.</p>
+      <dl class="fields">
+        <dt>Basis</dt><dd><strong>direct:</strong> The CLI already distinguishes interactive setup from noninteractive generation and keeps prompts on stderr. <strong>reasoned:</strong> A menu can automate the two-path decision without weakening scripted behavior.</dd>
+        <dt>Rationale</dt><dd>Desktop users receive guided recovery while automation remains predictable and environment-driven.</dd>
+        <dt>Downsides</dt><dd>This is larger than the requested copy fix and can create another state machine. It should follow only if static guidance proves insufficient.</dd>
+        <dt>Confidence</dt><dd>78%</dd>
+        <dt>Complexity</dt><dd>Medium</dd>
+      </dl>
+    </article>
+
+    <article class="idea" id="recovery-idea-6">
+      <div class="idea-head"><span class="rank">6</span><div><p class="eyebrow">Supportability without jargon</p><h3>Quiet normalized support code</h3></div></div>
+      <p>If operation/provider detail remains valuable for issue reports, render it only as a stable trailing identifier such as <code>credential-store-unavailable/openrouter/get</code>. Backend causes remain hidden and the support code never replaces the human explanation.</p>
+      <dl class="fields">
+        <dt>Basis</dt><dd><strong>direct:</strong> The typed error already contains stable provider and operation data and deliberately suppresses the backend cause.</dd>
+        <dt>Rationale</dt><dd>Error reports remain searchable and testable without putting internal vocabulary in the first sentence.</dd>
+        <dt>Downsides</dt><dd>The code adds visual noise and may be unnecessary until support volume justifies it.</dd>
+        <dt>Confidence</dt><dd>74%</dd>
+        <dt>Complexity</dt><dd>Low</dd>
+      </dl>
+    </article>
+
+    <h3 style="margin-top:30px">Refinement rejection summary</h3>
+    <div class="table-wrap" style="margin-top:14px">
+      <table>
+        <thead><tr><th>#</th><th>Considered idea</th><th>Reason rejected or merged</th></tr></thead>
+        <tbody>
+          <tr><td>10</td><td>“No Linux Secret Service provider found”</td><td>Basis refuted: one failed operation cannot distinguish an absent provider from stopped, locked, disabled, denied, unreachable, or backend-failure states.</td></tr>
+          <tr><td>11</td><td>“No key was saved or changed” for every operation</td><td>Basis refuted: a failed OS-backed <code>set</code> or <code>delete</code> can leave the durable outcome indeterminate.</td></tr>
+          <tr><td>12</td><td>Missing <code>DBUS_SESSION_BUS_ADDRESS</code> as a definitive diagnosis</td><td>Basis refuted: absence is a troubleshooting hint, not proof that no session bus can be resolved.</td></tr>
+          <tr><td>13</td><td>Preflight write capability with a successful read</td><td>Rejected: a successful <code>get</code> does not establish that a later <code>set</code> will succeed.</td></tr>
+          <tr><td>14</td><td>“Your provider key was not rejected” as common copy</td><td>Rejected: valid only after some verified-save paths, not for read or delete failures.</td></tr>
+          <tr><td>15</td><td>Universal <code>gnome-keyring-daemon</code> repair command</td><td>Rejected: desktop, distribution, PAM, and session startup differ; protocol-level guidance is more durable.</td></tr>
+          <tr><td>16</td><td>Raw vault operation as the headline</td><td>Merged into operation-aware human context and the optional quiet support code.</td></tr>
+          <tr><td>17</td><td>Generic <code>API_KEY</code> instructions</td><td>Rejected in favor of the exact provider-specific environment variable already available from runtime metadata.</td></tr>
+        </tbody>
+      </table>
     </div>
   </section>
 
@@ -556,7 +708,7 @@
     </div>
   </section>
 
-  <footer class="composition-signal">Composed 2026-07-17T01:59:00Z by ce-ideate from the user prompt and the llm-now / byok-runtime codebases. Updated 2026-07-17T04:54:50Z with the session-settled secret-storage MVP contract.</footer>
+  <footer class="composition-signal">Composed 2026-07-17T01:59:00Z by ce-ideate from the user prompt and the llm-now / byok-runtime codebases. Updated 2026-07-17T04:54:50Z with the session-settled secret-storage MVP contract. Updated 2026-07-20 with the ranked Linux Secret Service failure-copy refinement.</footer>
 </main>
 </body>
 </html>
