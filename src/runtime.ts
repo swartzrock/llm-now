@@ -1,5 +1,7 @@
 import {
   BYOK_API_KEY_ENV_VARS,
+  BYOK_PROVIDER_API_KEY_ENV_VARS,
+  type ByokCloudProviderId,
   type ByokEnvironment,
   type ByokModelOption,
   type ByokProviderConfig,
@@ -10,6 +12,11 @@ import {
   createByokNodeProvider,
   findAvailableProviders,
 } from "@swartzrock/byok-runtime/node";
+import type {
+  CredentialResolver,
+  ResolvedCredential,
+  SensitiveValueRegistry,
+} from "./credentials.ts";
 
 export type RuntimeStage = "discovery" | "model-list" | "generation";
 
@@ -26,16 +33,29 @@ export class RuntimeStageError extends Error {
 
 type FindProviders = typeof findAvailableProviders;
 type CreateProvider = typeof createByokNodeProvider;
+const CLOUD_PROVIDERS = Object.keys(
+  BYOK_PROVIDER_API_KEY_ENV_VARS,
+) as ByokCloudProviderId[];
+
+function isCloudProvider(provider: ByokProviderId): provider is ByokCloudProviderId {
+  return CLOUD_PROVIDERS.includes(provider as ByokCloudProviderId);
+}
 
 export interface RuntimeGatewayDependencies {
   env: ByokEnvironment;
   findProviders?: FindProviders;
   createProvider?: CreateProvider;
+  credentialResolver: CredentialResolver;
+  sensitive: SensitiveValueRegistry;
 }
 
 export interface RuntimeGateway {
   discover(): Promise<ByokProviderId[]>;
   listModels(provider: ByokProviderId): Promise<ByokModelOption[]>;
+  validateCredential(
+    provider: ByokCloudProviderId,
+    apiKey: string,
+  ): Promise<ByokModelOption[]>;
   generate(
     provider: ByokProviderId,
     model: string | null,
@@ -44,11 +64,24 @@ export interface RuntimeGateway {
   ): Promise<string>;
 }
 
-function providerConfig(
+async function providerConfig(
   provider: ByokProviderId,
   model: string | null,
-  env: ByokEnvironment,
-): ByokProviderConfig {
+  resolveCredential: (provider: ByokCloudProviderId) => Promise<ResolvedCredential>,
+): Promise<ByokProviderConfig> {
+  if (isCloudProvider(provider)) {
+    const credential = await resolveCredential(provider);
+    if (credential.source === "missing") {
+      const names = BYOK_PROVIDER_API_KEY_ENV_VARS[provider].join(" or ");
+      throw new Error(`missing credential; set ${names}`);
+    }
+    if (credential.source === "unavailable") {
+      const names = BYOK_PROVIDER_API_KEY_ENV_VARS[provider].join(" or ");
+      throw new Error(`native credential storage unavailable on this target; set ${names}`);
+    }
+    return { provider, apiKey: credential.apiKey, model: model ?? "" };
+  }
+
   switch (provider) {
     case "ollama":
     case "lm-studio":
@@ -65,20 +98,6 @@ function providerConfig(
         command: "claude",
         ...(model === null ? {} : { model }),
       };
-    case "anthropic":
-    case "openai":
-    case "google":
-    case "xai":
-    case "openrouter":
-    case "groq":
-    case "mistral":
-    case "deepseek":
-    case "deepinfra":
-      return {
-        provider,
-        credential: { source: "env", env },
-        model: model ?? "",
-      };
   }
 }
 
@@ -86,49 +105,77 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function redact(message: string, env: ByokEnvironment): string {
-  const values = [...new Set(
-    BYOK_API_KEY_ENV_VARS
-      .map((name) => env[name])
-      .filter((value): value is string => Boolean(value)),
-  )].sort((left, right) => right.length - left.length);
-  return values.reduce(
-    (redacted, value) => redacted.replaceAll(value, "[REDACTED]"),
-    message,
-  );
-}
-
 export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeGateway {
   const findProviders = deps.findProviders ?? findAvailableProviders;
   const createProvider: CreateProvider = deps.createProvider ?? createByokNodeProvider;
+  const sensitive = deps.sensitive;
+  for (const name of BYOK_API_KEY_ENV_VARS) {
+    const value = deps.env[name];
+    if (value) sensitive.register(value);
+  }
+  const credentialResolver = deps.credentialResolver;
 
-  function runtime(provider: ByokProviderId, model: string | null): ByokProviderRuntime {
-    return createProvider(providerConfig(provider, model, deps.env));
+  async function resolveCredential(provider: ByokCloudProviderId) {
+    const credential = await credentialResolver.resolve(provider);
+    if (credential.source === "environment" || credential.source === "vault") {
+      sensitive.register(credential.apiKey);
+    }
+    return credential;
+  }
+
+  async function runtime(
+    provider: ByokProviderId,
+    model: string | null,
+  ): Promise<ByokProviderRuntime> {
+    return createProvider(await providerConfig(provider, model, resolveCredential));
   }
 
   return {
     async discover() {
       try {
-        return await findProviders({ env: deps.env });
+        const providers = [...await findProviders({ env: deps.env })];
+        const available = new Set(providers);
+        for (const provider of CLOUD_PROVIDERS) {
+          if (available.has(provider)) continue;
+          try {
+            const credential = await resolveCredential(provider);
+            if (credential.source === "environment" || credential.source === "vault") {
+              providers.push(provider);
+            }
+          } catch (error) {
+            if (providers.length === 0) throw error;
+            break;
+          }
+        }
+        return providers;
       } catch (error) {
-        throw new RuntimeStageError("discovery", null, redact(errorMessage(error), deps.env));
+        throw new RuntimeStageError("discovery", null, sensitive.redact(errorMessage(error)));
       }
     },
 
     async listModels(provider) {
       try {
-        return await runtime(provider, null).listModels();
+        return await (await runtime(provider, null)).listModels();
       } catch (error) {
-        throw new RuntimeStageError("model-list", provider, redact(errorMessage(error), deps.env));
+        throw new RuntimeStageError("model-list", provider, sensitive.redact(errorMessage(error)));
+      }
+    },
+
+    async validateCredential(provider, apiKey) {
+      sensitive.register(apiKey);
+      try {
+        return await createProvider({ provider, apiKey, model: "" }).listModels();
+      } catch (error) {
+        throw new RuntimeStageError("model-list", provider, sensitive.redact(errorMessage(error)));
       }
     },
 
     async generate(provider, model, prompt, signal) {
       try {
-        const result = await runtime(provider, model).generateText({ prompt }, signal);
+        const result = await (await runtime(provider, model)).generateText({ prompt }, signal);
         return result.text;
       } catch (error) {
-        throw new RuntimeStageError("generation", provider, redact(errorMessage(error), deps.env));
+        throw new RuntimeStageError("generation", provider, sensitive.redact(errorMessage(error)));
       }
     },
   };
