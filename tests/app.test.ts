@@ -1449,7 +1449,7 @@ describe("API-key management", () => {
     expect(failed.stderr.text()).toContain(
       "llm-now couldn’t save the API key securely.",
     );
-    expect(failed.stderr.text()).toContain("Use a key now (not saved by llm-now):");
+    expect(failed.stderr.text()).toContain("Use an api key (not saved by llm-now):");
     expect(failed.stderr.text()).toContain("To save API keys securely:");
     expect(failed.stderr.text()).not.toContain(
       "credential vault set (openai): unavailable",
@@ -1483,7 +1483,7 @@ describe("API-key management", () => {
     expect(app.stderr.text()).toContain(
       "llm-now couldn’t access the saved API key.",
     );
-    expect(app.stderr.text()).toContain("Use a key now (not saved by llm-now):");
+    expect(app.stderr.text()).toContain("Use an api key (not saved by llm-now):");
     expect(app.stderr.text()).toContain("OPENROUTER_API_KEY");
     expect(app.stderr.text()).toContain(
       "read -r -s OPENROUTER_API_KEY && export OPENROUTER_API_KEY",

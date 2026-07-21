@@ -140,7 +140,7 @@ function credentialVaultUnavailableMessage(
       `${errorHeading} Secure API-key storage isn’t available in this Linux session.`,
       action,
       "",
-      `${tipHeading} Use a key now (not saved by llm-now):`,
+      `${tipHeading} Use an api key (not saved by llm-now):`,
       `  Use ${credentialNames.join(" or ")} in this shell.`,
       "  In bash/zsh, enter it without echoing:",
       `    ${colors.cyan(shellCommand)}`,
