@@ -22,7 +22,7 @@ Combine the “Proof-first narrative” structure with the headline “A tiny CL
 - macOS ARM64 uses Keychain; macOS x64 is environment-only under the current compiled lifecycle policy.
 - Linux glibc targets use an available, unlocked Secret Service such as GNOME Keyring or KWallet.
 - Successful generation writes only the model response to stdout; interactive UI and diagnostics use stderr.
-- Installation stays concise: link to the latest release, identify the correct platform/architecture suffixes, and retain only material trust or compatibility caveats.
+- Installation leads with Homebrew for macOS and Linux. Direct downloads remain the fallback and the Windows path, with the correct platform/architecture suffixes and only material trust or compatibility caveats.
 
 ## Deferred assets
 

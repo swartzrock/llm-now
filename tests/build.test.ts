@@ -108,6 +108,11 @@ describe("native release build", () => {
     expect(readme).toContain(
       "[Download the latest release](https://github.com/swartzrock/llm-now/releases/latest)",
     );
+    expect(readme).toContain("brew tap swartzrock/tap");
+    expect(readme).toContain("brew install llm-now");
+    expect(readme.indexOf("brew tap swartzrock/tap")).toBeLessThan(
+      readme.indexOf("[Download the latest release]"),
+    );
     expect(readme).not.toContain("RELEASE_URL=");
     expect(readme).not.toContain("$Version =");
   });

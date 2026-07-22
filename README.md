@@ -21,6 +21,15 @@ $ llm-now --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5
 
 ## Install
 
+### Homebrew (macOS and Linux)
+
+```bash
+brew tap swartzrock/tap
+brew install llm-now
+```
+
+### Direct download
+
 [Download the latest release](https://github.com/swartzrock/llm-now/releases/latest), choose the archive for your platform and architecture, then place the extracted executable somewhere on your `PATH`.
 
 - **macOS:** choose Apple silicon (`llm-now-v<version>-macos-arm64.zip`) or Intel (`llm-now-v<version>-macos-x64.zip`). Both builds are signed and notarized.
