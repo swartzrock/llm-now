@@ -7,7 +7,23 @@
 [![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64%20%28glibc%29-blue)](#install-a-release)
 [![Windows](https://img.shields.io/badge/Windows-x64%20unsigned%20early%20access-orange)](#install-a-release)
 
-`llm-now` makes one text-generation call through an LLM provider already available on your machine. It uses [`@swartzrock/byok-runtime`](https://github.com/swartzrock/byok-runtime) for discovery, model listing, and generation; it does not install providers. On supported release targets, it can store one fallback API key per cloud provider in the operating system's native credential store.
+## A tiny CLI for the local models you already run.
+
+`llm-now` sends one text-generation prompt through an LLM provider already available on your machine. It uses [`@swartzrock/byok-runtime`](https://github.com/swartzrock/byok-runtime) for discovery, model listing, and generation; it does not install or start providers.
+
+```console
+$ llm-now --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5432"
+```
+
+On the first run, choose a discovered provider and model. A typical response is concise and immediately usable:
+
+```text
+A program tried to connect to a service on your computer, but nothing was listening on port 5432.
+```
+
+| Native releases | Passive discovery | Secure credentials | Scriptable output |
+| --- | --- | --- | --- |
+| macOS, Linux, and Windows | Installs and starts nothing | Environment first; native fallback on enabled targets | Model response only on stdout |
 
 ## Install a release
 
@@ -100,12 +116,6 @@ llm-now
 ```
 
 Setup offers saved aliases, on-demand provider discovery, and cloud-provider API-key management. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
-
-Choose a discovered provider and model interactively:
-
-```bash
-llm-now --input "Write a two-line poem about rain"
-```
 
 If you have saved aliases, an interactive call offers those first. Choose “Select a new provider and model…” for a fresh selection. Alias, provider, and model lists are sorted and filter as you type.
 
