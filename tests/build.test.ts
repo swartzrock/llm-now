@@ -105,9 +105,11 @@ describe("native release build", () => {
       expect(releasing).toContain(archiveName("<version>", target));
       expect(manualTesting).toContain(archiveName("X.Y.Z", target));
     }
-    expect(readme.match(/ARCHIVE="llm-now-v\$\{VERSION\}-\$\{TARGET\}\.zip"/g))
-      .toHaveLength(2);
-    expect(readme).toContain('$Archive = "llm-now-v$Version-windows-x64.zip"');
+    expect(readme).toContain(
+      "[Download the latest release](https://github.com/swartzrock/llm-now/releases/latest)",
+    );
+    expect(readme).not.toContain("RELEASE_URL=");
+    expect(readme).not.toContain("$Version =");
   });
 
   test("creates a deterministic archive containing one executable", () => {

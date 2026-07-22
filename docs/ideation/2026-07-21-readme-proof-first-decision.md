@@ -11,8 +11,7 @@ Combine the “Proof-first narrative” structure with the headline “A tiny CL
 1. Repository name and dynamic status badges.
 2. The selected product promise.
 3. One real, provider-neutral command with all required context inside the prompt.
-4. A representative response.
-5. A compact Truth Bar covering native releases, passive discovery, credential handling, and clean stdout.
+4. A compact Truth Bar covering native releases, passive discovery, credential handling, and clean stdout.
 
 ## Accuracy constraints
 
@@ -23,6 +22,7 @@ Combine the “Proof-first narrative” structure with the headline “A tiny CL
 - macOS ARM64 uses Keychain; macOS x64 is environment-only under the current compiled lifecycle policy.
 - Linux glibc targets use an available, unlocked Secret Service such as GNOME Keyring or KWallet.
 - Successful generation writes only the model response to stdout; interactive UI and diagnostics use stderr.
+- Installation stays concise: link to the latest release, identify the correct platform/architecture suffixes, and retain only material trust or compatibility caveats.
 
 ## Deferred assets
 
