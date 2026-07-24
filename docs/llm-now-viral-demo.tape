@@ -63,7 +63,7 @@ Sleep 800 ms
 
 # Solve a recognizable problem using a local model.
 Hide
-Type `clear; gum style --foreground "#A6E3A1" --bold "Private problem. Local model. Immediate answer."`
+Type `clear; gum style --foreground "#A6E3A1" --bold "Postgres won't connect. Get unstuck without leaving your terminal."`
 Enter
 Show
 Sleep 1 s
