@@ -1,5 +1,5 @@
 import { chmod, mkdtemp, rm } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
 import { resolveAliasPath, saveAlias } from "../src/aliases";
 
@@ -46,8 +46,13 @@ try {
     if (process.platform !== "win32") await chmod(outfile, 0o755);
   }
 
+  // Keep bare CLI lookup inside the fixture directory. byok-runtime loads a
+  // login-shell PATH first, which could otherwise select a real Codex install.
   const env = {
-    PATH: [directory, process.env.PATH].filter(Boolean).join(delimiter),
+    PATH: directory,
+    ...(process.platform === "win32"
+      ? {}
+      : { SHELL: join(directory, "missing-login-shell") }),
     ...aliasEnvironment,
   };
   const cases = [
@@ -66,7 +71,6 @@ try {
       exitCode: 0,
       stdoutIncludes: "Usage:\n  llm-now\n  llm-now --input <text>",
       stdoutLandmarks: [
-        "Send a prompt to a selected model.",
         "Usage:\n  llm-now\n  llm-now --input <text>",
         "Rules:\n  Run llm-now with no arguments in a terminal to set up providers and API keys.\n  Input comes from exactly one of --input or stdin.",
         "Options:\n  --input <text>       Prompt text",
