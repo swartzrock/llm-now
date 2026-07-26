@@ -26,7 +26,7 @@ export function renderHelpText(
       ? `  Linux requires ${metadata("GNOME Keyring")} or ${metadata("KWallet")} in your user session.`
       : "  This platform must provide a supported native credential store.";
 
-  return `Send a prompt to a selected model.
+  return `A tiny CLI to send text-generation prompts to the models you already run.
 
 ${heading("Usage:")}
   ${literal("llm-now")}

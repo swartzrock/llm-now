@@ -1,83 +1,45 @@
 # llm-now
 
-`llm-now` makes one text-generation call through an LLM provider already available on your machine. It uses [`@swartzrock/byok-runtime`](https://github.com/swartzrock/byok-runtime) for discovery, model listing, and generation; it does not install providers. On supported release targets, it can store one fallback API key per cloud provider in the operating system's native credential store.
+[![CI](https://github.com/swartzrock/llm-now/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/swartzrock/llm-now/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/swartzrock/llm-now?sort=semver&display_name=tag)](https://github.com/swartzrock/llm-now/releases/latest)
+[![License](https://img.shields.io/github/license/swartzrock/llm-now)](https://github.com/swartzrock/llm-now/blob/main/LICENSE)
+[![macOS](https://img.shields.io/badge/macOS-signed%20%26%20notarized-brightgreen)](https://github.com/swartzrock/llm-now/releases/latest)
+[![Linux](https://img.shields.io/badge/Linux-x64%20%7C%20ARM64%20%28glibc%29-blue)](https://github.com/swartzrock/llm-now/releases/latest)
+[![Windows](https://img.shields.io/badge/Windows-x64%20unsigned%20early%20access-orange)](https://github.com/swartzrock/llm-now/releases/latest)
 
-## Install a release
+## A tiny CLI for the local models you already run.
 
-Choose the archive for your machine:
+`llm-now` sends one text-generation prompt through an LLM provider already available on your machine. It uses [`@swartzrock/byok-runtime`](https://github.com/swartzrock/byok-runtime) for discovery, model listing, and generation; it does not install or start providers.
 
-| Platform | Archive | Trust and compatibility |
-| --- | --- | --- |
-| macOS Intel | `llm-now-v<version>-macos-x64.zip` | Signed and notarized |
-| macOS Apple silicon | `llm-now-v<version>-macos-arm64.zip` | Signed and notarized |
-| Linux x64 | `llm-now-v<version>-linux-x64.zip` | glibc build; not Alpine/musl |
-| Linux ARM64 | `llm-now-v<version>-linux-arm64.zip` | glibc build; not Alpine/musl |
-| Windows x64 | `llm-now-v<version>-windows-x64.zip` | **Unsigned early access** |
+```console
+$ llm-now --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5432"
+```
 
-For macOS, set `TARGET` to `macos-arm64` or `macos-x64`. Download, verify, and extract one archive:
+| Native releases | Passive discovery | Secure credentials | Scriptable output |
+| --- | --- | --- | --- |
+| macOS, Linux, and Windows | Installs and starts nothing | Environment first; native fallback on enabled targets | Model response only on stdout |
+
+## See llm-now in action
+
+![Animated terminal demo of llm-now discovering available providers and using model aliases](docs/demos/demo.gif)
+
+## Install
+
+### Homebrew (macOS and Linux)
 
 ```bash
-VERSION=0.1.0
-TARGET=macos-arm64
-ARCHIVE="llm-now-v${VERSION}-${TARGET}.zip"
-BASE="https://github.com/swartzrock/llm-now/releases/download/v${VERSION}"
-SOURCE_DIGEST="<release source digest shown in the release notes>"
-
-curl -LO "$BASE/$ARCHIVE" -LO "$BASE/SHA256SUMS"
-CHECKSUM="$(grep "  $ARCHIVE$" SHA256SUMS)"
-test -n "$CHECKSUM" && printf '%s\n' "$CHECKSUM" | shasum -a 256 -c -
-gh attestation verify "$ARCHIVE" --repo swartzrock/llm-now \
-  --signer-workflow swartzrock/llm-now/.github/workflows/release.yml \
-  --source-digest "$SOURCE_DIGEST"
-mkdir -p "$HOME/.local/bin"
-unzip -o "$ARCHIVE" -d "$HOME/.local/bin"
-chmod +x "$HOME/.local/bin/llm-now"
+brew install swartzrock/tap/llm-now
 ```
 
-For Linux, set `TARGET` to `linux-x64` or `linux-arm64`. These are glibc builds; Alpine and other musl systems are not supported.
+### Direct download
 
-```bash
-VERSION=0.1.0
-TARGET=linux-x64
-ARCHIVE="llm-now-v${VERSION}-${TARGET}.zip"
-BASE="https://github.com/swartzrock/llm-now/releases/download/v${VERSION}"
-SOURCE_DIGEST="<release source digest shown in the release notes>"
+[Download the latest release](https://github.com/swartzrock/llm-now/releases/latest), choose the archive for your platform and architecture, then place the extracted executable somewhere on your `PATH`.
 
-curl -LO "$BASE/$ARCHIVE" -LO "$BASE/SHA256SUMS"
-CHECKSUM="$(grep "  $ARCHIVE$" SHA256SUMS)"
-test -n "$CHECKSUM" && printf '%s\n' "$CHECKSUM" | sha256sum --check -
-gh attestation verify "$ARCHIVE" --repo swartzrock/llm-now \
-  --signer-workflow swartzrock/llm-now/.github/workflows/release.yml \
-  --source-digest "$SOURCE_DIGEST"
-mkdir -p "$HOME/.local/bin"
-unzip -o "$ARCHIVE" -d "$HOME/.local/bin"
-chmod +x "$HOME/.local/bin/llm-now"
-```
+- **macOS:** choose Apple silicon (`llm-now-v<version>-macos-arm64.zip`) or Intel (`llm-now-v<version>-macos-x64.zip`). Both builds are signed and notarized.
+- **Linux:** choose `llm-now-v<version>-linux-arm64.zip` or `llm-now-v<version>-linux-x64.zip`. These are glibc builds; Alpine and other musl systems are not supported.
+- **Windows:** choose `llm-now-v<version>-windows-x64.zip`. This is unsigned early access, so Windows may warn or block it according to local security policy. Do not weaken security controls to run `llm-now`.
 
-The Windows x64 executable is **unsigned early access**. Windows may show a SmartScreen warning and, where policy permits, offer **Run anyway**. Smart App Control or enterprise policy may block the executable with no supported user bypass. Do not disable or weaken security controls to run `llm-now`.
-
-If your policy permits the executable, download and verify it before the first run:
-
-```powershell
-$Version = "0.1.0"
-$Archive = "llm-now-v$Version-windows-x64.zip"
-$Base = "https://github.com/swartzrock/llm-now/releases/download/v$Version"
-$SourceDigest = "<release source digest shown in the release notes>"
-
-Invoke-WebRequest "$Base/$Archive" -OutFile $Archive
-Invoke-WebRequest "$Base/SHA256SUMS" -OutFile SHA256SUMS
-$ChecksumLines = @(Get-Content SHA256SUMS | Where-Object { $_.EndsWith("  $Archive") })
-if ($ChecksumLines.Count -ne 1) { throw "Expected one checksum for $Archive" }
-$Expected = ($ChecksumLines[0] -split '\s+')[0].ToLowerInvariant()
-$Actual = (Get-FileHash $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($Expected -ne $Actual) { throw "SHA-256 mismatch for $Archive" }
-"SHA-256 verified: $Actual"
-gh attestation verify $Archive --repo swartzrock/llm-now `
-  --signer-workflow swartzrock/llm-now/.github/workflows/release.yml `
-  --source-digest $SourceDigest
-Expand-Archive $Archive -DestinationPath .\llm-now-windows -Force
-& .\llm-now-windows\llm-now.exe --help
-```
+Each release includes `SHA256SUMS` and GitHub artifact attestations alongside the archives.
 
 ## Usage
 
@@ -87,13 +49,11 @@ Run the bare command in an interactive terminal to open setup:
 llm-now
 ```
 
+![Rendered llm-now help screen showing usage, options, API-key environment variables, and secure storage guidance](docs/demos/help-screen.jpg)
+
 Setup offers saved aliases, on-demand provider discovery, and cloud-provider API-key management. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
 
-Choose a discovered provider and model interactively:
-
-```bash
-llm-now --input "Write a two-line poem about rain"
-```
+A generation call without a saved alias prompts you to choose a discovered provider and model.
 
 If you have saved aliases, an interactive call offers those first. Choose “Select a new provider and model…” for a fresh selection. Alias, provider, and model lists are sorted and filter as you type.
 
@@ -122,7 +82,7 @@ Exactly one prompt source is required: `--input` or stdin. Non-interactive calls
 
 After a successful unnamed interactive call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`, with the provider and model emphasized. Type a name to save that exact provider/model pair, or press Enter to exit. If the selected provider/model is already saved, it reports the existing alias and suggests an executable command such as `llm-now daily --input "<prompt>"` for next time instead of asking for a duplicate. A call that selected an existing alias does not ask again. Aliases contain no credentials and are available from every working directory.
 
-- macOS/Linux: `$XDG_CONFIG_HOME/llm-now/aliases.json`, otherwise `~/.config/llm-now/aliases.json`
+- macOS/Linux: `~/.config/llm-now/aliases.json`
 - Windows: `%APPDATA%\\llm-now\\aliases.json`, otherwise `%USERPROFILE%\\AppData\\Roaming\\llm-now\\aliases.json`
 
 Saving the same name and target reports that it is already saved. Reusing a name for a different target requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.

@@ -114,4 +114,4 @@ If a native backend regresses, set that target's explicit compatibility entry to
 | Windows x64 baseline | Credential Manager | Enabled behind the compiled lifecycle gate |
 
 
-Homebrew and Chocolatey integration is intentionally deferred. A custom Homebrew tap and a Chocolatey package may be added later if adoption justifies their ongoing maintenance; neither package manager is part of the current CI or release workflow.
+The Homebrew formula is maintained separately in [swartzrock/homebrew-tap](https://github.com/swartzrock/homebrew-tap); it is not published by this repository's release workflow. Chocolatey integration remains deferred.
