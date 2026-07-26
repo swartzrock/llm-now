@@ -24,8 +24,7 @@ $ llm-now --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5
 ### Homebrew (macOS and Linux)
 
 ```bash
-brew tap swartzrock/tap
-brew install llm-now
+brew install swartzrock/tap/llm-now
 ```
 
 ### Direct download
