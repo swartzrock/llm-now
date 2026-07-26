@@ -19,6 +19,10 @@ $ llm-now --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5
 | --- | --- | --- | --- |
 | macOS, Linux, and Windows | Installs and starts nothing | Environment first; native fallback on enabled targets | Model response only on stdout |
 
+## See llm-now in action
+
+![Animated terminal demo of llm-now discovering available providers and using model aliases](docs/demos/demo.gif)
+
 ## Install
 
 ### Homebrew (macOS and Linux)
@@ -44,6 +48,8 @@ Run the bare command in an interactive terminal to open setup:
 ```bash
 llm-now
 ```
+
+![Rendered llm-now help screen showing usage, options, API-key environment variables, and secure storage guidance](docs/demos/help-screen.jpg)
 
 Setup offers saved aliases, on-demand provider discovery, and cloud-provider API-key management. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
 
