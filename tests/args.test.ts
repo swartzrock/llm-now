@@ -11,7 +11,7 @@ import {
 import { isInteractive, resolvePrompt } from "../src/io.ts";
 import { stripTerminalSequences } from "../src/prompts.ts";
 
-const APPROVED_HELP_TEXT = `Send a prompt to a selected model.
+const APPROVED_HELP_TEXT = `A tiny CLI to send text-generation prompts to the models you already run.
 
 Usage:
   llm-now
