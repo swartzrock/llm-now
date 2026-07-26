@@ -1,0 +1,1142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llm-now Cookbook Campaign - Plan</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e14;
+      --surface: #131924;
+      --surface-raised: #1a2230;
+      --surface-soft: #202a3a;
+      --ink: #f4f7fb;
+      --muted: #aeb9c8;
+      --line: #344257;
+      --lime: #b7f36b;
+      --lime-soft: #263b22;
+      --cyan: #76d9f7;
+      --cyan-soft: #173744;
+      --amber: #ffcc66;
+      --amber-soft: #44361c;
+      --violet: #c3a6ff;
+      --violet-soft: #302647;
+      --danger: #ff9d9d;
+      --danger-soft: #472628;
+      --shadow: 0 22px 70px rgba(0, 0, 0, 0.28);
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-snap-type: y proximity;
+    }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(118, 217, 247, 0.09), transparent 28rem),
+        radial-gradient(circle at 90% 18%, rgba(183, 243, 107, 0.08), transparent 30rem),
+        var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.62;
+    }
+
+    a { color: var(--cyan); }
+    a:hover { color: var(--ink); }
+    strong { color: inherit; }
+
+    code, pre, .mono {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    code {
+      color: var(--lime);
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 1rem 0 0;
+      padding: 1.1rem 1.2rem;
+      overflow-x: auto;
+      border: 1px solid #3d4d63;
+      border-radius: 15px;
+      background: #080b10;
+      color: #e9f7d8;
+      font-size: 0.88rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.08;
+      letter-spacing: -0.035em;
+    }
+
+    h1 {
+      max-width: 14ch;
+      font-size: clamp(3rem, 8vw, 6.6rem);
+      font-weight: 850;
+    }
+
+    h2 {
+      font-size: clamp(2rem, 5vw, 3.8rem);
+      font-weight: 800;
+    }
+
+    h3 {
+      font-size: clamp(1.55rem, 3.6vw, 2.65rem);
+      font-weight: 780;
+    }
+
+    p { max-width: 72ch; }
+
+    .shell {
+      width: min(1160px, calc(100% - 2rem));
+      margin-inline: auto;
+    }
+
+    .top-nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      gap: 0.55rem;
+      align-items: center;
+      width: min(1160px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 0.75rem 0;
+      overflow-x: auto;
+      background: rgba(11, 14, 20, 0.88);
+      backdrop-filter: blur(16px);
+    }
+
+    .top-nav a, .slide-nav a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 2.35rem;
+      padding: 0.45rem 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.78rem;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .top-nav a:hover, .slide-nav a:hover {
+      border-color: var(--cyan);
+      color: var(--ink);
+    }
+
+    .slide {
+      min-height: calc(100vh - 4rem);
+      padding: clamp(3rem, 8vw, 7rem) 0;
+      scroll-margin-top: 3.8rem;
+      scroll-snap-align: start;
+    }
+
+    .cover {
+      display: grid;
+      align-content: center;
+      min-height: calc(100vh - 3.8rem);
+    }
+
+    .eyebrow {
+      margin: 0 0 0.8rem;
+      color: var(--lime);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .lede {
+      max-width: 61ch;
+      margin: 1.6rem 0 0;
+      color: #d6deea;
+      font-size: clamp(1.15rem, 2.2vw, 1.45rem);
+    }
+
+    .prompt-line {
+      display: inline-block;
+      margin-top: 2rem;
+      padding: 0.8rem 1rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #080b10;
+      color: var(--lime);
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    .metadata {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.75rem;
+      margin: 2.3rem 0 0;
+    }
+
+    .metadata div, .goal-grid article, .decision-card, .scope-card {
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: rgba(19, 25, 36, 0.92);
+    }
+
+    .metadata div { padding: 0.8rem 0.9rem; }
+
+    dt {
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    dd {
+      margin: 0.2rem 0 0;
+      color: var(--ink);
+      overflow-wrap: anywhere;
+    }
+
+    .section-intro {
+      margin: 1.1rem 0 2rem;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .goal-grid, .decision-grid, .scope-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+
+    .goal-grid article, .decision-card, .scope-card {
+      padding: 1.25rem;
+    }
+
+    .goal-grid h3, .decision-card h3, .scope-card h3 {
+      font-size: 1rem;
+      letter-spacing: 0;
+    }
+
+    .goal-grid p, .decision-card p, .scope-card p {
+      margin-bottom: 0;
+      color: #d1d9e5;
+    }
+
+    .decision-card {
+      background: var(--violet-soft);
+      border-color: #574477;
+    }
+
+    .settled {
+      color: #e1d6ff;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.82rem;
+    }
+
+    .requirements {
+      width: 100%;
+      margin-top: 1.5rem;
+      border-collapse: separate;
+      border-spacing: 0 0.55rem;
+    }
+
+    .requirements th {
+      padding: 0 0.85rem 0.25rem;
+      color: var(--muted);
+      font-size: 0.74rem;
+      letter-spacing: 0.08em;
+      text-align: left;
+      text-transform: uppercase;
+    }
+
+    .requirements td {
+      padding: 0.9rem;
+      background: var(--surface);
+      border-block: 1px solid var(--line);
+      vertical-align: top;
+    }
+
+    .requirements td:first-child {
+      width: 4.5rem;
+      border-left: 1px solid var(--line);
+      border-radius: 12px 0 0 12px;
+      color: var(--lime);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-weight: 800;
+    }
+
+    .requirements td:last-child {
+      border-right: 1px solid var(--line);
+      border-radius: 0 12px 12px 0;
+    }
+
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.8rem;
+      margin-top: 2rem;
+    }
+
+    .overview-card {
+      display: flex;
+      min-height: 8.5rem;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .overview-card:hover {
+      border-color: var(--lime);
+      transform: translateY(-2px);
+    }
+
+    .overview-card .num {
+      color: var(--lime);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-weight: 800;
+    }
+
+    .overview-card .mini-title {
+      margin-top: 1rem;
+      font-weight: 760;
+      line-height: 1.25;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 1rem;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 1.65rem;
+      padding: 0.2rem 0.55rem;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.045em;
+      text-transform: uppercase;
+    }
+
+    .tag.dev { background: var(--cyan-soft); color: #bfefff; border-color: #285b6b; }
+    .tag.power { background: var(--violet-soft); color: #e2d6ff; border-color: #594978; }
+    .tag.new { background: var(--lime-soft); color: #d7ffaa; border-color: #46653c; }
+    .tag.mac { background: var(--amber-soft); color: #ffe4a3; border-color: #6d572b; }
+    .tag.safe { background: var(--surface-soft); color: #d8e0eb; border-color: #46566c; }
+
+    .recipe-slide {
+      display: grid;
+      align-content: center;
+      min-height: calc(100vh - 4rem);
+      padding: clamp(3rem, 7vw, 6rem) 0;
+      scroll-margin-top: 3.8rem;
+      scroll-snap-align: start;
+    }
+
+    .recipe-card {
+      padding: clamp(1.3rem, 4vw, 2.6rem);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(145deg, rgba(26, 34, 48, 0.98), rgba(17, 23, 33, 0.98));
+      box-shadow: var(--shadow);
+    }
+
+    .recipe-kicker {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1.15rem;
+    }
+
+    .recipe-number {
+      color: var(--lime);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.86rem;
+      font-weight: 850;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .hook {
+      max-width: 62ch;
+      margin: 1.15rem 0 0;
+      color: #d9e2ee;
+      font-size: clamp(1.05rem, 2vw, 1.3rem);
+    }
+
+    .recipe-meta {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.7rem;
+      margin: 1.3rem 0;
+    }
+
+    .recipe-meta div {
+      padding: 0.75rem 0.85rem;
+      border-radius: 12px;
+      background: var(--surface-soft);
+    }
+
+    details {
+      margin-top: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(8, 11, 16, 0.44);
+    }
+
+    summary {
+      cursor: pointer;
+      padding: 0.8rem 1rem;
+      color: var(--cyan);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    .detail-body {
+      padding: 0 1rem 1rem;
+      color: #d0d9e5;
+    }
+
+    .detail-body p { margin: 0.7rem 0 0; }
+
+    .slide-nav {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .scope-card.deferred {
+      background: var(--amber-soft);
+      border-color: #6d572b;
+    }
+
+    .scope-card.safety {
+      background: var(--danger-soft);
+      border-color: #744044;
+    }
+
+    .acceptance-list {
+      display: grid;
+      gap: 0.75rem;
+      margin: 1.5rem 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .acceptance-list li {
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--surface);
+    }
+
+    .acceptance-list .id {
+      color: var(--lime);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-weight: 850;
+    }
+
+    .source-list {
+      display: grid;
+      gap: 0.7rem;
+      padding-left: 1.2rem;
+    }
+
+    .composition-signal {
+      width: min(1160px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 2rem 0 4rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.78rem;
+    }
+
+    @media (max-width: 850px) {
+      .metadata, .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .goal-grid, .decision-grid, .scope-grid, .recipe-meta { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 520px) {
+      .metadata, .overview-grid { grid-template-columns: 1fr; }
+      .recipe-kicker { align-items: flex-start; flex-direction: column; }
+      .requirements, .requirements tbody, .requirements tr, .requirements td { display: block; }
+      .requirements thead { display: none; }
+      .requirements tr { margin-bottom: 0.7rem; }
+      .requirements td { border-inline: 1px solid var(--line); border-radius: 0; }
+      .requirements td:first-child { width: auto; border-radius: 12px 12px 0 0; }
+      .requirements td:last-child { border-radius: 0 0 12px 12px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; scroll-snap-type: none; }
+      .overview-card:hover { transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="top-nav" aria-label="Plan navigation">
+    <a href="#top">Cover</a>
+    <a href="#goal-capsule">Goal Capsule</a>
+    <a href="#product-contract">Product Contract</a>
+    <a href="#recipe-overview">20 Recipes</a>
+    <a href="#success-criteria">Success Criteria</a>
+    <a href="#scope-boundaries">Scope Boundaries</a>
+    <a href="#sources">Sources</a>
+  </nav>
+
+  <header class="shell cover slide" id="top">
+    <p class="eyebrow">Requirements-only campaign deck · 20 candidate recipes</p>
+    <h1>Make the tiny CLI feel enormous.</h1>
+    <p class="lede">A three-week idea slate for showing how <code>llm-now</code> turns ordinary terminal text into useful, surprising outcomes—without becoming another chat app.</p>
+    <span class="prompt-line">$ producer | llm-now alias | next-thing</span>
+
+    <dl class="metadata" aria-label="Artifact metadata">
+      <div><dt>title</dt><dd>llm-now Cookbook Campaign - Plan</dd></div>
+      <div><dt>type</dt><dd>docs</dd></div>
+      <div><dt>date</dt><dd><time datetime="2026-07-26">2026-07-26</time></dd></div>
+      <div><dt>topic</dt><dd>cookbook-campaign</dd></div>
+      <div><dt>artifact_contract</dt><dd>ce-unified-plan/v1</dd></div>
+      <div><dt>artifact_readiness</dt><dd>requirements-only</dd></div>
+      <div><dt>product_contract_source</dt><dd>ce-brainstorm</dd></div>
+    </dl>
+  </header>
+
+  <main>
+    <section class="shell slide" id="goal-capsule">
+      <p class="eyebrow">Direction at a glance</p>
+      <h2>Goal Capsule</h2>
+      <div class="goal-grid">
+        <article>
+          <h3>Objective</h3>
+          <p>Create 20 campaign-ready recipe candidates that make readers want to copy a command, install <code>llm-now</code>, or click through to see what else it can do.</p>
+        </article>
+        <article>
+          <h3>Product authority</h3>
+          <p>This plan owns the candidate slate and its slideshow presentation. Final social posts, winner selection, and the permanent cookbook remain separate work.</p>
+        </article>
+        <article>
+          <h3>Open blockers</h3>
+          <p>None before planning. The eventual shortlist is a downstream editorial choice, not a blocker for producing the candidate deck.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="shell slide" id="product-contract">
+      <p class="eyebrow">The thing to preserve</p>
+      <h2>Product Contract</h2>
+
+      <section aria-labelledby="summary-heading">
+        <h3 id="summary-heading">Summary</h3>
+        <p class="section-intro">Produce a self-contained HTML slideshow of 20 audience-labeled <code>llm-now</code> recipe concepts, sequenced as a campaign arc and detailed enough to choose which recipes deserve full production.</p>
+      </section>
+
+      <section aria-labelledby="problem-heading">
+        <h3 id="problem-heading">Problem Frame</h3>
+        <p>The README teaches installation, input modes, aliases, and provider selection, but its intentionally compact examples cannot demonstrate the range of situations where a one-shot text model becomes useful. A publicity campaign needs moments with stronger curiosity gaps than “summarize this text.”</p>
+        <p>The opportunity is not to pretend the CLI has tools, memory, or repository awareness. It is to show that familiar shell producers and consumers supply the missing context and destination, making a narrow text primitive unexpectedly versatile.</p>
+      </section>
+
+      <section aria-labelledby="decisions-heading">
+        <h3 id="decisions-heading">Key Decisions</h3>
+        <div class="decision-grid">
+          <article class="decision-card">
+            <h3>Campaign arc with audience lanes</h3>
+            <p>Alternate serious, useful, playful, and surprising concepts while retaining audience tags. Governs R1, R2, R3.</p>
+          </article>
+          <article class="decision-card">
+            <h3>Mixed-audience showcase</h3>
+            <p>Reach beyond a developer-only cookbook so the breadth itself demonstrates the product.</p>
+            <p class="settled">(session-settled: user-directed — chosen over a terminal-developer-only collection: variety is part of the desired product demonstration)</p>
+          </article>
+          <article class="decision-card">
+            <h3>Human review before mutation</h3>
+            <p>Recipes may generate text for consequential actions, but they never pipe model output directly into an executor. Governs R6.</p>
+          </article>
+          <article class="decision-card">
+            <h3>Candidate depth, not finished tutorials</h3>
+            <p>Show enough command detail to judge the idea while reserving production polish for shortlisted recipes. Governs R5.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="product-requirements" aria-labelledby="requirements-heading">
+        <h3 id="requirements-heading">Requirements</h3>
+        <table class="requirements">
+          <thead><tr><th>ID</th><th>Concern</th><th>Requirement</th></tr></thead>
+          <tbody>
+            <tr id="r1"><td>R1.</td><td>Campaign</td><td>The slate contains exactly 20 independently publishable recipe candidates for a three-week daily campaign.</td></tr>
+            <tr id="r2"><td>R2.</td><td>Campaign</td><td>The sequence varies intended audience and emotional register so adjacent candidates do not feel repetitive.</td></tr>
+            <tr id="r3"><td>R3.</td><td>Campaign</td><td>Each candidate creates a curiosity gap around shell composition rather than merely restating a generic chat prompt.</td></tr>
+            <tr id="r4"><td>R4.</td><td>Candidate content</td><td>Each candidate visibly labels its intended audience and any platform dependency.</td></tr>
+            <tr id="r5"><td>R5.</td><td>Candidate content</td><td>Each candidate includes a social hook, useful outcome, plausible command sketch, click rationale, and production caveat.</td></tr>
+            <tr id="r6"><td>R6.</td><td>Safety</td><td>No candidate blindly executes generated output or implies that model text should bypass human review before a consequential action.</td></tr>
+            <tr id="r7"><td>R7.</td><td>Deck</td><td>The artifact is one self-contained HTML slideshow with a compact overview and direct anchors to all 20 candidates.</td></tr>
+            <tr id="r8"><td>R8.</td><td>Deck</td><td>Navigation and reading remain usable without a JavaScript framework or external layout assets.</td></tr>
+            <tr id="r9"><td>R9.</td><td>Product truth</td><td>Each command sketch supplies exactly one prompt source through <code>--input</code> or stdin.</td></tr>
+            <tr id="r10"><td>R10.</td><td>Product truth</td><td>Each non-interactive command sketch names an alias or an explicit provider/model pair.</td></tr>
+            <tr id="r11"><td>R11.</td><td>Product truth</td><td>Each recipe treats successful stdout as model-response text and keeps UI or diagnostic text out of that channel.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+    <section class="shell slide" id="recipe-overview">
+      <p class="eyebrow">The campaign arc</p>
+      <h2>Twenty hooks, one primitive.</h2>
+      <p class="section-intro">The order deliberately changes lanes. Use this overview as the shortlist surface, then jump into any full candidate slide.</p>
+      <div class="overview-grid" aria-label="Recipe candidate index">
+        <a class="overview-card" href="#recipe-01"><span class="num">01</span><span class="mini-title">The diff writes its commit message</span><span class="tag dev">Developer</span></a>
+        <a class="overview-card" href="#recipe-09"><span class="num">09</span><span class="mini-title">A tone dial for your clipboard</span><span class="tag power">Power user</span></a>
+        <a class="overview-card" href="#recipe-15"><span class="num">15</span><span class="mini-title">A man page becomes a tutor</span><span class="tag new">New to LLMs</span></a>
+        <a class="overview-card" href="#recipe-02"><span class="num">02</span><span class="mini-title">A red test run explains itself</span><span class="tag dev">Developer</span></a>
+        <a class="overview-card" href="#recipe-10"><span class="num">10</span><span class="mini-title">A pep talk appears in Stickies</span><span class="tag power">Power user</span></a>
+        <a class="overview-card" href="#recipe-16"><span class="num">16</span><span class="mini-title">Your own notes quiz you</span><span class="tag new">New to LLMs</span></a>
+        <a class="overview-card" href="#recipe-03"><span class="num">03</span><span class="mini-title">Skeptical maintainer preflight</span><span class="tag dev">Developer</span></a>
+        <a class="overview-card" href="#recipe-11"><span class="num">11</span><span class="mini-title">Your terminal talks you through it</span><span class="tag power">Power user</span></a>
+        <a class="overview-card" href="#recipe-17"><span class="num">17</span><span class="mini-title">Run a pre-mortem before deciding</span><span class="tag new">New to LLMs</span></a>
+        <a class="overview-card" href="#recipe-04"><span class="num">04</span><span class="mini-title">Release notes from the commit trail</span><span class="tag dev">Developer</span></a>
+        <a class="overview-card" href="#recipe-12"><span class="num">12</span><span class="mini-title">Meeting notes become commitments</span><span class="tag power">Power user</span></a>
+        <a class="overview-card" href="#recipe-18"><span class="num">18</span><span class="mini-title">The pantry proposes dinner</span><span class="tag new">New to LLMs</span></a>
+        <a class="overview-card" href="#recipe-05"><span class="num">05</span><span class="mini-title">Two hundred log lines become a handoff</span><span class="tag dev">Developer</span></a>
+        <a class="overview-card" href="#recipe-13"><span class="num">13</span><span class="mini-title">Downloads folder, cleanup plan</span><span class="tag power">Power user</span></a>
+        <a class="overview-card" href="#recipe-06"><span class="num">06</span><span class="mini-title">TODO archaeology</span><span class="tag dev">Developer</span></a>
+        <a class="overview-card" href="#recipe-14"><span class="num">14</span><span class="mini-title">A rough note becomes a checklist</span><span class="tag power">Power user</span></a>
+        <a class="overview-card" href="#recipe-07"><span class="num">07</span><span class="mini-title">Give lazygit an explainer</span><span class="tag dev">Developer</span></a>
+        <a class="overview-card" href="#recipe-19"><span class="num">19</span><span class="mini-title">Same prompt, local and cloud</span><span class="tag new">LLM-curious</span></a>
+        <a class="overview-card" href="#recipe-08"><span class="num">08</span><span class="mini-title">Give Emacs a model—no plugin</span><span class="tag dev">Developer</span></a>
+        <a class="overview-card" href="#recipe-20"><span class="num">20</span><span class="mini-title">Your laptop, narrated by mission control</span><span class="tag power">Power user</span></a>
+      </div>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-01">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 01 · Developer</span><span class="tag safe">Human-reviewed</span></div>
+        <h3>Let the staged diff write its own commit message.</h3>
+        <p class="hook">Social hook: “I stopped describing my diff to an AI. The diff is already text.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Developers using Git</dd></div>
+          <div><dt>Outcome</dt><dd>A reviewable Conventional Commit message</dd></div>
+          <div><dt>Platform</dt><dd>macOS, Linux, Windows shell equivalents</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Write a Conventional Commit message for this staged diff. Return only the message.'; git diff --cached; } | llm-now haiku</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> The command makes the Unix-composition story visible in one line and improves on “ask chat to write a commit message” by supplying the exact staged context.</p>
+            <p><strong>Production note:</strong> Generate message text only. The finished recipe must tell the reader to review it before running <code>git commit</code>; never pipe model output into a shell or Git command.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 1 navigation"><a href="#recipe-overview">← Overview</a><a href="#recipe-09">Recipe 09 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-09">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 09 · Power user</span><span class="tag mac">macOS</span></div>
+        <h3>Add a tone dial to the clipboard.</h3>
+        <p class="hook">Social hook: “Copy the awkward paragraph. Paste back the warmer version. No browser tab in between.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Writers, managers, and support responders</dd></div>
+          <div><dt>Outcome</dt><dd>Clipboard text rewritten with a named tone</dd></div>
+          <div><dt>Platform</dt><dd>macOS; Linux and Windows need clipboard equivalents</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Rewrite this to sound warm, direct, and concise. Preserve every factual claim. Return only the rewrite.'; pbpaste; } | llm-now haiku | pbcopy</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> Clipboard in, clipboard out feels like a native superpower while visibly proving the value of stdout-only model responses.</p>
+            <p><strong>Production note:</strong> Warn that the command replaces clipboard contents and that copied text may be sensitive. Offer a local-alias variant first.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 9 navigation"><a href="#recipe-01">← Recipe 01</a><a href="#recipe-15">Recipe 15 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-15">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 15 · New to LLMs</span><span class="tag new">Local-friendly</span></div>
+        <h3>Turn any man page into a patient tutor.</h3>
+        <p class="hook">Social hook: “The documentation was already on my machine. I just changed its reading level.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>People learning shell tools</dd></div>
+          <div><dt>Outcome</dt><dd>A five-minute mental model plus safe examples</dd></div>
+          <div><dt>Platform</dt><dd>Unix-like systems with <code>man</code></dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Teach this command to a beginner: mental model, five common flags, two safe examples, and one common mistake.'; man tar | col -b; } | llm-now local</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> The raw material is authoritative local documentation, making the recipe more grounded than a generic “explain tar” prompt.</p>
+            <p><strong>Production note:</strong> Tell readers to confirm flags against the original man page because the model can still misstate details.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 15 navigation"><a href="#recipe-09">← Recipe 09</a><a href="#recipe-02">Recipe 02 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-02">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 02 · Developer</span><span class="tag safe">Local-friendly</span></div>
+        <h3>Make a red test run explain itself.</h3>
+        <p class="hook">Social hook: “The test suite failed. I piped the last 200 lines into the local model already running on my laptop.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Developers debugging test failures</dd></div>
+          <div><dt>Outcome</dt><dd>Likely cause plus the smallest next check</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform with command adaptation</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Diagnose the likely root cause and suggest the smallest next check.'; bun test 2&gt;&amp;1 | tail -200; } | llm-now local</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It turns an annoying terminal moment into an immediate local workflow and demonstrates that <code>llm-now</code> needs no editor extension.</p>
+            <p><strong>Production note:</strong> Use a bounded tail and warn readers to remove secrets, customer data, and proprietary source fragments before sending output to any non-local provider.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 2 navigation"><a href="#recipe-15">← Recipe 15</a><a href="#recipe-10">Recipe 10 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-10">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 10 · Power user</span><span class="tag mac">macOS · Stickies</span></div>
+        <h3>Leave future-you a pep talk in Stickies.</h3>
+        <p class="hook">Social hook: “My terminal asked a model for two encouraging sentences, then left them on my desktop for tomorrow.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Mac automation fans and productivity tinkerers</dd></div>
+          <div><dt>Outcome</dt><dd>A generated note stored in Stickies</dd></div>
+          <div><dt>Platform</dt><dd>macOS only</dd></div>
+        </dl>
+        <pre><code>note=$(llm-now haiku --input "Write a specific two-sentence pep talk for someone finishing a difficult project.")
+osascript - "$note" &lt;&lt;'APPLESCRIPT'
+on run argv
+  tell application "Stickies" to make new note with properties {body:item 1 of argv}
+end run
+APPLESCRIPT</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> This is whimsical, visible, and unmistakably not a developer-only use case. It develops the user’s original Stickies idea into a safe argument-passing shape.</p>
+            <p><strong>Production note:</strong> Validate the AppleScript against supported macOS versions before publishing and explain that the script creates a note but does not grant <code>llm-now</code> app-control capabilities.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 10 navigation"><a href="#recipe-02">← Recipe 02</a><a href="#recipe-16">Recipe 16 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-16">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 16 · New to LLMs</span><span class="tag new">Study aid</span></div>
+        <h3>Make your own notes quiz you.</h3>
+        <p class="hook">Social hook: “I didn’t ask the model what it knows. I asked it to test me only on what I wrote.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Students, self-learners, and documentation readers</dd></div>
+          <div><dt>Outcome</dt><dd>A self-test grounded in supplied notes</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Create ten questions using only these notes. Mix recall and application. Put the answer key after a clear divider.'; cat notes.md; } | llm-now local</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It teaches the most important beginner lesson—supply the source material—without discussing prompt theory.</p>
+            <p><strong>Production note:</strong> Call the output a study aid, not an authoritative assessment, and recommend checking answers against the notes.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 16 navigation"><a href="#recipe-10">← Recipe 10</a><a href="#recipe-03">Recipe 03 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-03">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 03 · Developer</span><span class="tag safe">Read-only preflight</span></div>
+        <h3>Ask a skeptical maintainer to preflight your diff.</h3>
+        <p class="hook">Social hook: “Before opening the PR, I asked for only the three risks most likely to waste reviewer time.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Developers preparing pull requests</dd></div>
+          <div><dt>Outcome</dt><dd>A short risk checklist, not a full review</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Act as a skeptical maintainer. Name only the three highest-risk issues in this staged diff.'; git diff --cached; } | llm-now haiku</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> The strict three-risk constraint keeps the result useful and shows prompt design as ordinary shell text rather than a special integration.</p>
+            <p><strong>Production note:</strong> Position this as a preflight, never as a replacement for tests or human review. Large diffs may exceed model input limits and should be narrowed.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 3 navigation"><a href="#recipe-16">← Recipe 16</a><a href="#recipe-11">Recipe 11 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-11">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 11 · Power user</span><span class="tag mac">macOS · Audio</span></div>
+        <h3>Let the terminal talk you through a five-minute reset.</h3>
+        <p class="hook">Social hook: “A model writes the coaching; macOS already knows how to speak stdin.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>People who enjoy lightweight personal automations</dd></div>
+          <div><dt>Outcome</dt><dd>A short spoken focus or breathing prompt</dd></div>
+          <div><dt>Platform</dt><dd>macOS; other systems need a speech command</dd></div>
+        </dl>
+        <pre><code>llm-now haiku --input "Write a calm 60-second spoken reset before a difficult task. Use short sentences and no headings." | say</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It makes the model response leave the screen entirely and shows <code>llm-now</code> as a composable producer.</p>
+            <p><strong>Production note:</strong> Keep the claim modest: this is a generated focus prompt, not medical or mental-health advice.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 11 navigation"><a href="#recipe-03">← Recipe 03</a><a href="#recipe-17">Recipe 17 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-17">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 17 · New to LLMs</span><span class="tag safe">Decision aid</span></div>
+        <h3>Run a pre-mortem before you make the decision.</h3>
+        <p class="hook">Social hook: “I asked future failure to send me a memo from six months ahead.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Founders, managers, and people facing a consequential choice</dd></div>
+          <div><dt>Outcome</dt><dd>Failure scenarios, warning signals, and cheap tests</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Assume this decision failed six months from now. Write a pre-mortem with plausible causes, early warning signs, and one cheap test for each. Do not decide for me.'; cat decision.md; } | llm-now haiku</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> The future-memo framing is memorable and demonstrates an LLM as a perspective generator rather than an oracle.</p>
+            <p><strong>Production note:</strong> State that the model is surfacing hypotheses, not providing legal, medical, or financial advice.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 17 navigation"><a href="#recipe-11">← Recipe 11</a><a href="#recipe-04">Recipe 04 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-04">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 04 · Developer</span><span class="tag safe">Release workflow</span></div>
+        <h3>Turn the commit trail into release notes.</h3>
+        <p class="hook">Social hook: “The changelog draft was hiding in <code>git log</code> the whole time.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Maintainers and release engineers</dd></div>
+          <div><dt>Outcome</dt><dd>A user-facing release-note draft</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Draft concise user-facing release notes. Group changes by user impact and omit merge noise.'; git log --oneline --no-merges v1.2.0..HEAD; } | llm-now haiku</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It transforms a familiar developer artifact into publishable prose and makes the value of stdout redirection obvious.</p>
+            <p><strong>Production note:</strong> Use a clearly marked example tag range. The final recipe should require fact-checking against the actual diff because commit subjects may be incomplete.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 4 navigation"><a href="#recipe-17">← Recipe 17</a><a href="#recipe-12">Recipe 12 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-12">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 12 · Power user</span><span class="tag safe">Human confirmation</span></div>
+        <h3>Turn meeting notes into commitments, not a summary.</h3>
+        <p class="hook">Social hook: “Summaries are cheap. I asked for decisions, owners, deadlines, and unresolved questions.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Team leads, project managers, and individual contributors</dd></div>
+          <div><dt>Outcome</dt><dd>A structured action-item draft</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Extract decisions, action items, stated owners, stated dates, and unresolved questions. Mark anything missing instead of guessing.'; cat meeting-notes.txt; } | llm-now haiku</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It demonstrates outcome-oriented prompting and appeals to readers who do not identify as developers.</p>
+            <p><strong>Production note:</strong> Require human confirmation before assigning tasks or dates. Meeting notes may contain confidential information, so provider choice matters.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 12 navigation"><a href="#recipe-04">← Recipe 04</a><a href="#recipe-18">Recipe 18 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-18">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 18 · New to LLMs</span><span class="tag new">Everyday useful</span></div>
+        <h3>Let the pantry propose dinner.</h3>
+        <p class="hook">Social hook: “A text file of what I already have became three realistic dinners and one tiny shopping list.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Home users trying a local model for the first time</dd></div>
+          <div><dt>Outcome</dt><dd>Meal options constrained by supplied ingredients</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Suggest three simple dinners using mostly these ingredients. Separate what I have from the smallest shopping list. Ask no follow-up questions.'; cat pantry.txt; } | llm-now local</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It is approachable, private enough to favor a local model, and still demonstrates the same file-to-model composition as developer recipes.</p>
+            <p><strong>Production note:</strong> Include ordinary food-safety and allergy caveats without turning the recipe into health advice.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 18 navigation"><a href="#recipe-12">← Recipe 12</a><a href="#recipe-05">Recipe 05 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-05">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 05 · Developer / SRE</span><span class="tag safe">Sanitize first</span></div>
+        <h3>Turn 200 log lines into an incident handoff.</h3>
+        <p class="hook">Social hook: “Not ‘summarize these logs’—give the next engineer a timeline, hypotheses, and missing evidence.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Developers, operators, and support engineers</dd></div>
+          <div><dt>Outcome</dt><dd>A compact handoff with uncertainty preserved</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform with log-command adaptation</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Create an incident handoff: timeline, strongest hypotheses, evidence gaps, and next checks. Do not invent facts.'; tail -n 200 app.log; } | llm-now local</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> “Handoff” is a sharper outcome than summary and demonstrates a workflow teams already perform under pressure.</p>
+            <p><strong>Production note:</strong> Prefer a local alias for sensitive logs. The finished recipe must lead with redaction and data-handling guidance.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 5 navigation"><a href="#recipe-18">← Recipe 18</a><a href="#recipe-13">Recipe 13 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-13">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 13 · Power user</span><span class="tag safe">Plan only · no deletion</span></div>
+        <h3>Let your Downloads folder propose its own cleanup plan.</h3>
+        <p class="hook">Social hook: “The model sees filenames, not files—and it suggests categories without deleting a thing.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Desktop organizers and local-model users</dd></div>
+          <div><dt>Outcome</dt><dd>A proposed grouping and review checklist</dd></div>
+          <div><dt>Platform</dt><dd>macOS and Linux; adapt listing command elsewhere</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Propose categories for reviewing these filenames. Flag likely duplicates by name only. Do not invent contents or output shell commands.'; find ~/Downloads -maxdepth 1 -type f -print; } | llm-now local</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It feels agentic while staying honest: the model receives a text inventory and returns only a plan.</p>
+            <p><strong>Production note:</strong> Never turn the result into automatic deletion or moves. Filenames can reveal sensitive information, so the local-model version should be canonical.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 13 navigation"><a href="#recipe-05">← Recipe 05</a><a href="#recipe-06">Recipe 06 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-06">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 06 · Developer</span><span class="tag safe">Read-only inventory</span></div>
+        <h3>Do TODO archaeology instead of TODO counting.</h3>
+        <p class="hook">Social hook: “I gave every TODO and FIXME to a local model and asked which hidden project themes they reveal.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Maintainers inheriting or cleaning a codebase</dd></div>
+          <div><dt>Outcome</dt><dd>A thematic debt map with suggested investigation order</dd></div>
+          <div><dt>Platform</dt><dd>macOS and Linux; adapt search command on Windows</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Group these TODOs by underlying theme. Identify likely clusters, risk signals, and the first three items worth investigating.'; rg -n 'TODO|FIXME' src tests; } | llm-now local</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> The recipe extracts structure from mundane text and gives <code>rg</code> users an immediately recognizable composition.</p>
+            <p><strong>Production note:</strong> Clarify that comments can be stale and the model cannot inspect surrounding code unless the command supplies it.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 6 navigation"><a href="#recipe-13">← Recipe 13</a><a href="#recipe-14">Recipe 14 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-14">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 14 · Power user</span><span class="tag safe">Text filter</span></div>
+        <h3>Turn the messy note into a checklist you can act on.</h3>
+        <p class="hook">Social hook: “One text file goes in. A prioritized Markdown checklist comes out.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Knowledge workers and Markdown users</dd></div>
+          <div><dt>Outcome</dt><dd>A prioritized checklist with unknowns preserved</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Convert this rough note into a prioritized Markdown checklist. Preserve uncertainties as questions. Return only Markdown.'; cat rough-note.txt; } | llm-now haiku</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It is immediately understandable to beginners and demonstrates that format constraints make stdout useful downstream.</p>
+            <p><strong>Production note:</strong> Show redirection only after first showing the result on screen, so a filename is not overwritten accidentally.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 14 navigation"><a href="#recipe-06">← Recipe 06</a><a href="#recipe-07">Recipe 07 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-07">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 07 · Developer</span><span class="tag dev">Lazygit candidate</span></div>
+        <h3>Give lazygit a plain-English “explain this commit” command.</h3>
+        <p class="hook">Social hook: “No AI feature request for lazygit. Its custom commands can already call a tiny CLI.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Lazygit and terminal-Git users</dd></div>
+          <div><dt>Outcome</dt><dd>A selected commit explained by intent and consequence</dd></div>
+          <div><dt>Platform</dt><dd>Cross-platform; lazygit wiring varies</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Explain this commit in plain English: intent, behavior change, and review risk.'; git show --stat --patch HEAD; } | llm-now haiku | less</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It reframes “AI integration” as one custom shell command and directly develops the user’s lazygit idea.</p>
+            <p><strong>Production note:</strong> The full recipe must verify current lazygit custom-command placeholders before publishing. The command sketch uses <code>HEAD</code> so it remains truthful without guessing that configuration.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 7 navigation"><a href="#recipe-14">← Recipe 14</a><a href="#recipe-19">Recipe 19 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-19">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 19 · LLM-curious</span><span class="tag new">Provider contrast</span></div>
+        <h3>Ask the same prompt locally and in the cloud—side by side.</h3>
+        <p class="hook">Social hook: “One tiny CLI makes the provider the variable, not the workflow.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>People comparing privacy, speed, style, or cost</dd></div>
+          <div><dt>Outcome</dt><dd>A visible two-model comparison</dd></div>
+          <div><dt>Platform</dt><dd>macOS and Linux shells with process substitution</dd></div>
+        </dl>
+        <pre><code>paste &lt;(llm-now local --input "Explain recursion in one sentence.") &lt;(llm-now haiku --input "Explain recursion in one sentence.")</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It dramatizes the product promise: aliases let the same command shape reach different providers already available on the machine.</p>
+            <p><strong>Production note:</strong> Explain that outputs vary and that this is a qualitative demonstration, not a benchmark. Provide a PowerShell-friendly alternative in the full recipe.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 19 navigation"><a href="#recipe-07">← Recipe 07</a><a href="#recipe-08">Recipe 08 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-08">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 08 · Developer</span><span class="tag dev">Emacs</span></div>
+        <h3>Give Emacs a model without installing an AI plugin.</h3>
+        <p class="hook">Social hook: “Select a region. Run one shell command. Replace it with the model’s stdout.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Emacs users and Unix-tool purists</dd></div>
+          <div><dt>Outcome</dt><dd>A selected region rewritten in place after review</dd></div>
+          <div><dt>Platform</dt><dd>Any Emacs environment with shell access</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Rewrite this region for clarity without changing meaning. Return only replacement text.'; cat; } | llm-now haiku</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> Emacs already knows how to send a region through a shell command; clean stdout turns <code>llm-now</code> into a plugin-free text filter.</p>
+            <p><strong>Production note:</strong> The finished recipe should show <code>shell-command-on-region</code>, including the prefix argument needed to replace text, and remind users that undo remains available.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 8 navigation"><a href="#recipe-19">← Recipe 19</a><a href="#recipe-20">Recipe 20 →</a></nav>
+    </section>
+
+    <section class="shell recipe-slide" id="recipe-20">
+      <article class="recipe-card">
+        <div class="recipe-kicker"><span class="recipe-number">Recipe 20 · Power user / Playful</span><span class="tag power">Shareable finale</span></div>
+        <h3>Have mission control narrate your laptop.</h3>
+        <p class="hook">Social hook: “I piped <code>uptime</code> through a local model and my laptop became a spacecraft.”</p>
+        <dl class="recipe-meta">
+          <div><dt>Audience</dt><dd>Terminal tinkerers and people who share delightful tools</dd></div>
+          <div><dt>Outcome</dt><dd>A calm NASA-style system-status update</dd></div>
+          <div><dt>Platform</dt><dd>Unix-like systems; adapt status command elsewhere</dd></div>
+        </dl>
+        <pre><code>{ printf '%s\n\n' 'Turn this computer status into a calm two-sentence NASA mission-control update. Preserve the numbers.'; uptime; } | llm-now local</code></pre>
+        <details>
+          <summary>Why it earns the click + production note</summary>
+          <div class="detail-body">
+            <p><strong>Why:</strong> It is compact, visualizable, harmless, and memorable—the right emotional finish for a campaign built around recombining ordinary commands.</p>
+            <p><strong>Production note:</strong> Keep it clearly playful and avoid implying that the model performs system monitoring or diagnosis.</p>
+          </div>
+        </details>
+      </article>
+      <nav class="slide-nav" aria-label="Recipe 20 navigation"><a href="#recipe-08">← Recipe 08</a><a href="#success-criteria">Success Criteria →</a></nav>
+    </section>
+    <section class="shell slide" id="success-criteria">
+      <p class="eyebrow">How the slate earns its keep</p>
+      <h2>Success Criteria</h2>
+      <ul class="acceptance-list">
+        <li><strong>Selection quality:</strong> A reviewer can shortlist candidates from the overview, then judge any finalist from one slide without needing the README open beside it.</li>
+        <li><strong>Audience range:</strong> The deck’s campaign order visibly satisfies <a href="#r2">R2</a>.</li>
+        <li><strong>Product truth:</strong> Every candidate satisfies <a href="#r9">R9</a>, <a href="#r10">R10</a>, and <a href="#r11">R11</a>.</li>
+        <li><strong>Campaign fit:</strong> Every candidate can become one daily post per <a href="#r1">R1</a>; the twenty-first day remains available for launch, recap, or the winning full cookbook.</li>
+        <li><strong>Safety:</strong> Every candidate satisfies <a href="#r6">R6</a>.</li>
+      </ul>
+
+      <h3 style="margin-top: 2.5rem;">Acceptance Examples</h3>
+      <ul class="acceptance-list">
+        <li id="ae1"><span class="id">AE1.</span> <strong>Covers R1, R2, R7.</strong> A reviewer opens the file, sees all 20 candidates in campaign order, and jumps directly to any full slide.</li>
+        <li id="ae2"><span class="id">AE2.</span> <strong>Covers R5, R6.</strong> The commit-message candidate generates reviewable prose but never invokes <code>git commit</code> or a shell with model output.</li>
+        <li id="ae3"><span class="id">AE3.</span> <strong>Covers R4.</strong> The Stickies candidate is visibly labeled macOS-only before the reader reaches its command sketch.</li>
+        <li id="ae4"><span class="id">AE4.</span> <strong>Covers R9, R10.</strong> Every non-interactive command supplies one input source and names either an alias or an explicit provider/model pair.</li>
+      </ul>
+    </section>
+
+    <section class="shell slide" id="scope-boundaries">
+      <p class="eyebrow">Keep the slate selectable</p>
+      <h2>Scope Boundaries</h2>
+      <div class="scope-grid">
+        <article class="scope-card">
+          <h3>In this plan</h3>
+          <p>Twenty recipe concepts, audience and platform labels, campaign hooks, truthful command sketches, selection rationale, and production caveats.</p>
+        </article>
+        <article class="scope-card deferred">
+          <h3>Deferred for later</h3>
+          <p>Winner selection, full tutorials, exact lazygit configuration, platform variants, screenshots, terminal recordings, and the permanent cookbook location.</p>
+        </article>
+        <article class="scope-card safety">
+          <h3>Outside this work</h3>
+          <p>Final Twitter/X or LinkedIn copy, publishing automation, engagement analytics, and recipes that execute generated commands without review.</p>
+        </article>
+      </div>
+
+      <h3 style="margin-top: 2.5rem;">Dependencies / Assumptions</h3>
+      <ul>
+        <li>The examples assume the reader has configured aliases such as <code>local</code> or <code>haiku</code>; full recipes must teach readers to substitute their own alias.</li>
+        <li>Platform-specific app and shell integrations require validation on their target operating system before publication.</li>
+        <li>Commands that include private text, filenames, code, or logs require provider-appropriate data handling and redaction guidance.</li>
+      </ul>
+    </section>
+
+    <section class="shell slide" id="sources">
+      <p class="eyebrow">Grounding</p>
+      <h2>Sources / Research</h2>
+      <ul class="source-list">
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/README.md"><code>README.md</code></a> — product promise, input contract, aliases, provider discovery, and stdout behavior.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/args.ts"><code>src/args.ts</code></a> — accepted non-interactive command shapes and provider/model selection constraints.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/io.ts"><code>src/io.ts</code></a> — exactly-one-input-source behavior.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/docs/demos/llm-now-demo.tape"><code>docs/demos/llm-now-demo.tape</code></a> — current local/cloud alias demonstration and error-explanation example.</li>
+      </ul>
+    </section>
+    </section>
+  </main>
+
+  <footer class="composition-signal">Composed 2026-07-26T18:44Z by ce-brainstorm from the confirmed cookbook campaign conversation and repository grounding.</footer>
+</body>
+</html>
