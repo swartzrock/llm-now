@@ -1623,21 +1623,33 @@ describe("API-key management", () => {
     return { ...app, ...fixture, sensitive, resolver };
   }
 
-  test("validates before one provider-scoped write, invalidates, and keeps all sentinels secret", async () => {
+  test("saves the provider key before offering an optional model shortcut", async () => {
     const candidate = "u4-add-candidate-sentinel";
     const events: string[] = [];
     const seen: Array<{ message: string; options: PromptOption[] }> = [];
     const confirmInitialValues: Array<boolean | undefined> = [];
+    const promptFlow: string[] = [];
+    const basePrompter = prompts({
+      choices: ["setup:manage-api-keys", "openai", true, "gpt-5"],
+      passwords: [candidate],
+      names: ["FAST"],
+      confirms: [true],
+      seen,
+      confirmInitialValues,
+    });
     const app = management({
       events,
-      prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "gpt-5"],
-        passwords: [candidate],
-        names: ["FAST"],
-        confirms: [true],
-        seen,
-        confirmInitialValues,
-      }),
+      prompter: {
+        ...basePrompter,
+        select: async (...args) => {
+          promptFlow.push(`select:${args[0]}`);
+          return basePrompter.select(...args);
+        },
+        confirm: async (...args) => {
+          promptFlow.push(`confirm:${args[0]}`);
+          return basePrompter.confirm(...args);
+        },
+      },
       runtime: runtime({
         providers: [],
         validateCredential: async (_provider, value) => {
@@ -1658,6 +1670,11 @@ describe("API-key management", () => {
       invalidations.push(provider);
       invalidate?.(provider);
     };
+    const writeStderr = app.stderr.write.bind(app.stderr);
+    app.stderr.write = (chunk, callback) => {
+      if (chunk.includes("API key verified")) promptFlow.push("receipt");
+      writeStderr(chunk, callback);
+    };
 
     expect(await runApplication(app.value)).toBe(0);
     expect(events).toEqual([
@@ -1669,6 +1686,20 @@ describe("API-key management", () => {
     expect(app.events.filter((event) => event === "set:openai")).toHaveLength(1);
     expect(invalidations).toEqual(["openai"]);
     expect(confirmInitialValues).toEqual([false]);
+    expect(promptFlow).toEqual([
+      "select:What would you like to set up?",
+      "select:Choose an API-key provider",
+      "confirm:Save this verified OpenAI API key?",
+      "receipt",
+      "select:Create a model shortcut now?",
+      "select:Choose a model for the shortcut",
+    ]);
+    expect(
+      seen.find((prompt) => prompt.message === "Create a model shortcut now?")?.options,
+    ).toEqual([
+      { value: false, label: "Not now" },
+      { value: true, label: "Choose a model…" },
+    ]);
     expect(app.stored()).toBe(candidate);
     const visible = `${app.stdout.text()}${app.stderr.text()}${seen.flatMap((item) => [item.message, ...item.options.map((option) => `${option.label}${option.hint ?? ""}`)]).join("\n")}`;
     expect(visible).not.toContain(candidate);
@@ -1681,7 +1712,7 @@ describe("API-key management", () => {
     let saved: { name: string; model: string | null } | undefined;
     const app = management({
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "safe-model"],
+        choices: ["setup:manage-api-keys", "openai", true, "safe-model"],
         passwords: [candidate],
         names: [candidate, "safe-alias"],
         confirms: [true],
@@ -1787,10 +1818,9 @@ describe("API-key management", () => {
         new Error(`backend included ${replacement}`),
       ),
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "replace", "qwen"],
+        choices: ["setup:manage-api-keys", "openai", "replace"],
         confirms: [true, true],
         passwords: [replacement],
-        names: [""],
       }),
       runtime: runtime({ providers: [] }),
     });
@@ -1953,10 +1983,9 @@ describe("API-key management", () => {
     const app = management({
       initial: old,
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "replace", "qwen"],
+        choices: ["setup:manage-api-keys", "openai", "replace", false],
         confirms: [true, true],
         passwords: [replacement],
-        names: [""],
       }),
       runtime: runtime({ providers: [] }),
     });
@@ -1997,9 +2026,8 @@ describe("API-key management", () => {
     for (const decision of [false, null] as const) {
       const app = management({
         prompter: prompts({
-          choices: ["setup:manage-api-keys", "openai", "qwen"],
+          choices: ["setup:manage-api-keys", "openai"],
           passwords: ["u4-final-decision-sentinel"],
-          names: [""],
           confirms: [decision],
         }),
         runtime: runtime({ providers: [] }),
@@ -2011,28 +2039,37 @@ describe("API-key management", () => {
     }
   });
 
-  test("cancelling optional alias decisions returns 130 before credential commit", async () => {
+  test("cancelling optional shortcut decisions keeps the committed provider credential", async () => {
     const candidate = "u4-alias-cancel-sentinel";
     const cases = [
       {
         prompter: prompts({
           choices: ["setup:manage-api-keys", "openai", null],
           passwords: [candidate],
+          confirms: [true],
         }),
       },
       {
         prompter: prompts({
-          choices: ["setup:manage-api-keys", "openai", "qwen"],
+          choices: ["setup:manage-api-keys", "openai", true, null],
+          passwords: [candidate],
+          confirms: [true],
+        }),
+      },
+      {
+        prompter: prompts({
+          choices: ["setup:manage-api-keys", "openai", true, "qwen"],
           passwords: [candidate],
           names: [null],
+          confirms: [true],
         }),
       },
       {
         prompter: prompts({
-          choices: ["setup:manage-api-keys", "openai", "qwen"],
+          choices: ["setup:manage-api-keys", "openai", true, "qwen"],
           passwords: [candidate],
           names: ["fast"],
-          confirms: [null],
+          confirms: [true, null],
         }),
         loadAliases: async () => ({
           version: 1 as const,
@@ -2047,10 +2084,10 @@ describe("API-key management", () => {
         loadAliases: testCase.loadAliases,
         runtime: runtime({ providers: [] }),
       });
-      expect(await runApplication(app.value)).toBe(130);
-      expect(app.events).toEqual(["get:openai"]);
-      expect(app.stored()).toBeNull();
-      expect(app.stderr.text()).not.toContain("API key verified");
+      expect(await runApplication(app.value)).toBe(0);
+      expect(app.events).toEqual(["get:openai", "set:openai"]);
+      expect(app.stored()).toBe(candidate);
+      expect(app.stderr.text()).toContain("API key verified");
     }
   });
 
@@ -2133,7 +2170,7 @@ describe("API-key management", () => {
     const candidate = "u4-partial-success-sentinel";
     const promptEvents: string[] = [];
     const base = prompts({
-      choices: ["setup:manage-api-keys", "openai", "qwen"],
+      choices: ["setup:manage-api-keys", "openai", true, "qwen"],
       passwords: [candidate],
       names: ["fast"],
       confirms: [true],
@@ -2162,11 +2199,11 @@ describe("API-key management", () => {
     expect(app.stderr.text()).not.toContain(candidate);
   });
 
-  test("preflights alias overwrite before final consent and reuses that decision without a post-commit prompt", async () => {
+  test("confirms alias overwrite after saving the provider credential", async () => {
     const confirmMessages: string[] = [];
     const app = management({
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "qwen"],
+        choices: ["setup:manage-api-keys", "openai", true, "qwen"],
         passwords: ["u4-alias-preflight-sentinel"],
         names: ["FAST"],
         confirms: [true, true],
@@ -2189,8 +2226,8 @@ describe("API-key management", () => {
 
     expect(await runApplication(app.value)).toBe(0);
     expect(confirmMessages).toHaveLength(2);
-    expect(confirmMessages[0]).toContain("Overwrite alias fast?");
-    expect(confirmMessages[1]).toContain("Save this verified OpenAI API key and alias fast?");
+    expect(confirmMessages[0]).toBe("Save this verified OpenAI API key?");
+    expect(confirmMessages[1]).toContain("Overwrite alias fast?");
     expect(app.events).toEqual(["get:openai", "set:openai"]);
   });
 
@@ -2262,9 +2299,8 @@ describe("API-key management", () => {
       stderrTty: true,
       runtime: { value: gateway, calls: { discover: 0, list: 0, generate: 0 } },
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "gpt-5"],
+        choices: ["setup:manage-api-keys", "openai", false],
         passwords: [candidate],
-        names: [""],
         confirms: [true],
       }),
       credentialVault: fixture.vault,

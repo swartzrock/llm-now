@@ -186,11 +186,20 @@ function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
 function selectedCredentialModel(
   value: string | number | boolean | null,
   models: readonly ByokModelOption[],
-): string | false | null {
+): string | null {
   if (value === null) return null;
-  if (value === false) return false;
   if (typeof value !== "string" || !models.some((model) => model.id === value)) {
     throw new RangeError("Prompter returned an invalid credential model choice.");
+  }
+  return value;
+}
+
+function selectedShortcutChoice(
+  value: string | number | boolean | null,
+): boolean | null {
+  if (value === null) return null;
+  if (typeof value !== "boolean") {
+    throw new RangeError("Prompter returned an invalid model shortcut choice.");
   }
   return value;
 }
@@ -207,17 +216,25 @@ async function prepareCredentialAlias(
   provider: ByokCloudProviderId,
   models: readonly ByokModelOption[],
   diagnostic: (text: string) => void,
-): Promise<PendingAlias | null | 130> {
+): Promise<PendingAlias | null> {
   const safeModels = models.filter((model) =>
     sanitizePromptText(model.id) === model.id
     && deps.sensitive.redact(model.id) === model.id
   );
   if (safeModels.length === 0) {
     diagnostic(
-      `model-list (${provider}): provider returned ${models.length === 0 ? "no models" : "no alias-safe models"}; the API key can still be saved without an alias.`,
+      `model-list (${provider}): provider returned ${models.length === 0 ? "no models" : "no alias-safe models"}; the API key was saved without an alias.`,
     );
     return null;
   }
+
+  const createShortcut = selectedShortcutChoice(
+    await deps.prompter.select("Create a model shortcut now?", [
+      { value: false, label: "Not now" },
+      { value: true, label: "Choose a model…" },
+    ]),
+  );
+  if (createShortcut !== true) return null;
 
   const modelOptions = sortPromptOptions(safeModels.map((model) => {
     const id = deps.sensitive.redact(sanitizePromptText(model.id));
@@ -229,18 +246,14 @@ async function prepareCredentialAlias(
     };
   }));
   const model = selectedCredentialModel(
-    await deps.prompter.select("Choose a model for an optional alias", [
-      ...modelOptions,
-      { value: false, label: "Skip alias" },
-    ]),
+    await deps.prompter.select("Choose a model for the shortcut", modelOptions),
     safeModels,
   );
-  if (model === null) return 130;
-  if (model === false) return null;
+  if (model === null) return null;
   const selection = { provider, model } satisfies AliasRecord;
 
   while (true) {
-    const name = await deps.prompter.input("Enter an optional alias name (Enter to skip)", {
+    const name = await deps.prompter.input("Name this model shortcut (Enter to skip)", {
       validate: (value) => {
         if (value === undefined || value === "") return undefined;
         if (deps.sensitive.redact(value) !== value) return "Alias names must not contain an API key.";
@@ -249,7 +262,7 @@ async function prepareCredentialAlias(
           : "Use 1-64 ASCII letters, numbers, hyphens, or underscores.";
       },
     });
-    if (name === null) return 130;
+    if (name === null) return null;
     if (name === "") return null;
     if (deps.sensitive.redact(name) !== name) {
       diagnostic("config: alias names must not contain an API key.");
@@ -267,7 +280,7 @@ async function prepareCredentialAlias(
         `Overwrite alias ${canonicalName}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, selection)}`,
         { initialValue: false },
       );
-      if (overwrite === null) return 130;
+      if (overwrite === null) return null;
       if (!overwrite) continue;
     }
     return { name: canonicalName, selection, expectedCurrent: current };
@@ -532,11 +545,9 @@ async function runCredentialManagement(
     "model-list",
     provider,
   );
-  const pendingAlias = await prepareCredentialAlias(deps, aliases, provider, models, diagnostic);
-  if (pendingAlias === 130) return 130;
 
   const save = await deps.prompter.confirm(
-    `Save this verified ${providerLabel(provider)} API key${pendingAlias === null ? "" : ` and alias ${pendingAlias.name}`}?`,
+    `Save this verified ${providerLabel(provider)} API key?`,
     { initialValue: false },
   );
   if (save === null) return 130;
@@ -550,6 +561,7 @@ async function runCredentialManagement(
     + "  stored as: saved credential\n",
   );
 
+  const pendingAlias = await prepareCredentialAlias(deps, aliases, provider, models, diagnostic);
   if (pendingAlias === null) return 0;
   try {
     const saveAlias = deps.saveAlias ?? saveStoredAlias;

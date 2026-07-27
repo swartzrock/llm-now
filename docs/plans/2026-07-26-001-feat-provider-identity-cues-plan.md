@@ -26,7 +26,7 @@ deepened: 2026-07-26
 
 ### Summary
 
-Extend the existing Clack provider choices with focused connection-type hints and replace the plain saved-key message with a compact, terminal-safe provider identity receipt after successful credential persistence.
+Extend the existing Clack provider choices with focused connection-type hints, replace the plain saved-key message with a compact terminal-safe provider identity receipt after successful credential persistence, and offer model-alias creation only as a separate post-save action.
 
 ### Problem Frame
 
@@ -51,11 +51,13 @@ The current UI is an ANSI-cell Clack flow on stderr, so literal SVG or emulator-
 
 - R6. Provider identity remains understandable as plain text without color, emoji, vendor artwork, terminal-image protocols, or fixed alignment.
 - R7. New provider cues render only on the interactive stderr surface and never expose API-key material or alter generated-response stdout.
+- R8. API-key consent and persistence remain provider-scoped; model selection is offered only afterward for an optional alias, and skipping or cancelling that follow-up preserves the saved credential.
 
 ### Key Decisions
 
 - **A+B hybrid.** Use focused-row provider hints plus one compact credential transition receipt. (session-settled: user-directed — chosen over a persistent provider header: the hybrid preserves orientation at decision and confirmation points without repeating vendor-heavy UI.) Governs R1-R5.
 - **Terminal-native identity.** Use canonical provider text and connection state rather than vendor SVGs or terminal image protocols. (session-settled: user-approved — chosen over literal SVG or bitmap logo rendering: the current Clack surface is portable ANSI-cell output and image protocols would require disproportionate detection, placement, packaging, and fallback work.) Governs R6-R7.
+- **Provider credential before model shortcut.** Save and confirm the provider-scoped API key before offering model selection for an optional alias. (session-settled: user-directed — chosen over the combined pre-save key-and-model flow: one provider credential can serve many models, so the UI should not imply that the key is model-bound.) Governs R8.
 
 ### Acceptance Examples
 
@@ -64,6 +66,7 @@ The current UI is an ANSI-cell Clack flow on stderr, so literal SVG or emulator-
 - AE3. Given a candidate key that validates and is saved for Anthropic, when persistence completes, then stderr contains an Anthropic receipt with `API key verified` and `stored as: saved credential`, stdout remains empty, and the candidate is absent from all visible output.
 - AE4. Given a candidate key that validates but the user declines saving, when credential management exits, then no saved-credential receipt is emitted.
 - AE5. Given an environment credential already takes precedence, when a different verified key is persisted to the vault, then the receipt confirms only the saved record and does not claim active runtime provenance or expose either credential.
+- AE6. Given a verified provider key and available models, when persistence succeeds, then the receipt appears before an optional `Create a model shortcut now?` choice; choosing `Not now` or cancelling leaves the provider credential saved without an alias.
 
 ### Scope Boundaries
 
@@ -86,7 +89,7 @@ The current UI is an ANSI-cell Clack flow on stderr, so literal SVG or emulator-
 
 - KTD1. **Central connection-class metadata.** Extend the canonical provider identity seam in `src/prompts.ts` with one terminal-safe connection-class hint per provider, then reuse it at every provider-option construction site. (session-settled: user-directed — chosen over bare provider rows: focused hints distinguish API-key, CLI, and local connections inside the existing Clack interaction model.) Implements R1-R3.
 - KTD2. **Context owns availability wording.** The shared metadata contains only the stable connection class; discovery-backed pickers add `available`, while the static key-management picker does not. `Available` means present in the successful discovery snapshot that built the current picker, not that model listing or generation has succeeded.
-- KTD3. **Receipt follows successful persistence.** Replace the generic saved-key sentence with `◆ <Provider> · API key verified` followed by `  stored as: saved credential` after the vault write and resolver invalidation succeed. ANSI styling is supplemental and must strip to this exact two-line template. This keeps `saved credential` truthful and leaves validation, cancellation, and error branches unchanged. (session-settled: user-directed — chosen over a persistent provider header: a one-shot transition card confirms meaningful state without carrying branding through every later prompt.) Implements R4-R7.
+- KTD3. **Receipt follows successful persistence.** Replace the generic saved-key sentence with `◆ <Provider> · API key verified` followed by `  stored as: saved credential` after the vault write and resolver invalidation succeed, then offer model selection only as an optional alias follow-up. ANSI styling is supplemental and must strip to this exact two-line template. This keeps `saved credential` truthful, makes the provider-scoped commit boundary visible, and leaves validation, pre-save cancellation, and error branches unchanged. (session-settled: user-directed — chosen over a persistent provider header and a combined key-and-model save: a one-shot transition card confirms meaningful state without carrying branding through every later prompt or implying that the credential is model-bound.) Implements R4-R8.
 
 ### High-Level Technical Design
 
@@ -113,6 +116,7 @@ sequenceDiagram
 - The identity receipt replaces the existing `Saved the <Provider> API key.` line instead of adding a second success message.
 - `stored as: saved credential` describes the record just persisted, not the credential source a later generation will resolve; it is shown only after `vault.set` and resolver invalidation complete.
 - Receipt content comes only from canonical provider identity plus fixed literals, never candidate values, environment names, runtime model metadata, resolver output, or vault error text.
+- The optional model shortcut flow begins only after the receipt; cancellation after that boundary exits successfully because the provider credential is already committed.
 - Existing Picocolors capability checks remain the only styling gate, so `NO_COLOR` and `TERM=dumb` preserve the exact receipt words without ANSI sequences; non-TTY setup remains unreachable under the existing application-level interactivity gate.
 
 ### Delivery Phase
@@ -145,13 +149,13 @@ One phase delivers the complete A+B hybrid: provider connection hints first, fol
 ### U2. Render the saved credential identity receipt
 
 - **Goal:** Confirm a verified and persisted API key with a compact provider-aware receipt.
-- **Requirements:** R4-R7; covers AE3-AE5; implements KTD3.
+- **Requirements:** R4-R8; covers AE3-AE6; implements KTD3.
 - **Dependencies:** U1.
 - **Files:** `src/app.ts`, `tests/app.test.ts`.
 - **Approach:**
   1. Replace the current saved-key sentence after successful vault persistence with the exact KTD3 two-line template using only the canonical provider label, fixed receipt copy, and existing terminal colors.
   2. Keep the source line indented and textual so it remains meaningful without color or special alignment.
-  3. Preserve the current ordering of credential persistence, resolver invalidation, optional alias persistence, and diagnostics.
+  3. Ask for provider-scoped save consent, persist and confirm the key, then offer model selection and alias naming as a separate optional follow-up.
 - **Execution note:** Strengthen the existing credential-management tests before changing the success output so failure and cancellation branches remain characterized.
 - **Patterns to follow:** Alias-save status output in `offerAliasSave`, `createTerminalColors`, secret-sentinel assertions, and the event-order assertions in credential-management tests.
 - **Test scenarios:**
@@ -162,6 +166,7 @@ One phase delivers the complete A+B hybrid: provider connection hints first, fol
   5. Replacing an existing key emits exactly one receipt after the successful replacement and exposes neither old nor replacement credential.
   6. An optional alias write failure after key persistence leaves the one saved-credential receipt intact, then emits the existing partial-success diagnostic.
   7. Covers AE5. An active environment credential does not change the saved-record receipt or leak environment names or values.
+  8. Covers AE6. The receipt precedes the model-shortcut prompt, and skipping or cancelling any optional shortcut step leaves the committed provider credential intact.
 - **Verification:** Credential-management tests prove the receipt trigger, ordering, secret safety, plain-text fallback, and unchanged failure behavior.
 
 ---
@@ -184,4 +189,5 @@ One phase delivers the complete A+B hybrid: provider connection hints first, fol
 - U2 is complete when successful API-key persistence renders one compact, provider-aware stderr receipt and all branches without successful API-key persistence remain receipt-free.
 - The Anthropic and Claude CLI distinction is covered by automated tests.
 - Plain-text fallback, stdout purity, and credential secrecy are covered by automated tests.
+- Model selection is visibly optional and occurs only after provider credential persistence succeeds.
 - The full repository check passes with no new dependency, runtime asset, custom renderer, or abandoned experimental code in the diff.
