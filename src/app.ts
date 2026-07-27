@@ -36,10 +36,10 @@ import {
   cloudCredentialProviderOptions,
   createSearchablePrompter,
   createTerminalColors,
+  discoveredProviderOptions,
   formatAliasInventory,
   formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
-  providerConnectionHint,
   providerLabel,
   selectAliasOrFresh,
   selectProviderAndModel,
@@ -616,11 +616,7 @@ async function runSetup(
       diagnostic(NO_PROVIDER_DIAGNOSTIC);
       return 1;
     }
-    const providerOptions = sortPromptOptions(providers.map((provider) => ({
-      value: provider,
-      label: providerLabel(provider),
-      hint: `${providerConnectionHint(provider)} · available`,
-    })));
+    const providerOptions = discoveredProviderOptions(providers);
     const provider = await deps.prompter.select("Choose an available provider", providerOptions);
     if (provider === null) return 130;
     if (typeof provider !== "string" || !providers.includes(provider as ByokProviderId)) {
