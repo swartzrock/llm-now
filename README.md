@@ -60,6 +60,7 @@ If you have saved aliases, an interactive call offers those first. Choose “Sel
 Use a saved global alias:
 
 ```bash
+llm-now daily
 llm-now daily --input "Summarize this idea"
 printf 'Explain this diff' | llm-now daily
 ```
@@ -86,6 +87,11 @@ stderr. Inventory returns before prompt handling, provider discovery or runtime
 calls, credential access, and alias mutation. The bare word `aliases` remains a
 positional alias and generates normally when that alias is configured.
 
+In a terminal, the alias-only form shows the resolved alias, provider, and model,
+asks for one prompt, generates once, and exits. A delegated model is labeled
+`default model`; a pinned alias shows its model ID. Blank input stays at the
+prompt, while Escape or Ctrl-C cancels.
+
 Alias names are ASCII case-insensitive but spelling-exact: `daily`, `Daily`, and
 `DAILY` select the same alias, while `dailly` does not. Aliases are stored and
 displayed in lowercase. Options may appear before or after the alias, though the alias-first form above is recommended. The explicit
@@ -99,7 +105,7 @@ llm-now --input "Hello" --provider ollama --model llama3
 printf 'Hello' | llm-now --provider claude-cli --model default
 ```
 
-Exactly one prompt source is required: `--input` or stdin. Non-interactive calls require a positional alias, `--alias`, or both `--provider` and `--model`. A second positional argument is never treated as prompt text. Successful generation writes the model response, byte-for-byte, to stdout. Interactive UI and diagnostics use stderr, so the response remains safe to redirect or pipe. After an interactive response, stderr resets terminal styling and adds a clean visual boundary without changing stdout.
+For scripts and non-interactive calls, exactly one prompt source is required: `--input` or stdin. Non-interactive calls require a positional alias, `--alias`, or both `--provider` and `--model`. A second positional argument is never treated as prompt text. Successful generation writes the model response, byte-for-byte, to stdout. Interactive UI and diagnostics use stderr, so the response remains safe to redirect or pipe. After an interactive response, stderr resets terminal styling and adds a clean visual boundary without changing stdout.
 
 ## Aliases and configuration
 

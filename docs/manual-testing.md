@@ -267,6 +267,15 @@ First run an interactive call with no explicit selection. Confirm that the sorte
 
 ```bash
 cd /
+rm -f stdout.txt stderr.txt
+"$BIN" daily >stdout.txt
+```
+
+The terminal must show `Prompt for daily · PROVIDER · MODEL`, using `default model` only when the alias has no pinned model. Submit whitespace first and confirm validation keeps the field open, then enter `Summarize the idea of gravity.`. The command must generate exactly once, exit `0`, and leave `stdout.txt` containing only the response even though stdout was redirected. Repeat the alias-only command with Escape and Ctrl-C; each cancellation must exit `130`, generate nothing, and leave stdout empty.
+
+Then verify deterministic reuse:
+
+```bash
 printf 'Summarize the idea of gravity.' |
   "$BIN" daily >stdout.txt 2>stderr.txt
 ```
@@ -278,7 +287,9 @@ working directory, write only the response to stdout, and skip the alias-save pr
 with `Daily` and `DAILY`; both must resolve the same lowercase `daily` record. A misspelling
 such as `dailly` must fail instead of selecting `daily`. Also
 verify that aliases named `help`, `version`, and `run` work when supplied as bare positional
-names; only `--help` and `--version` select those standalone modes.
+names; only `--help` and `--version` select those standalone modes. Finally, run an explicit
+provider/model selection without `--input` and confirm it retains the usage error instead of
+opening the alias-only prompt.
 
 ### MT-13: List configured aliases
 

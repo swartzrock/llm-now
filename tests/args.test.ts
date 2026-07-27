@@ -21,12 +21,14 @@ Usage:
   llm-now
   llm-now --aliases
   llm-now --input <text>
+  llm-now <alias>
   llm-now <alias> --input <text>
   llm-now --provider <id> --model <id|default> --input <text>
 
 Rules:
   Run llm-now with no arguments in a terminal to set up providers and API keys.
-  Input comes from exactly one of --input or stdin.
+  A terminal alias with no input source asks for one prompt.
+  Otherwise, input comes from exactly one of --input or stdin.
   Omit selection for interactive choice; otherwise use an alias or provider/model.
   Model "default" is available only for codex-cli and claude-cli.
 
