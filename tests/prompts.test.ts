@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ByokModelOption, ByokProviderId } from "@swartzrock/byok-runtime";
 import { PassThrough } from "node:stream";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
+import { promptValidationMessage } from "../src/io.ts";
 import {
   createSearchablePrompter,
   createTerminalColors,
@@ -304,6 +305,36 @@ describe("terminal provider and model selection", () => {
     setTimeout(() => input.write("\r"), 1);
     expect(await entered).toBe("");
   });
+
+  test("real Clack text input keeps blank validation active until submission", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let rendered = "";
+    output.on("data", (chunk) => rendered += chunk.toString());
+    const entered = createSearchablePrompter(input, output).input("Prompt", {
+      validate: promptValidationMessage,
+    });
+    setTimeout(() => input.write("\r"), 1);
+    setTimeout(() => input.write("  exact prompt  \r"), 10);
+
+    expect(await entered).toBe("  exact prompt  ");
+    expect(stripTerminalSequences(rendered)).toContain("prompt must not be blank.");
+  });
+
+  for (const [name, key] of [
+    ["Ctrl-C", "\u0003"],
+    ["Escape", "\u001b"],
+  ] as const) {
+    test(`real Clack text input normalizes ${name} cancellation`, async () => {
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const entered = createSearchablePrompter(input, output).input("Prompt", {
+        validate: promptValidationMessage,
+      });
+      setTimeout(() => input.write(key), 1);
+      expect(await entered).toBeNull();
+    });
+  }
 
   test("validates hidden credential candidates without transforming opaque values", () => {
     expect(validateCredentialCandidate("opaque-key value")).toBeUndefined();

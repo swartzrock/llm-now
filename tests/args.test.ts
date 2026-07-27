@@ -8,7 +8,11 @@ import {
   renderHelpText,
   requireDeterministicSelection,
 } from "../src/args.ts";
-import { isInteractive, resolvePrompt } from "../src/io.ts";
+import {
+  isInteractive,
+  promptValidationMessage,
+  resolvePrompt,
+} from "../src/io.ts";
 import { stripTerminalSequences } from "../src/prompts.ts";
 
 const APPROVED_HELP_TEXT = `A tiny CLI to send text-generation prompts to the models you already run.
@@ -143,6 +147,13 @@ describe("arguments and input", () => {
     await expect(resolvePrompt(" \n ", input("", true))).rejects.toThrow(
       "prompt must not be blank",
     );
+  });
+
+  test("shares blank validation without transforming accepted prompt text", () => {
+    for (const value of [undefined, "", " \n "]) {
+      expect(promptValidationMessage(value)).toBe("prompt must not be blank.");
+    }
+    expect(promptValidationMessage("  exact prompt  ")).toBeUndefined();
   });
 
   test("rejects invalid UTF-8 from stdin", async () => {

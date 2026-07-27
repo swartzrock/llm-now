@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>llm-now no-input launcher experience — ideation</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080c0f;
+      --surface: #10171c;
+      --surface-2: #162027;
+      --surface-3: #1c2931;
+      --text: #edf4ef;
+      --muted: #aebcb5;
+      --faint: #74867d;
+      --green: #b5f26c;
+      --green-soft: #203319;
+      --green-text: #d8ffad;
+      --cyan: #83d8d4;
+      --cyan-soft: #143334;
+      --cyan-text: #b9f4ef;
+      --amber: #f4c768;
+      --amber-soft: #3a2c14;
+      --amber-text: #ffe0a0;
+      --red-soft: #3d2025;
+      --red-text: #ffc6cd;
+      --border: #2a3941;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --shadow: 0 24px 80px rgba(0, 0, 0, .34);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 12% -10%, rgba(181, 242, 108, .11), transparent 32rem),
+        radial-gradient(circle at 95% 15%, rgba(131, 216, 212, .08), transparent 28rem),
+        var(--bg);
+      color: var(--text);
+      font: 15px/1.65 var(--sans);
+    }
+
+    a { color: var(--cyan); text-underline-offset: .18em; }
+    a:hover { color: var(--cyan-text); }
+    code, pre, .mono { font-family: var(--mono); }
+    code {
+      padding: .12rem .34rem;
+      border: 1px solid var(--border);
+      border-radius: .35rem;
+      background: #091015;
+      color: #dcebe3;
+      font-size: .92em;
+    }
+    strong { color: inherit; }
+    p { max-width: 74ch; }
+
+    .page {
+      width: min(94vw, 980px);
+      margin: 0 auto;
+      padding: 4rem 0 5rem;
+    }
+
+    .hero {
+      padding: clamp(1.5rem, 4vw, 2.7rem);
+      border: 1px solid var(--border);
+      border-radius: 1.35rem;
+      background: linear-gradient(145deg, rgba(24, 35, 42, .98), rgba(12, 19, 23, .98));
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin: 0 0 .6rem;
+      color: var(--green);
+      font: 750 .74rem/1.2 var(--mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 {
+      margin-top: 0;
+      line-height: 1.17;
+      letter-spacing: -.025em;
+    }
+    h1 {
+      max-width: 18ch;
+      margin-bottom: 1rem;
+      font-size: clamp(2.2rem, 6vw, 4.2rem);
+    }
+    h2 { margin-bottom: 1rem; font-size: clamp(1.55rem, 3vw, 2.2rem); }
+    h3 { margin-bottom: .6rem; font-size: 1.35rem; }
+    .lede { max-width: 68ch; color: #cedbd5; font-size: 1.08rem; }
+
+    .metadata, .stats, .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .65rem;
+    }
+    .metadata { margin-top: 1.5rem; }
+    .metadata span, .stat, .chip {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-2);
+    }
+    .metadata span {
+      padding: .42rem .72rem;
+      color: var(--muted);
+      font-size: .82rem;
+    }
+    .metadata b { color: var(--text); font-weight: 680; }
+    .stats { margin: 1rem 0 2.8rem; }
+    .stat { min-width: 9rem; padding: .8rem 1rem; }
+    .stat strong { display: block; font: 760 1.4rem/1 var(--mono); }
+    .stat span {
+      display: block;
+      margin-top: .4rem;
+      color: var(--muted);
+      font-size: .73rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    nav.toc, .jump-list {
+      margin: 1.2rem 0 0;
+      padding: 1rem 1.2rem;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: rgba(16, 23, 28, .82);
+    }
+    nav.toc ul, .jump-list ol {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem 1.15rem;
+      margin: .4rem 0 0;
+      padding-left: 1.2rem;
+    }
+    nav.toc a, .jump-list a { color: var(--muted); text-decoration: none; }
+    nav.toc a:hover, .jump-list a:hover { color: var(--text); }
+
+    section { margin-top: 4rem; scroll-margin-top: 1.5rem; }
+    .section-intro { color: var(--muted); }
+    .recommendation {
+      margin-top: 1.2rem;
+      padding: 1.15rem 1.25rem;
+      border: 1px solid #47632e;
+      border-radius: 1rem;
+      background: var(--green-soft);
+      color: var(--green-text);
+    }
+    .recommendation .eyebrow { color: var(--green-text); }
+    .recommendation p:last-child { margin-bottom: 0; }
+
+    .grounding-grid, .axis-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+    .grounding-card, .axis-list li {
+      padding: 1.05rem 1.15rem;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: var(--surface);
+    }
+    .grounding-card h3 { font-size: 1rem; letter-spacing: 0; }
+    .grounding-card p { margin-bottom: 0; color: var(--muted); }
+    .axis-list { margin-top: 1.2rem; padding: 0; list-style: none; }
+    .axis-list li { min-height: 5rem; }
+    .axis-list b {
+      display: block;
+      margin-bottom: .25rem;
+      color: var(--green);
+      font: 740 .74rem/1.2 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .idea {
+      margin-top: 1.35rem;
+      padding: 1.4rem;
+      border: 1px solid var(--border);
+      border-radius: 1.1rem;
+      background: linear-gradient(155deg, rgba(24, 35, 42, .97), rgba(14, 21, 26, .97));
+      box-shadow: 0 10px 35px rgba(0, 0, 0, .18);
+      scroll-margin-top: 1.5rem;
+    }
+    .idea:first-of-type { border-color: #47632e; }
+    .idea-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .rank {
+      margin: 0 0 .45rem;
+      color: var(--green);
+      font: 750 .75rem/1 var(--mono);
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .chip-row { justify-content: flex-end; }
+    .chip {
+      padding: .36rem .62rem;
+      color: var(--muted);
+      font: 650 .72rem/1 var(--mono);
+      white-space: nowrap;
+    }
+    .chip.high {
+      border-color: #47632e;
+      background: var(--green-soft);
+      color: var(--green-text);
+    }
+    .chip.med {
+      border-color: #6a5226;
+      background: var(--amber-soft);
+      color: var(--amber-text);
+    }
+    .chip.axis {
+      border-color: #2e5d5f;
+      background: var(--cyan-soft);
+      color: var(--cyan-text);
+    }
+    .idea > p { color: #d7e2dd; }
+    .idea dl {
+      display: grid;
+      grid-template-columns: 7.5rem 1fr;
+      gap: .75rem 1rem;
+      margin: 1.1rem 0 0;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    .idea dt {
+      color: var(--faint);
+      font: 730 .72rem/1.45 var(--mono);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .idea dd { margin: 0; color: #d4dfda; }
+
+    .diagram {
+      margin: 1.2rem 0 .35rem;
+      padding: 1rem;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: #0b1216;
+    }
+    .diagram svg { display: block; min-width: 700px; width: 100%; height: auto; }
+    .diagram text { font-family: var(--mono); }
+    .diagram .box { fill: var(--surface-2); stroke: #40515a; stroke-width: 1.5; }
+    .diagram .primary { fill: var(--green-soft); stroke: #5d7b3f; stroke-width: 1.5; }
+    .diagram .secondary { fill: var(--cyan-soft); stroke: #347276; stroke-width: 1.5; }
+    .diagram .warning { fill: var(--amber-soft); stroke: #78602d; stroke-width: 1.5; }
+    .diagram .line { fill: none; stroke: #70868c; stroke-width: 1.5; }
+    .diagram .label { fill: var(--text); font-size: 14px; font-weight: 700; }
+    .diagram .sub { fill: var(--muted); font-size: 12px; }
+    .caption { margin: .65rem 0 0; color: var(--faint); font-size: .82rem; }
+
+    .terminal-compare {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: .9rem;
+      margin-top: 1.1rem;
+    }
+    .terminal {
+      margin: 0;
+      padding: 1rem;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: .85rem;
+      background: #070b0d;
+      color: #dae6e0;
+      font-size: .84rem;
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+    .terminal .dim { color: #7d9187; }
+    .terminal .hot { color: var(--green); }
+    .terminal .cyan { color: var(--cyan); }
+
+    .table-wrap {
+      max-height: 38rem;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: var(--surface);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td {
+      padding: .72rem .75rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      background: var(--surface-2);
+      color: var(--text);
+      font: 730 .71rem/1.2 var(--mono);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    td:first-child { width: 3.25rem; color: var(--faint); font-family: var(--mono); }
+    td:nth-child(2) { width: 34%; color: #e2ece7; font-weight: 630; }
+    td:nth-child(3) { color: var(--muted); }
+    .refs { padding-left: 1.2rem; }
+    .refs li { margin: .55rem 0; color: var(--muted); }
+
+    footer {
+      margin-top: 4rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      color: var(--faint);
+      font-size: .78rem;
+    }
+
+    @media (max-width: 720px) {
+      .page { width: min(92vw, 980px); padding-top: 2rem; }
+      .hero { padding: 1.35rem; }
+      .grounding-grid, .axis-list, .terminal-compare { grid-template-columns: 1fr; }
+      .idea-head { display: block; }
+      .chip-row { justify-content: flex-start; margin-bottom: .8rem; }
+      .idea dl { grid-template-columns: 1fr; gap: .25rem; }
+      .idea dd { margin-bottom: .65rem; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Ideation · terminal entry experience</p>
+      <h1>Make bare <code>llm-now</code> feel like a launchpad</h1>
+      <p class="lede">The current no-input screen asks users what they want to “set up,” then mixes runnable shortcuts with provider discovery and credential administration. The better organizing principle is intent: help people start work, choose something new, or deliberately enter management.</p>
+      <div class="metadata" aria-label="Document metadata">
+        <span><b>Date</b> <time datetime="2026-07-27">2026-07-27</time></span>
+        <span><b>Topic</b> no-input-launcher-experience</span>
+        <span><b>Focus</b> guide users through aliases, provider discovery, and commands</span>
+        <span><b>Mode</b> repo-grounded</span>
+      </div>
+      <nav class="toc" aria-label="Document sections">
+        <p class="eyebrow">Navigate</p>
+        <ul>
+          <li><a href="#codebase-context">Codebase Context</a></li>
+          <li><a href="#topic-axes">Topic Axes</a></li>
+          <li><a href="#ranked-ideas">Ranked Ideas</a></li>
+          <li><a href="#rejection-summary">Rejection Summary</a></li>
+          <li><a href="#references">Sources &amp; References</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <div class="stats" aria-label="Ideation counts">
+      <div class="stat"><strong>44</strong><span>raw ideas</span></div>
+      <div class="stat"><strong>20</strong><span>consolidated</span></div>
+      <div class="stat"><strong>7</strong><span>survivors</span></div>
+      <div class="stat"><strong>4</strong><span>topic axes</span></div>
+    </div>
+
+    <section id="codebase-context">
+      <p class="eyebrow">Grounding</p>
+      <h2>Codebase Context</h2>
+      <p class="section-intro">The existing product already contains most of the interaction pieces needed for a stronger entry experience. The problem is primarily how the bare command routes and frames them.</p>
+      <div class="grounding-grid">
+        <article class="grounding-card">
+          <h3>The root mixes unlike things</h3>
+          <p><code>runSetup</code> alphabetizes saved aliases, then appends provider discovery and API-key management to the same autocomplete under “What would you like to set up?”</p>
+        </article>
+        <article class="grounding-card">
+          <h3>Selections stop too early</h3>
+          <p>An alias selection prints a second command and exits. Discovery selects only a provider, then returns a template with <code>--model &lt;id&gt;</code>.</p>
+        </article>
+        <article class="grounding-card">
+          <h3>The complete flow already exists</h3>
+          <p>Prompt-bearing interaction already offers aliases first, supports provider/model selection, generates, optionally saves a shortcut, and prints reuse guidance.</p>
+        </article>
+        <article class="grounding-card">
+          <h3>The terminal contract is strong</h3>
+          <p>Prompts and guidance stay on stderr while the model response stays on stdout. Discovery is passive, cancellation exits 130, and credentials never belong in selectable UI data.</p>
+        </article>
+      </div>
+      <div class="recommendation">
+        <p class="eyebrow">Recommendation</p>
+        <p><strong>Use Idea 1 as the information architecture, and Idea 2 as the behavioral contract.</strong> In plain terms: show an adaptive work-versus-management home, then ensure every successful branch finishes the task before teaching the reusable command.</p>
+      </div>
+    </section>
+
+    <section id="topic-axes">
+      <p class="eyebrow">Decomposition</p>
+      <h2>Topic Axes</h2>
+      <ul class="axis-list">
+        <li><b>Intent hierarchy</b>Everyday use of saved targets versus administrative setup.</li>
+        <li><b>User state</b>First-run or unconfigured versus returning and configured.</li>
+        <li><b>Choice presentation</b>Labels, hints, grouping, search, and progressive disclosure.</li>
+        <li><b>Selection outcome</b>Whether a choice acts, guides, previews, or forces another invocation.</li>
+      </ul>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">Seven directions survived critique</p>
+      <h2>Ranked Ideas</h2>
+      <p class="section-intro">These are ranked by groundedness, expected value, leverage, pragmatism, and coverage across the four axes. They are composable unless a card explicitly presents an alternative interaction order.</p>
+      <nav class="jump-list" aria-label="Ranked idea jump list">
+        <p class="eyebrow">Jump to an idea</p>
+        <ol>
+          <li><a href="#idea-1">Adaptive two-door home</a></li>
+          <li><a href="#idea-2">One invocation, then teach</a></li>
+          <li><a href="#idea-3">First useful result onboarding</a></li>
+          <li><a href="#idea-4">Prompt-first launcher</a></li>
+          <li><a href="#idea-5">Dedicated setup entrance</a></li>
+          <li><a href="#idea-6">Hundred-shortcut palette</a></li>
+          <li><a href="#idea-7">Readiness telemetry</a></li>
+        </ol>
+      </nav>
+
+      <article class="idea" id="idea-1">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 1 · recommended</p>
+            <h3>Adaptive two-door home</h3>
+          </div>
+          <div class="chip-row" aria-label="Idea 1 attributes">
+            <span class="chip high">Confidence 92%</span>
+            <span class="chip">Complexity Medium</span>
+            <span class="chip axis">State · intent · presentation</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Preserve two stable concepts—work and management—while changing their emphasis using already-known state. A returning user sees “Run with a saved shortcut” first and “Manage connections and shortcuts” second. A user with no shortcuts sees “Choose a model to use” first and “Connect or manage providers” second. Each route opens a homogeneous searchable picker; provider discovery runs only after the user chooses a route that needs it.</p>
+        <div class="diagram" role="img" aria-label="Conceptual flow from known launcher state to a work or management route">
+          <svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrow-1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#70868c"/>
+              </marker>
+            </defs>
+            <rect class="box" x="30" y="102" rx="14" width="170" height="92"/>
+            <text class="label" x="115" y="137" text-anchor="middle">bare llm-now</text>
+            <text class="sub" x="115" y="163" text-anchor="middle">read alias state</text>
+            <line class="line" x1="200" y1="148" x2="300" y2="148" marker-end="url(#arrow-1)"/>
+            <path class="secondary" d="M390 68 L482 148 L390 228 L298 148 Z"/>
+            <text class="label" x="390" y="140" text-anchor="middle">saved</text>
+            <text class="label" x="390" y="159" text-anchor="middle">shortcuts?</text>
+            <line class="line" x1="482" y1="118" x2="570" y2="70" marker-end="url(#arrow-1)"/>
+            <text class="sub" x="515" y="78">yes</text>
+            <rect class="primary" x="575" y="28" rx="14" width="250" height="92"/>
+            <text class="label" x="700" y="63" text-anchor="middle">Run with a shortcut</text>
+            <text class="sub" x="700" y="87" text-anchor="middle">Manage stays visible, secondary</text>
+            <line class="line" x1="482" y1="178" x2="570" y2="226" marker-end="url(#arrow-1)"/>
+            <text class="sub" x="515" y="218">no</text>
+            <rect class="warning" x="575" y="180" rx="14" width="250" height="92"/>
+            <text class="label" x="700" y="215" text-anchor="middle">Choose a model to use</text>
+            <text class="sub" x="700" y="239" text-anchor="middle">Connect stays visible, secondary</text>
+          </svg>
+          <p class="caption">Conceptual shape: use known alias state to choose emphasis; do not perform eager provider scans just to render the home.</p>
+        </div>
+        <dl>
+          <dt>Axis</dt><dd>User state, intent hierarchy, and choice presentation.</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> Alias state is already known; the prompt-bearing path already contains focused alias and provider/model pickers; the current mixed root is assembled in one <code>runSetup</code> seam. <strong>external:</strong> OpenCode and Claude Code both separate operational use from connection or management work.</dd>
+          <dt>Rationale</dt><dd>Newcomers get a clear next step, returning users regain a fast daily path, and the interface achieves real hierarchy without needing unsupported section headings inside one fuzzy list.</dd>
+          <dt>Downsides</dt><dd>Some actions gain one navigation step. The zero-shortcut copy must distinguish “choose something already available” from “connect something new” without pretending readiness is known before discovery.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-2">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 2</p>
+            <h3>One invocation, then teach</h3>
+          </div>
+          <div class="chip-row" aria-label="Idea 2 attributes">
+            <span class="chip high">Confidence 95%</span>
+            <span class="chip">Complexity Medium</span>
+            <span class="chip axis">Selection outcome</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Make “no successful launcher branch asks for a second invocation” a product invariant. Selecting an alias collects a prompt and generates. Discovery continues through model choice and prompt capture. Only after success does stderr show the exact reusable command or saved alias.</p>
+        <div class="diagram" role="img" aria-label="Before and after flow showing a second invocation replaced by immediate execution and a command receipt">
+          <svg viewBox="0 0 860 260" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrow-2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#70868c"/>
+              </marker>
+            </defs>
+            <text class="sub" x="30" y="28">CURRENT</text>
+            <rect class="box" x="30" y="45" rx="12" width="170" height="66"/>
+            <text class="label" x="115" y="84" text-anchor="middle">select haiku</text>
+            <line class="line" x1="200" y1="78" x2="260" y2="78" marker-end="url(#arrow-2)"/>
+            <rect class="warning" x="265" y="45" rx="12" width="250" height="66"/>
+            <text class="label" x="390" y="72" text-anchor="middle">print “Next: llm-now…”</text>
+            <text class="sub" x="390" y="92" text-anchor="middle">exit, then user reruns</text>
+            <text class="sub" x="30" y="151">PROPOSED</text>
+            <rect class="box" x="30" y="168" rx="12" width="170" height="66"/>
+            <text class="label" x="115" y="207" text-anchor="middle">select haiku</text>
+            <line class="line" x1="200" y1="201" x2="260" y2="201" marker-end="url(#arrow-2)"/>
+            <rect class="primary" x="265" y="168" rx="12" width="150" height="66"/>
+            <text class="label" x="340" y="195" text-anchor="middle">ask + run</text>
+            <text class="sub" x="340" y="215" text-anchor="middle">same process</text>
+            <line class="line" x1="415" y1="201" x2="475" y2="201" marker-end="url(#arrow-2)"/>
+            <rect class="secondary" x="480" y="168" rx="12" width="340" height="66"/>
+            <text class="label" x="650" y="195" text-anchor="middle">response on stdout</text>
+            <text class="sub" x="650" y="215" text-anchor="middle">exact reusable command on stderr</text>
+          </svg>
+          <p class="caption">The command template becomes a receipt for a completed action instead of a substitute for the action.</p>
+        </div>
+        <dl>
+          <dt>Axis</dt><dd>Selection outcome.</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> Both current dead ends can compose steps already used by the normal interactive flow. The application already sends model output to stdout and all interactive guidance to stderr.</dd>
+          <dt>Rationale</dt><dd>This removes the most surprising behavior in the screenshot while retaining the CLI’s teachability and pipeline-safe output contract.</dd>
+          <dt>Downsides</dt><dd>Bare invocation can now cross into a billable generation. The UI needs an unmistakable prompt-entry and execution boundary, plus clear cancellation before the request is sent.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-3">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 3</p>
+            <h3>First useful result onboarding</h3>
+          </div>
+          <div class="chip-row" aria-label="Idea 3 attributes">
+            <span class="chip high">Confidence 89%</span>
+            <span class="chip">Complexity Medium</span>
+            <span class="chip axis">State · outcome</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> When no shortcut exists, guide the user through provider and model choice far enough to run a first prompt, then offer to name that target. If passive discovery finds nothing, switch to a focused recovery screen that explains what was checked and offers relevant connection actions. The first session succeeds when the user receives a result; onboarding becomes durable when the first shortcut is saved.</p>
+        <div class="diagram" role="img" aria-label="Conceptual first-run flow from no shortcut to a first result and optional saved shortcut">
+          <svg viewBox="0 0 860 220" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrow-3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#70868c"/>
+              </marker>
+            </defs>
+            <rect class="box" x="25" y="76" rx="12" width="140" height="70"/>
+            <text class="label" x="95" y="105" text-anchor="middle">no shortcut</text>
+            <text class="sub" x="95" y="126" text-anchor="middle">known state</text>
+            <line class="line" x1="165" y1="111" x2="215" y2="111" marker-end="url(#arrow-3)"/>
+            <rect class="secondary" x="220" y="76" rx="12" width="160" height="70"/>
+            <text class="label" x="300" y="105" text-anchor="middle">choose target</text>
+            <text class="sub" x="300" y="126" text-anchor="middle">or connect</text>
+            <line class="line" x1="380" y1="111" x2="430" y2="111" marker-end="url(#arrow-3)"/>
+            <rect class="primary" x="435" y="76" rx="12" width="160" height="70"/>
+            <text class="label" x="515" y="105" text-anchor="middle">first result</text>
+            <text class="sub" x="515" y="126" text-anchor="middle">immediate value</text>
+            <line class="line" x1="595" y1="111" x2="645" y2="111" marker-end="url(#arrow-3)"/>
+            <rect class="warning" x="650" y="76" rx="12" width="180" height="70"/>
+            <text class="label" x="740" y="105" text-anchor="middle">name shortcut</text>
+            <text class="sub" x="740" y="126" text-anchor="middle">durable milestone</text>
+          </svg>
+          <p class="caption">Immediate value and durable setup are two milestones in one guided path, not competing definitions of completion.</p>
+        </div>
+        <dl>
+          <dt>Axis</dt><dd>User state and selection outcome.</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> Empty alias state, passive no-provider diagnostics, provider/model selection, generation, and post-generation alias saving all exist today.</dd>
+          <dt>Rationale</dt><dd>New users should not have to understand the provider inventory before receiving value, and setup should leave behind a reusable target rather than abstract knowledge.</dd>
+          <dt>Downsides</dt><dd>The combined path is longer and needs clear backtracking. Connection failures must remain honest recovery states rather than being papered over with a recommended provider.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-4">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 4 · alternative ordering</p>
+            <h3>Prompt-first launcher</h3>
+          </div>
+          <div class="chip-row" aria-label="Idea 4 attributes">
+            <span class="chip med">Confidence 74%</span>
+            <span class="chip">Complexity Low</span>
+            <span class="chip axis">Intent · outcome</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Ask “What would you like to ask?” immediately, then resolve the execution target using saved shortcuts first and a fresh-model escape hatch. This is the strongest alternative to an intent gate: it assumes a bare LLM command is primarily for doing LLM work and defers provider plumbing until it becomes necessary.</p>
+        <div class="terminal-compare" aria-label="Conceptual comparison of current and prompt-first entry">
+          <pre class="terminal"><span class="dim">CURRENT</span>
+$ llm-now
+
+What would you like to set up?
+  deepseek32
+  haiku
+  Discover providers…
+  Add or manage API keys…</pre>
+          <pre class="terminal"><span class="dim">PROMPT-FIRST</span>
+$ llm-now
+
+<span class="hot">What would you like to ask?</span>
+› Summarize this branch
+
+<span class="cyan">Use a saved shortcut</span>
+  haiku · Claude CLI
+  local · Ollama
+  Choose another model…</pre>
+        </div>
+        <dl>
+          <dt>Axis</dt><dd>Intent hierarchy and selection outcome.</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> Prompt and target resolution are separable stages in the current application. <strong>reasoned:</strong> A user typically knows the job before knowing the provider/model plumbing.</dd>
+          <dt>Rationale</dt><dd>The product’s purpose becomes obvious at first contact, and the model inventory becomes a means rather than the main event.</dd>
+          <dt>Downsides</dt><dd>Users who opened the command to manage a connection need a visible escape hatch. Typing a prompt and then canceling during model choice can feel like lost work. This ordering should be compared directly with Idea 1, not stacked blindly on top of it.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-5">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 5</p>
+            <h3>Dedicated <code>llm-now setup</code> entrance</h3>
+          </div>
+          <div class="chip-row" aria-label="Idea 5 attributes">
+            <span class="chip med">Confidence 78%</span>
+            <span class="chip">Complexity Medium</span>
+            <span class="chip axis">Intent hierarchy</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Give provider discovery, API-key work, and future shortcut administration a stable explicit command. Keep “Setup and connections…” discoverable from the bare launcher, but stop forcing high-frequency work and sensitive maintenance to share the same undifferentiated front door.</p>
+        <div class="terminal-compare" aria-label="Conceptual split between daily and administrative command entrances">
+          <pre class="terminal"><span class="dim">DAILY ENTRANCE</span>
+$ llm-now
+
+<span class="hot">Run with a shortcut…</span>
+  Choose another model…
+  Setup and connections…</pre>
+          <pre class="terminal"><span class="dim">ADMINISTRATIVE ENTRANCE</span>
+$ llm-now setup
+
+<span class="cyan">Connections &amp; shortcuts</span>
+  Discover available providers…
+  Add or manage API keys…
+  Manage saved shortcuts…</pre>
+        </div>
+        <dl>
+          <dt>Axis</dt><dd>Intent hierarchy.</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> Credential management is already a deliberate multi-step flow with materially different risk from choosing a saved alias. <strong>reasoned:</strong> Daily traffic and maintenance traffic deserve stable, distinct addresses.</dd>
+          <dt>Rationale</dt><dd>This gives low-frequency controls a durable home and prevents the bare launcher from becoming a dumping ground as management features grow.</dd>
+          <dt>Downsides</dt><dd>It introduces another command to learn. It complements a good bare home but does not remove the need to make setup discoverable and state-aware there.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-6">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 6</p>
+            <h3>Hundred-shortcut palette</h3>
+          </div>
+          <div class="chip-row" aria-label="Idea 6 attributes">
+            <span class="chip high">Confidence 88%</span>
+            <span class="chip">Complexity Low</span>
+            <span class="chip axis">Choice presentation</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Design as if a power user has one hundred aliases. The root contains “Search saved shortcuts…” rather than every alias; selecting it opens a dedicated type-to-filter list with provider/model hints. The extreme case reveals the current structural flaw even when the screenshot contains only four aliases.</p>
+        <div class="terminal-compare" aria-label="Conceptual comparison of a growing root list and a dedicated shortcut palette">
+          <pre class="terminal"><span class="dim">FLAT ROOT · GROWS FOREVER</span>
+  alias-001
+  alias-002
+  alias-003
+  …
+  alias-100
+  Discover providers…
+  Add or manage keys…</pre>
+          <pre class="terminal"><span class="dim">BOUNDED ROOT</span>
+<span class="hot">  Search saved shortcuts…</span>
+  Choose another model…
+  Manage connections…
+
+<span class="dim">then:</span> type to filter 100 shortcuts</pre>
+        </div>
+        <dl>
+          <dt>Axis</dt><dd>Choice presentation.</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> The current root grows linearly by concatenating every alias with navigation actions, while the existing autocomplete already filters deterministically. <strong>reasoned:</strong> A collection is data to search, not navigation to flatten.</dd>
+          <dt>Rationale</dt><dd>The launcher stays calm as users accumulate targets, and every screen contains one kind of selectable thing.</dd>
+          <dt>Downsides</dt><dd>Users with only a handful of aliases pay an extra Enter. Avoid a speculative recency system; deterministic sorting and explicit search are already trustworthy.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-7">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 7</p>
+            <h3>Readiness telemetry</h3>
+          </div>
+          <div class="chip-row" aria-label="Idea 7 attributes">
+            <span class="chip med">Confidence 76%</span>
+            <span class="chip">Complexity Low</span>
+            <span class="chip axis">Choice presentation</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Separate state from controls. A compact status line explains why this screen looks the way it does—“Ready · 4 saved shortcuts” or “No saved shortcut yet”—then every row begins with an action verb. Alias is the user-owned concept; provider/model appears as supporting detail. Safe provider capability can appear after discovery, but secret values never do.</p>
+        <div class="terminal-compare" aria-label="Conceptual readiness states with action-led choices">
+          <pre class="terminal"><span class="hot">READY · 4 SAVED SHORTCUTS</span>
+
+› Run with haiku
+  <span class="dim">Claude CLI · provider default</span>
+  Run with local
+  <span class="dim">Ollama · llama3</span></pre>
+          <pre class="terminal"><span class="cyan">NO SAVED SHORTCUT YET</span>
+
+› Choose a model to use
+  Connect or manage providers
+  <span class="dim">Discovery runs only when chosen</span></pre>
+        </div>
+        <dl>
+          <dt>Axis</dt><dd>Choice presentation.</dd>
+          <dt>Basis</dt><dd><strong>direct:</strong> Alias counts are known, alias rows already carry provider/model hints, and runtime connection state can be reported without placing credentials in prompt data.</dd>
+          <dt>Rationale</dt><dd>Users no longer have to infer readiness from an assorted list, and action-led labels make the outcome of each row predictable before Enter.</dd>
+          <dt>Downsides</dt><dd>Provider readiness may require discovery latency. The initial status should rely only on already-known state unless the user deliberately enters a discovery route.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <p class="eyebrow">What did not survive</p>
+      <h2>Rejection Summary</h2>
+      <p class="section-intro">Most cuts were consolidations: several independent frames converged on the same stronger direction. Two ideas were rejected on evidence rather than taste.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td>State-aware launchpad</td><td>Merged into Idea 1; the raw version overclaimed that provider readiness was available before discovery.</td></tr>
+            <tr><td>2</td><td>Work-first configured entry</td><td>Merged into Idea 1 as the configured state.</td></tr>
+            <tr><td>3</td><td>Three-row intent gate</td><td>Merged into Idea 1; the synthesis specifies state as well as hierarchy.</td></tr>
+            <tr><td>4</td><td>One management door</td><td>Underspecified and merged into Ideas 1 and 5; fresh-model selection must remain visibly reachable.</td></tr>
+            <tr><td>6</td><td>Select a shortcut, then ask</td><td>Merged into Idea 2’s general one-invocation invariant.</td></tr>
+            <tr><td>8</td><td>Provider-to-result funnel</td><td>Merged into Idea 2’s discovery branch.</td></tr>
+            <tr><td>9</td><td>First useful shortcut milestone</td><td>Merged into Idea 3, which includes both a first result and a durable shortcut.</td></tr>
+            <tr><td>10</td><td>No-provider recovery screen</td><td>Merged into Idea 3 as the honest empty-discovery state.</td></tr>
+            <tr><td>12</td><td>One-target fast lane</td><td>Cut because “valid” cannot be known without probing and stale-alias behavior was undefined.</td></tr>
+            <tr><td>14</td><td>Recommended first target</td><td>Cut because availability hints do not justify a transparent, defensible model-recommendation rule.</td></tr>
+            <tr><td>15</td><td>Aliases as named work contexts</td><td>Merged into Idea 7’s action-led language and supporting provider/model detail.</td></tr>
+            <tr><td>16</td><td>Post-success command receipt</td><td>Merged into Idea 2’s “then teach” contract.</td></tr>
+            <tr><td>17</td><td>Progressive shortcut maintenance</td><td>Sound but deferred as a later management refinement, not a central answer to the mixed opening experience.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="references">
+      <p class="eyebrow">Evidence index</p>
+      <h2>Sources &amp; References</h2>
+      <ul class="refs">
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/app.ts"><code>src/app.ts</code></a> — bare setup routing, selection outcomes, generation, alias saving, and stdout/stderr behavior.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/prompts.ts"><code>src/prompts.ts</code></a> — prompt option contract, alias picker, provider/model picker, and passive no-provider result.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/aliases.ts"><code>src/aliases.ts</code></a> — empty alias-store semantics.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/tests/app.test.ts"><code>tests/app.test.ts</code></a> — sorted alias behavior, discovery bypass, credential-safety expectations, and generation outcomes.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/README.md"><code>README.md</code></a> — interactive behavior, passive discovery, and stdout guarantees.</li>
+        <li><a href="https://docs.anthropic.com/en/docs/claude-code/cli-reference">Claude Code CLI reference</a> — work-first bare interactive entry and separate command surfaces.</li>
+        <li><a href="https://docs.aws.amazon.com/cli/latest/userguide/cli-usage-wizard.html">AWS CLI wizards</a> — guided configuration that produces a concrete command rather than a placeholder handoff.</li>
+      </ul>
+    </section>
+
+    <footer class="composition-signal">Composed <time datetime="2026-07-27T18:49:28Z">2026-07-27T18:49:28Z</time> by <code>ce-ideate</code> from the user’s no-input launcher prompt and supplied terminal screenshot.</footer>
+  </main>
+</body>
+</html>
