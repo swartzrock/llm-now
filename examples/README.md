@@ -93,7 +93,7 @@ llm_commit_message() {
 
   {
     printf '%s\n\n' \
-      'Write a Conventional Commit message for this staged diff. Return only the message.'
+      'Write exactly one Conventional Commit subject line for this staged diff. Use at most 72 characters. Return no Markdown, quotation marks, explanation, or body.'
     printf '%s\n' "$diff"
   } | llm-now haiku
 }
@@ -108,37 +108,64 @@ Stage a small change, run the function, and compare the message with
 
 **Audience:** Lazygit users
 
-This custom command reuses `llm_commit_message` and `llm_markdown` from above. It
-shows a draft for the staged changes, but never runs `git commit`.
+This custom command generates a summary, opens it in an editable lazygit prompt,
+then shows an empty description prompt. It runs `git commit` only after you review
+both fields and confirm.
 
-1. Put both functions in a small shell file, such as
+1. Put `llm_commit_message` in a small shell file, such as
    `~/.config/lazygit/llm-now-functions.sh`, and source that file from your normal
    Bash or Zsh startup file.
-2. Merge the following settings into lazygit's `config.yml`. If `os` or
-   `customCommands` already exists, add to those sections instead of creating a
-   duplicate key.
+2. Keep the `shellFunctionsFile` setting already added to lazygit's `config.yml`:
 
 ```yaml
 os:
   shellFunctionsFile: ~/.config/lazygit/llm-now-functions.sh
+```
 
+3. Replace the earlier `G` entry with this custom command. Merge it into an
+   existing `customCommands` list rather than adding a second top-level key.
+
+```yaml
 customCommands:
   - key: G
     context: files
-    description: Draft commit message with llm-now
-    command: "llm_commit_message | llm_markdown"
-    output: terminal
+    description: Generate and edit commit message
+    prompts:
+      - type: input
+        title: Commit summary [generated]
+        key: Summary
+        initialValue: >-
+          {{ runCommand "/bin/zsh -c 'source ~/.config/lazygit/llm-now-functions.sh; llm_commit_message'" }}
+      - type: input
+        title: Commit description
+        key: Description
+        initialValue: ""
+      - type: confirm
+        title: Commit staged changes?
+        body: Commit with the summary and optional description above?
+    command: >-
+      git commit
+      --message {{.Form.Summary | quote}}
+      {{if .Form.Description}}--message {{.Form.Description | quote}}{{end}}
+    loadingText: Committing staged changes
+    output: log
 ```
 
-Stage a change, focus lazygit's Files panel, and press `G`. Review the generated
-message, return to lazygit, then press `c` and enter the message you actually want
-to commit.
+The explicit `source` inside `initialValue` is intentional. Lazygit uses
+`shellFunctionsFile` when it executes a custom command, but the `runCommand`
+template helper that generates an initial value runs the requested executable
+directly and does not load that file.
+
+Stage a change, focus lazygit's Files panel, and press `G`. Edit the generated
+`Commit summary [generated]`, press Enter, optionally write a `Commit description`,
+then confirm the commit. Press Escape at any prompt to cancel. Custom-command
+prompts appear one after another rather than in lazygit's native two-field layout.
 
 `G` is unused in lazygit's current default Files-panel keybindings, but press `?`
 to check your installed version and personal configuration. Choose another unused
 key if needed. Lazygit's
 [custom-command guide](https://github.com/jesseduffield/lazygit/blob/master/docs/Custom_Command_Keybindings.md)
-documents the `files` context and `output: terminal`; its
+documents prompt initial values, form fields, quoting, and the `files` context; its
 [configuration guide](https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md#using-aliases-or-functions-in-shell-commands)
 documents `shellFunctionsFile`.
 
