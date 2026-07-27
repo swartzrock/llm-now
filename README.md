@@ -23,6 +23,8 @@ $ llm-now --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5
 
 ![Animated terminal demo of llm-now discovering available providers and using model aliases](docs/demos/demo.gif)
 
+Want something to try? Open the [cookbook of 20 reusable examples](examples/README.md).
+
 ## Install
 
 ### Homebrew (macOS and Linux)
