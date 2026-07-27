@@ -36,8 +36,28 @@ const PROVIDER_LABELS = {
   "claude-cli": "Claude CLI",
 } satisfies Record<ByokProviderId, string>;
 
+const PROVIDER_CONNECTION_CLASSES = {
+  ollama: "local server",
+  anthropic: "API key",
+  openai: "API key",
+  google: "API key",
+  xai: "API key",
+  openrouter: "API key",
+  groq: "API key",
+  mistral: "API key",
+  deepseek: "API key",
+  deepinfra: "API key",
+  "lm-studio": "local server",
+  "codex-cli": "authenticated CLI",
+  "claude-cli": "authenticated CLI",
+} satisfies Record<ByokProviderId, string>;
+
 export function providerLabel(provider: ByokProviderId): string {
   return PROVIDER_LABELS[provider];
+}
+
+export function providerConnectionHint(provider: ByokProviderId): string {
+  return PROVIDER_CONNECTION_CLASSES[provider];
 }
 
 export const CLOUD_CREDENTIAL_PROVIDERS = Object.freeze(
@@ -87,6 +107,7 @@ export function cloudCredentialProviderOptions(): PromptOption[] {
   return sortPromptOptions(CLOUD_CREDENTIAL_PROVIDERS.map((provider) => ({
     value: provider,
     label: providerLabel(provider),
+    hint: providerConnectionHint(provider),
   })));
 }
 
@@ -220,6 +241,7 @@ export async function selectProviderAndModel(
     const providerOptions = sortPromptOptions(providers.map((provider) => ({
       value: provider,
       label: providerLabel(provider),
+      hint: `${providerConnectionHint(provider)} · available`,
     })));
     const providerValue = selectedString(
       await deps.prompter.select("Choose a provider", providerOptions),

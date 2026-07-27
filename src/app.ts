@@ -39,6 +39,7 @@ import {
   formatAliasInventory,
   formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
+  providerConnectionHint,
   providerLabel,
   selectAliasOrFresh,
   selectProviderAndModel,
@@ -614,6 +615,7 @@ async function runSetup(
     const providerOptions = sortPromptOptions(providers.map((provider) => ({
       value: provider,
       label: providerLabel(provider),
+      hint: `${providerConnectionHint(provider)} · available`,
     })));
     const provider = await deps.prompter.select("Choose an available provider", providerOptions);
     if (provider === null) return 130;

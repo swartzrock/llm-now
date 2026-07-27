@@ -571,7 +571,10 @@ describe("one-shot application", () => {
     expect(await runApplication(app.value)).toBe(0);
     expect(app.runtime.calls).toEqual({ discover: 1, list: 0, generate: 0 });
     expect(seen[1]?.message).toBe("Choose an available provider");
-    expect(seen[1]?.options.map(({ label }) => label)).toEqual(["Codex CLI", "Ollama"]);
+    expect(seen[1]?.options).toEqual([
+      { value: "codex-cli", label: "Codex CLI", hint: "authenticated CLI · available" },
+      { value: "ollama", label: "Ollama", hint: "local server · available" },
+    ]);
     expect(app.stderr.text()).toContain("Provider Ollama is available");
   });
 
@@ -616,16 +619,16 @@ describe("one-shot application", () => {
     expect(await runApplication(app.value)).toBe(130);
     expect(app.stdout.text()).toBe("");
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
-    expect(seen[1]?.options.map(({ value }) => value)).toEqual([
-      "anthropic",
-      "deepinfra",
-      "deepseek",
-      "google",
-      "groq",
-      "mistral",
-      "openai",
-      "openrouter",
-      "xai",
+    expect(seen[1]?.options).toEqual([
+      { value: "anthropic", label: "Anthropic", hint: "API key" },
+      { value: "deepinfra", label: "DeepInfra", hint: "API key" },
+      { value: "deepseek", label: "DeepSeek", hint: "API key" },
+      { value: "google", label: "Gemini", hint: "API key" },
+      { value: "groq", label: "Groq", hint: "API key" },
+      { value: "mistral", label: "Mistral", hint: "API key" },
+      { value: "openai", label: "OpenAI", hint: "API key" },
+      { value: "openrouter", label: "OpenRouter", hint: "API key" },
+      { value: "xai", label: "xAI", hint: "API key" },
     ]);
   });
 
