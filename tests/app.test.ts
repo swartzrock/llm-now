@@ -22,6 +22,7 @@ import {
 import {
   stripTerminalSequences,
   type PromptOption,
+  type TextPromptOptions,
   type PromptValue,
 } from "../src/prompts.ts";
 
@@ -72,6 +73,7 @@ function prompts(options: {
   passwords?: Array<string | null>;
   seen?: Array<{ message: string; options: PromptOption[] }>;
   inputMessages?: string[];
+  inputOptions?: TextPromptOptions[];
   passwordMessages?: string[];
   confirmMessages?: string[];
   confirmInitialValues?: Array<boolean | undefined>;
@@ -86,8 +88,9 @@ function prompts(options: {
       options.confirmInitialValues?.push(promptOptions?.initialValue);
       return options.confirms?.shift() ?? null;
     },
-    input: async (message) => {
+    input: async (message, promptOptions = {}) => {
       options.inputMessages?.push(message);
+      options.inputOptions?.push(promptOptions);
       return options.names?.shift() ?? null;
     },
     password: async (message) => {
@@ -1137,6 +1140,146 @@ describe("one-shot application", () => {
     expect(app.stdout.text()).toBe("response");
     expect(app.stderr.text()).toBe("");
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
+  });
+
+  test("positional and long-form alias-only TTY calls prompt once with target context", async () => {
+    const results = [];
+    for (const args of [["Daily"], ["--alias", "Daily"]]) {
+      const events: string[] = [];
+      const inputMessages: string[] = [];
+      const inputOptions: TextPromptOptions[] = [];
+      const app = dependencies({
+        args,
+        stdin: input("", true),
+        stderrTty: true,
+        prompter: prompts({
+          names: ["  exact prompt  "],
+          inputMessages,
+          inputOptions,
+        }),
+        resolveAlias: async (_path, name) => {
+          events.push(`resolve:${name}`);
+          return { provider: "claude-cli", model: null };
+        },
+        runtime: runtime({
+          generate: async (provider, model, prompt) => {
+            events.push(`generate:${provider}:${model}:${prompt}`);
+            return "alias-result";
+          },
+        }),
+      });
+
+      results.push({
+        exitCode: await runApplication(app.value),
+        stdout: app.stdout.text(),
+        stderr: app.stderr.text(),
+        runtimeCalls: app.runtime.calls,
+        inputMessages,
+        validatesBlank: inputOptions[0]?.validate?.(" \n "),
+        events,
+      });
+    }
+
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0]).toEqual({
+      exitCode: 0,
+      stdout: "alias-result",
+      stderr: "\u001b[0m\n\n",
+      runtimeCalls: { discover: 0, list: 0, generate: 1 },
+      inputMessages: ["Prompt for Daily · Claude CLI · default model"],
+      validatesBlank: "prompt must not be blank.",
+      events: [
+        "resolve:Daily",
+        "generate:claude-cli:null:  exact prompt  ",
+      ],
+    });
+  });
+
+  test("keeps prompting when an injected prompter returns blank text", async () => {
+    const inputMessages: string[] = [];
+    const app = dependencies({
+      args: ["daily"],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({
+        names: [" \n ", "accepted"],
+        inputMessages,
+      }),
+      resolveAlias: async () => ({ provider: "anthropic", model: "claude-sonnet" }),
+      runtime: runtime({
+        generate: async (_provider, _model, prompt) => {
+          expect(prompt).toBe("accepted");
+          return "alias-result";
+        },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(inputMessages).toEqual([
+      "Prompt for daily · Anthropic · claude-sonnet",
+      "Prompt for daily · Anthropic · claude-sonnet",
+    ]);
+    expect(app.runtime.calls.generate).toBe(1);
+  });
+
+  test("resolves alias failures before opening the one-shot input prompt", async () => {
+    const inputMessages: string[] = [];
+    const app = dependencies({
+      args: ["missing"],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({ names: ["must not be read"], inputMessages }),
+      resolveAlias: async () => {
+        throw new AliasStoreError("alias not found: missing");
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(inputMessages).toEqual([]);
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toBe("config: alias not found: missing\n");
+  });
+
+  test("cancels alias-only input with exit 130 before generation", async () => {
+    const app = dependencies({
+      args: ["daily"],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({ names: [null] }),
+      resolveAlias: async () => ({ provider: "openai", model: "gpt-5" }),
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toBe("");
+  });
+
+  test("does not prompt alias-only calls outside the stdin-and-stderr TTY contract", async () => {
+    for (const tty of [
+      { stdin: true, stderr: false },
+      { stdin: false, stderr: true },
+    ]) {
+      const inputMessages: string[] = [];
+      let resolves = 0;
+      const app = dependencies({
+        args: ["daily"],
+        stdin: input("", tty.stdin),
+        stderrTty: tty.stderr,
+        prompter: prompts({ names: ["must not be read"], inputMessages }),
+        resolveAlias: async () => {
+          resolves += 1;
+          return { provider: "openai", model: "gpt-5" };
+        },
+      });
+
+      expect(await runApplication(app.value)).toBe(2);
+      expect(inputMessages).toEqual([]);
+      expect(resolves).toBe(0);
+      expect(app.runtime.calls.generate).toBe(0);
+      expect(app.stderr.text()).toContain("usage:");
+    }
   });
 
   test("piped input works with a positional alias", async () => {
