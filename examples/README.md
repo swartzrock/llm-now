@@ -50,6 +50,7 @@ Keep three rules in mind:
 | # | Recipe | Audience | Extra tools |
 | --- | --- | --- | --- |
 | 1 | [A commit message from the staged diff](#1-let-the-staged-diff-write-its-own-commit-message) | Developer | Git |
+| 1b | [The same commit-message feature in lazygit](#1b-add-the-same-feature-to-lazygit) | Developer | Git, lazygit |
 | 2 | [A tone dial for the clipboard](#2-add-a-tone-dial-to-the-clipboard) | Power user | macOS |
 | 3 | [A patient man-page tutor](#3-turn-any-man-page-into-a-patient-tutor) | New to LLMs | `man`, `col` |
 | 4 | [A test-failure doctor](#4-make-a-red-test-run-explain-itself) | Developer | Your test runner |
@@ -102,6 +103,44 @@ llm_commit_message | llm_markdown
 
 Stage a small change, run the function, and compare the message with
 `git diff --cached`. Review and edit the result before using it.
+
+### 1b. Add the same feature to lazygit
+
+**Audience:** Lazygit users
+
+This custom command reuses `llm_commit_message` and `llm_markdown` from above. It
+shows a draft for the staged changes, but never runs `git commit`.
+
+1. Put both functions in a small shell file, such as
+   `~/.config/lazygit/llm-now-functions.sh`, and source that file from your normal
+   Bash or Zsh startup file.
+2. Merge the following settings into lazygit's `config.yml`. If `os` or
+   `customCommands` already exists, add to those sections instead of creating a
+   duplicate key.
+
+```yaml
+os:
+  shellFunctionsFile: ~/.config/lazygit/llm-now-functions.sh
+
+customCommands:
+  - key: G
+    context: files
+    description: Draft commit message with llm-now
+    command: "llm_commit_message | llm_markdown"
+    output: terminal
+```
+
+Stage a change, focus lazygit's Files panel, and press `G`. Review the generated
+message, return to lazygit, then press `c` and enter the message you actually want
+to commit.
+
+`G` is unused in lazygit's current default Files-panel keybindings, but press `?`
+to check your installed version and personal configuration. Choose another unused
+key if needed. Lazygit's
+[custom-command guide](https://github.com/jesseduffield/lazygit/blob/master/docs/Custom_Command_Keybindings.md)
+documents the `files` context and `output: terminal`; its
+[configuration guide](https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md#using-aliases-or-functions-in-shell-commands)
+documents `shellFunctionsFile`.
 
 ## 2. Add a tone dial to the clipboard
 
