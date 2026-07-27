@@ -544,7 +544,11 @@ async function runCredentialManagement(
 
   await vault.set(provider, candidate);
   resolver.invalidate?.(provider);
-  deps.stderr.write(`Saved the ${providerLabel(provider)} API key.\n`);
+  const colors = createTerminalColors(deps.stderr, deps.env);
+  deps.stderr.write(
+    colors.green(`◆ ${providerLabel(provider)} · API key verified\n`)
+    + "  stored as: saved credential\n",
+  );
 
   if (pendingAlias === null) return 0;
   try {

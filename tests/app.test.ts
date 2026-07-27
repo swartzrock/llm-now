@@ -662,36 +662,48 @@ describe("one-shot application", () => {
     expect(passwordMessages.every((message) => !message.includes(invalid.trim()))).toBe(true);
   });
 
-  test("validates the exact hidden candidate while keeping setup stderr-only and secret-free", async () => {
+  test("renders the exact plain saved-credential receipt without credential provenance", async () => {
     const candidate = "u3-valid-hidden-sentinel";
+    const environmentCredential = "u3-environment-sentinel";
     const passwordMessages: string[] = [];
     const validated: string[] = [];
-    const app = dependencies({
-      args: [],
-      stdin: input("", true),
-      stderrTty: true,
-      prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai"],
-        passwords: [candidate],
-        confirms: [true],
-        passwordMessages,
-      }),
-      runtime: runtime({
-        providers: [],
-        validateCredential: async (_provider, apiKey) => {
-          validated.push(apiKey);
-          return [];
-        },
-      }),
-    });
+    const terminalEnvironments: Array<Record<string, string>> = [
+      { NO_COLOR: "1" },
+      { TERM: "dumb" },
+    ];
+    for (const terminalEnv of terminalEnvironments) {
+      const app = dependencies({
+        args: [],
+        stdin: input("", true),
+        stderrTty: true,
+        env: { ...terminalEnv, OPENAI_API_KEY: environmentCredential },
+        prompter: prompts({
+          choices: ["setup:manage-api-keys", "openai", false],
+          passwords: [candidate],
+          confirms: [true],
+          passwordMessages,
+        }),
+        runtime: runtime({
+          providers: [],
+          validateCredential: async (_provider, apiKey) => {
+            validated.push(apiKey);
+            return [{ id: "qwen", label: "Qwen" }];
+          },
+        }),
+      });
 
-    expect(await runApplication(app.value)).toBe(0);
-    expect(validated).toEqual([candidate]);
-    expect(app.stdout.text()).toBe("");
-    expect(app.stderr.text()).toContain("Saved the OpenAI API key");
-    expect(`${app.stdout.text()}${app.stderr.text()}${passwordMessages.join("\n")}`).not.toContain(
-      candidate,
-    );
+      expect(await runApplication(app.value)).toBe(0);
+      expect(app.stdout.text()).toBe("");
+      expect(app.stderr.text()).toBe(
+        "◆ OpenAI · API key verified\n  stored as: saved credential\n",
+      );
+      expect(`${app.stdout.text()}${app.stderr.text()}${passwordMessages.join("\n")}`).not.toContain(
+        candidate,
+      );
+      expect(app.stderr.text()).not.toContain(environmentCredential);
+      expect(app.stderr.text()).not.toContain("OPENAI_API_KEY");
+    }
+    expect(validated).toEqual([candidate, candidate]);
   });
 
   test("adds bare setup guidance only to interactive missing-credential failures", async () => {
@@ -1725,6 +1737,7 @@ describe("API-key management", () => {
     });
     expect(await runApplication(invalid.value)).toBe(130);
     expect(invalid.events).toEqual(["get:openai"]);
+    expect(invalid.stderr.text()).not.toContain("API key verified");
 
     const old = "u4-old-validation-sentinel";
     const candidate = "u4-invalid-provider-sentinel";
@@ -1745,6 +1758,7 @@ describe("API-key management", () => {
     expect(failed.events).toEqual(["get:openai"]);
     expect(failed.stderr.text()).not.toContain(old);
     expect(failed.stderr.text()).not.toContain(candidate);
+    expect(failed.stderr.text()).not.toContain("API key verified");
   });
 
   test("declining replacement intent requests no password, while set failure preserves the old key", async () => {
@@ -1761,6 +1775,7 @@ describe("API-key management", () => {
     expect(await runApplication(declined.value)).toBe(0);
     expect(passwordMessages).toEqual([]);
     expect(declined.events).toEqual(["get:openai"]);
+    expect(declined.stderr.text()).not.toContain("API key verified");
 
     const old = "u4-old-set-failure-sentinel";
     const replacement = "u4-replacement-set-failure-sentinel";
@@ -1797,6 +1812,7 @@ describe("API-key management", () => {
     expect(failed.stderr.text()).toContain("Secret Service");
     expect(failed.stderr.text()).not.toContain(old);
     expect(failed.stderr.text()).not.toContain(replacement);
+    expect(failed.stderr.text()).not.toContain("API key verified");
   });
 
   test("offers safe Linux remediation when the credential vault is unavailable", async () => {
@@ -1973,6 +1989,7 @@ describe("API-key management", () => {
       expect(await runApplication(app.value)).toBe(130);
       expect(app.events).toEqual(["get:openai"]);
       expect(app.stored()).toBe("u4-cancel-old-sentinel");
+      expect(app.stderr.text()).not.toContain("API key verified");
     }
   });
 
@@ -1990,6 +2007,7 @@ describe("API-key management", () => {
       expect(await runApplication(app.value)).toBe(decision === null ? 130 : 0);
       expect(app.events).toEqual(["get:openai"]);
       expect(app.stored()).toBeNull();
+      expect(app.stderr.text()).not.toContain("API key verified");
     }
   });
 
@@ -2032,6 +2050,7 @@ describe("API-key management", () => {
       expect(await runApplication(app.value)).toBe(130);
       expect(app.events).toEqual(["get:openai"]);
       expect(app.stored()).toBeNull();
+      expect(app.stderr.text()).not.toContain("API key verified");
     }
   });
 
@@ -2136,7 +2155,9 @@ describe("API-key management", () => {
     expect(await runApplication(app.value)).toBe(1);
     expect(app.stored()).toBe(candidate);
     expect(promptEvents.at(-1)).toBe("alias-write");
-    expect(app.stderr.text()).toContain("API key was saved");
+    expect((app.stderr.text().match(/API key verified/g) ?? [])).toHaveLength(1);
+    expect(app.stderr.text()).toContain("◆ OpenAI · API key verified");
+    expect(app.stderr.text()).toContain("  stored as: saved credential\n");
     expect(app.stderr.text()).toContain("alias was not saved");
     expect(app.stderr.text()).not.toContain(candidate);
   });
