@@ -219,7 +219,7 @@ function freshPromptMessage(
   );
 }
 
-async function collectAliasPrompt(
+async function collectOneShotPrompt(
   deps: ApplicationDependencies,
   message: string,
 ): Promise<string | null> {
@@ -753,7 +753,7 @@ async function runLauncher(
       }),
     );
     if (aliasResult.kind === "cancelled") return aliasResult.exitCode;
-    const prompt = await collectAliasPrompt(
+    const prompt = await collectOneShotPrompt(
       deps,
       aliasPromptMessage(deps, aliasResult.alias, aliasResult.selection),
     );
@@ -772,7 +772,7 @@ async function runLauncher(
 
   const selection = await resolveFreshSelection(deps, aliases, diagnostic);
   if (typeof selection === "number") return selection;
-  const prompt = await collectAliasPrompt(
+  const prompt = await collectOneShotPrompt(
     deps,
     freshPromptMessage(deps, selection.selection),
   );
@@ -837,7 +837,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       );
       if (typeof resolved === "number") return resolved;
       selection = resolved;
-      const entered = await collectAliasPrompt(
+      const entered = await collectOneShotPrompt(
         deps,
         aliasPromptMessage(deps, parsed.selection.alias, resolved.selection),
       );

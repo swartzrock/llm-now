@@ -187,18 +187,23 @@ export function formatAliasInventory(
     .join("\n");
 }
 
-export async function selectAlias(
-  aliases: Readonly<Record<string, AliasRecord>>,
-  prompter: SearchablePrompter,
-  formatOption: (
-    alias: string,
-    selection: AliasRecord,
-  ) => { label: string; hint: string } = (alias, selection) => ({
+type FormatAliasOption = (
+  alias: string,
+  selection: AliasRecord,
+) => { label: string; hint: string };
+
+function defaultAliasOption(alias: string, selection: AliasRecord) {
+  return {
     label: alias,
     hint: formatSelection(selection),
-  }),
-): Promise<InteractiveAliasSelectionResult> {
-  const options = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => {
+  };
+}
+
+function formatAliasOptions(
+  aliases: Readonly<Record<string, AliasRecord>>,
+  formatOption: FormatAliasOption = defaultAliasOption,
+): PromptOption[] {
+  return sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => {
     const formatted = formatOption(alias, selection);
     return {
       value: alias,
@@ -206,40 +211,44 @@ export async function selectAlias(
       hint: sanitizePromptText(formatted.hint),
     };
   }));
-  const value = await prompter.select("Choose a saved shortcut", options);
-  if (value === null) return { kind: "cancelled", exitCode: 130 };
+}
+
+function resolveAliasChoice(
+  value: PromptValue,
+  aliases: Readonly<Record<string, AliasRecord>>,
+): { alias: string; selection: AliasRecord } {
   if (typeof value !== "string" || !Object.hasOwn(aliases, value)) {
     throw new RangeError("Prompter returned an invalid alias choice.");
   }
   const selection = aliases[value];
   if (selection === undefined) throw new RangeError("Alias choice was unavailable.");
-  return { kind: "selected", alias: value, selection };
+  return { alias: value, selection };
+}
+
+export async function selectAlias(
+  aliases: Readonly<Record<string, AliasRecord>>,
+  prompter: SearchablePrompter,
+  formatOption: FormatAliasOption = defaultAliasOption,
+): Promise<InteractiveAliasSelectionResult> {
+  const options = formatAliasOptions(aliases, formatOption);
+  const value = await prompter.select("Choose a saved shortcut", options);
+  if (value === null) return { kind: "cancelled", exitCode: 130 };
+  const resolved = resolveAliasChoice(value, aliases);
+  return { kind: "selected", alias: resolved.alias, selection: resolved.selection };
 }
 
 export async function selectAliasOrFresh(
   aliases: Readonly<Record<string, AliasRecord>>,
   prompter: SearchablePrompter,
 ): Promise<InteractiveAliasResult> {
-  const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => {
-    return {
-      value: alias,
-      label: sanitizePromptText(alias),
-      hint: formatSelection(selection),
-    };
-  }));
   const options: PromptOption[] = [
-    ...aliasOptions,
+    ...formatAliasOptions(aliases),
     { value: false, label: "Select a new provider and model…" },
   ];
   const value = await prompter.select("Choose an alias", options);
   if (value === null) return { kind: "cancelled", exitCode: 130 };
   if (value === false) return { kind: "fresh" };
-  if (typeof value !== "string" || !Object.hasOwn(aliases, value)) {
-    throw new RangeError("Prompter returned an invalid alias choice.");
-  }
-  const selection = aliases[value];
-  if (selection === undefined) throw new RangeError("Alias choice was unavailable.");
-  return { kind: "selected", selection };
+  return { kind: "selected", selection: resolveAliasChoice(value, aliases).selection };
 }
 
 function selectedString(
