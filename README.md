@@ -43,7 +43,7 @@ Each release includes `SHA256SUMS` and GitHub artifact attestations alongside th
 
 ## Usage
 
-Run the bare command in an interactive terminal to open setup:
+Run the bare command in an interactive terminal to open the adaptive launcher:
 
 ```bash
 llm-now
@@ -51,11 +51,11 @@ llm-now
 
 ![Rendered llm-now help screen showing usage, options, API-key environment variables, and secure storage guidance](docs/demos/help-screen.jpg)
 
-Setup offers saved aliases, on-demand provider discovery, and cloud-provider API-key management. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
+The launcher separates work from connection management. With saved aliases it offers “Run with a saved shortcut…”, “Choose another model…”, and “Manage connections…”. Without aliases it offers “Choose a model to use…” and “Manage connections…”. Merely opening either root performs no provider discovery.
 
-A generation call without a saved alias prompts you to choose a discovered provider and model.
+Shortcut work opens the focused “Choose a saved shortcut” picker, asks for one contextual prompt, generates once, and exits in the same invocation. Fresh-model work discovers providers only after you choose that route, then continues through model choice, prompt entry, generation, and optional alias saving. Alias, provider, and model lists are sorted and filter as you type.
 
-If you have saved aliases, an interactive call offers those first. Choose “Select a new provider and model…” for a fresh selection. Alias, provider, and model lists are sorted and filter as you type.
+Connection management opens its own “What would you like to manage?” menu for provider discovery or API-key management. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
 
 Use a saved global alias:
 
@@ -127,7 +127,7 @@ keep the intended target. It never chooses between conflicting targets.
 
 Recognized environment variables are always authoritative. They are the recommended credential source for scripts, automation, and headless systems. When no recognized environment credential is set, an enabled release target may use one provider-specific key from the operating system's native credential store.
 
-Use bare `llm-now` to add, replace, or delete a stored fallback. Replacement verifies the new key before changing the existing record, and save/delete confirmations default to No. Deleting a stored fallback does not remove an active environment credential. Aliases remain version 1 provider/model records and never contain keys or credential identifiers.
+Use bare `llm-now`, choose “Manage connections…”, then “Add or manage API keys…” to add, replace, or delete a stored fallback. Replacement verifies the new key before changing the existing record, and save/delete confirmations default to No. Deleting a stored fallback does not remove an active environment credential. Aliases remain version 1 provider/model records and never contain keys or credential identifiers.
 
 ### How secure storage works
 
@@ -169,4 +169,4 @@ Exit codes:
 - `0`: successful generation or alias inventory, help, version, or completed/declined setup action (including declined/cancelled post-success alias saving)
 - `1`: discovery, model-list, generation, configuration (including an invalid, unreadable, or case-conflicting alias store), credential-store, or post-credential alias failure
 - `2`: invalid usage, including combining `--aliases` with another option or positional value
-- `130`: interactive setup or alias/provider/model selection cancelled before a durable action
+- `130`: launcher, management, prompt, alias, provider, or model selection cancelled before a durable action

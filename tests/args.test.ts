@@ -26,8 +26,10 @@ Usage:
   llm-now --provider <id> --model <id|default> --input <text>
 
 Rules:
-  Run llm-now with no arguments in a terminal to set up providers and API keys.
-  A terminal alias with no input source asks for one prompt.
+  Run llm-now with no arguments in a terminal to open the adaptive launcher.
+  Launcher work asks for one prompt and generates in the same invocation.
+  Provider discovery starts only after you choose a route that needs it.
+  A terminal alias with no input source also asks for one prompt.
   Otherwise, input comes from exactly one of --input or stdin.
   Omit selection for interactive choice; otherwise use an alias or provider/model.
   Model "default" is available only for codex-cli and claude-cli.

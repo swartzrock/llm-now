@@ -2,23 +2,24 @@
 # hook → provider discovery → local utility → cloud switch → install CTA.
 #
 # Render from the repository root with:
-#   vhs docs/llm-now-viral-demo.tape
+#   mkdir -p .tmp-llm-now-demo
+#   bun build ./index.ts --compile --outfile .tmp-llm-now-demo/llm-now
+#   LLM_NOW_DEMO_BIN="$PWD/.tmp-llm-now-demo/llm-now" vhs docs/demos/llm-now-demo.tape
+#   rm -rf .tmp-llm-now-demo
 #
 # Prerequisites:
 # - Save a fast, warmed-up local model as the alias `local`.
 # - Save an Anthropic Haiku model as the alias `haiku`.
 
-Output docs/llm-now-viral-demo.gif
+Output docs/demos/demo.gif
 
-Require llm-now
-Require gum
 Require cat
 Require clear
 Require mktemp
 Require rm
-Require zsh
+Require bash
 
-Set Shell zsh
+Set Shell bash
 Set FontFamily "Hack Nerd Font Mono"
 Set FontSize 22
 Set Width 1200
@@ -39,7 +40,9 @@ Set WindowBarSize 40
 
 # Prepare a deterministic prompt without showing setup commands.
 Hide
-Type `unfunction precmd 2>/dev/null; precmd_functions=(); RPROMPT=''; PS1='$ '; clear`
+Type `unset PROMPT_COMMAND; PS1='$ '; clear`
+Enter
+Type `test -x "$LLM_NOW_DEMO_BIN" || exit 1; llm-now() { "$LLM_NOW_DEMO_BIN" "$@"; }`
 Enter
 Type `DEMO_ORIG_DIR="$PWD"; DEMO_DIR="$(mktemp -d)"; cd "$DEMO_DIR"`
 Enter
@@ -47,14 +50,18 @@ Type `printf '%s\n' 'Explain this error in one sentence and give the most likely
 Enter
 
 # Hook and discovery: keep the promise visible while the command is typed.
-Type `clear; gum style --foreground "#C6A6FF" --bold "One command for every LLM already on your machine."`
+Type `clear; printf '\033[1;35m%s\033[0m\n' "One command for every LLM already on your machine."`
 Enter
 Show
 Sleep 1500 ms
 
 Type `llm-now`
 Enter
-Wait+Screen@10 s /What would you like to set up\?/
+Wait+Screen@10 s /What would you like to do\?/
+Type "Manage"
+Sleep 500 ms
+Enter
+Wait+Screen@10 s /What would you like to manage\?/
 Type "Discover"
 Sleep 500 ms
 Enter
@@ -66,7 +73,7 @@ Sleep 800 ms
 
 # Solve a recognizable problem using a local model.
 Hide
-Type `clear; gum style --foreground "#C6A6FF" --bold "Postgres won't connect? Get unstuck without leaving your terminal."`
+Type `clear; printf '\033[1;35m%s\033[0m\n' "Postgres won't connect? Get unstuck without leaving your terminal."`
 Enter
 Show
 Sleep 1 s
@@ -81,7 +88,7 @@ Sleep 4 s
 
 # Switch providers without changing the surrounding workflow.
 Hide
-Type `clear; gum style --foreground "#C6A6FF" --bold "Local or cloud? It's the same command."`
+Type `clear; printf '\033[1;35m%s\033[0m\n' "Local or cloud? It's the same command."`
 Enter
 Show
 Sleep 1 s
@@ -93,7 +100,7 @@ Sleep 4 s
 
 # Finish on a low-friction call to action. Do not execute the install command.
 Hide
-Type `clear; gum style --foreground "#C6A6FF" --bold "Try it with the models already on your machine."`
+Type `clear; printf '\033[1;35m%s\033[0m\n' "Try it with the models already on your machine."`
 Enter
 Show
 Sleep 1 s
