@@ -104,19 +104,54 @@ llm_commit_message | llm_markdown
 Stage a small change, run the function, and compare the message with
 `git diff --cached`. Review and edit the result before using it.
 
-### Why there is no one-key lazygit version yet
+### 1b. Generate and review a commit summary in lazygit
 
-Lazygit custom commands cannot invoke lazygit's native commit dialog. A shell
-command can preload lazygit's pending commit message, but it cannot open the
-dialog afterward. Custom prompts are not a substitute because each one appears
-separately. A configuration that generates a message with `G` and then asks you
-to press `c` adds work instead of providing a shortcut, so this cookbook does not
-recommend one.
+**Audience:** Lazygit users
 
-Supporting the intended experience—press `G` once, then review the generated
-summary above an editable description—requires a new lazygit integration point.
-Until lazygit exposes one, use `llm_commit_message` directly and paste its result
-where you already commit.
+This custom command shows one editable `Commit summary [generated]` field. It
+does not ask for or create a commit description.
+
+1. Put `llm_commit_message` in a small shell file, such as
+   `~/.config/lazygit/llm-now-functions.sh`.
+2. Add that file to lazygit's `config.yml`:
+
+```yaml
+os:
+  shellFunctionsFile: ~/.config/lazygit/llm-now-functions.sh
+```
+
+3. Merge this entry into the existing `customCommands` list:
+
+```yaml
+customCommands:
+  - key: G
+    context: files
+    description: Generate and review commit summary
+    prompts:
+      - type: input
+        title: Commit summary [generated]
+        key: Summary
+        initialValue: >-
+          {{ runCommand "/bin/zsh -c 'source ~/.config/lazygit/llm-now-functions.sh; llm_commit_message'" }}
+    command: git commit --message {{.Form.Summary | quote}}
+    loadingText: Committing staged changes
+    output: log
+```
+
+Stage a change, focus lazygit's Files panel, and press `G`. Review or edit the
+generated summary, then press Enter to commit or Escape to cancel. There is no
+second prompt.
+
+The explicit `source` in `initialValue` is intentional. Lazygit sources
+`shellFunctionsFile` for the final `command`, but its `runCommand` template helper
+executes the requested program directly when generating the prompt's initial
+value.
+
+`G` is unused in lazygit's current default Files-panel keybindings, but press `?`
+to check your installed version and personal configuration. Choose another unused
+key if needed. See lazygit's
+[custom-command guide](https://github.com/jesseduffield/lazygit/blob/master/docs/Custom_Command_Keybindings.md)
+for prompt fields, template functions, quoting, and contexts.
 
 ## 2. Add a tone dial to the clipboard
 
