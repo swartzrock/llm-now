@@ -108,9 +108,11 @@ Stage a small change, run the function, and compare the message with
 
 **Audience:** Lazygit users
 
-This custom command generates a summary, opens it in an editable lazygit prompt,
-then shows an empty description prompt. It runs `git commit` only after you review
-both fields and confirm.
+Lazygit's custom-command prompts appear one at a time, so they cannot reproduce
+the built-in commit dialog. This version generates a summary for lazygit's pending
+commit file. Pressing lazygit's normal commit key then opens the native dialog with
+the generated summary above an empty description field. The custom command never
+runs `git commit`.
 
 1. Put `llm_commit_message` in a small shell file, such as
    `~/.config/lazygit/llm-now-functions.sh`, and source that file from your normal
@@ -129,37 +131,31 @@ os:
 customCommands:
   - key: G
     context: files
-    description: Generate and edit commit message
-    prompts:
-      - type: input
-        title: Commit summary [generated]
-        key: Summary
-        initialValue: >-
-          {{ runCommand "/bin/zsh -c 'source ~/.config/lazygit/llm-now-functions.sh; llm_commit_message'" }}
-      - type: input
-        title: Commit description
-        key: Description
-        initialValue: ""
-      - type: confirm
-        title: Commit staged changes?
-        body: Commit with the summary and optional description above?
+    description: Generate commit summary for native commit dialog
     command: >-
-      git commit
-      --message {{.Form.Summary | quote}}
-      {{if .Form.Description}}--message {{.Form.Description | quote}}{{end}}
-    loadingText: Committing staged changes
-    output: log
+      summary=$(llm_commit_message) &&
+      printf '%s' "$summary" >
+      "$(git rev-parse --git-path LAZYGIT_PENDING_COMMIT)"
+    loadingText: Generating commit summary
+    output: none
 ```
 
-The explicit `source` inside `initialValue` is intentional. Lazygit uses
-`shellFunctionsFile` when it executes a custom command, but the `runCommand`
-template helper that generates an initial value runs the requested executable
-directly and does not load that file.
+Stage a change, focus lazygit's Files panel, and press `G`. When generation
+finishes, press `c` to open lazygit's native commit dialog. The generated text is
+already in `Commit summary`; `Commit description` is visible directly below it
+and remains empty for you to fill if needed. Review both fields, then submit with
+lazygit's normal commit key. Press Escape to cancel without committing.
 
-Stage a change, focus lazygit's Files panel, and press `G`. Edit the generated
-`Commit summary [generated]`, press Enter, optionally write a `Commit description`,
-then confirm the commit. Press Escape at any prompt to cancel. Custom-command
-prompts appear one after another rather than in lazygit's native two-field layout.
+`shellFunctionsFile` is enough here: lazygit sources it before executing the final
+custom command, so the command does not need to source the file again. The native
+dialog's `Commit summary` title is fixed by lazygit and cannot be changed to
+`Commit summary [generated]`; pressing `G` immediately beforehand is the generated
+marker.
+
+`LAZYGIT_PENDING_COMMIT` is lazygit's own preserved-message file. Writing only the
+generated subject to it preloads the summary while leaving the description empty.
+Running `G` again replaces any pending commit draft, but it still does not create a
+commit.
 
 `G` is unused in lazygit's current default Files-panel keybindings, but press `?`
 to check your installed version and personal configuration. Choose another unused
