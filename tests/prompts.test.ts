@@ -8,6 +8,8 @@ import {
   createTerminalColors,
   formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
+  selectAlias,
+  selectAliasOrFresh,
   selectProviderAndModel,
   stripTerminalSequences,
   validateCredentialCandidate,
@@ -37,11 +39,14 @@ function gateway(options: {
 
 function choices(
   ...answers: Array<PromptValue | null>
-): SearchablePrompter & { seen: PromptOption[][] } {
+): SearchablePrompter & { messages: string[]; seen: PromptOption[][] } {
+  const messages: string[] = [];
   const seen: PromptOption[][] = [];
   return {
+    messages,
     seen,
-    select: async (_message, options) => {
+    select: async (message, options) => {
+      messages.push(message);
       seen.push([...options]);
       const answer = answers.shift();
       if (answer === undefined) throw new Error("unexpected prompt");
@@ -58,6 +63,70 @@ function choices(
     },
   };
 }
+
+describe("terminal alias selection", () => {
+  test("presents sorted sanitized aliases only and returns the exact alias snapshot", async () => {
+    const unsafeAlias = "\u001b[31mZulu-secret";
+    const aliases = {
+      [unsafeAlias]: { provider: "openai", model: "gpt-secret\u0000" },
+      Alpha: { provider: "claude-cli", model: null },
+    } as const;
+    const prompter = choices(unsafeAlias);
+
+    const result = await selectAlias(
+      aliases,
+      prompter,
+      (alias, selection) => ({
+        label: alias.replaceAll("secret", "[redacted]"),
+        hint: formatSelection(selection).replaceAll("secret", "[redacted]"),
+      }),
+    );
+
+    expect(result.kind).toBe("selected");
+    if (result.kind !== "selected") throw new Error("expected selected alias");
+    expect(result.alias).toBe(unsafeAlias);
+    expect(result.selection).toBe(aliases[unsafeAlias]);
+    expect(prompter.messages).toEqual(["Choose a saved shortcut"]);
+    expect(prompter.seen).toEqual([[
+      { value: "Alpha", label: "Alpha", hint: "Claude CLI · default model" },
+      {
+        value: unsafeAlias,
+        label: "Zulu-[redacted]",
+        hint: "OpenAI · gpt-[redacted]",
+      },
+    ]]);
+  });
+
+  test("normalizes cancellation and rejects values outside the offered aliases", async () => {
+    const aliases = {
+      daily: { provider: "anthropic", model: "claude-sonnet" },
+    } as const;
+
+    expect(await selectAlias(aliases, choices(null))).toEqual({
+      kind: "cancelled",
+      exitCode: 130,
+    });
+    expect(selectAlias(aliases, choices("missing"))).rejects.toThrow(
+      "Prompter returned an invalid alias choice.",
+    );
+  });
+
+  test("keeps the mixed alias picker fresh-model escape path", async () => {
+    const prompter = choices(false);
+
+    expect(
+      await selectAliasOrFresh(
+        { daily: { provider: "anthropic", model: "claude-sonnet" } },
+        prompter,
+      ),
+    ).toEqual({ kind: "fresh" });
+    expect(prompter.messages).toEqual(["Choose an alias"]);
+    expect(prompter.seen[0]?.at(-1)).toEqual({
+      value: false,
+      label: "Select a new provider and model…",
+    });
+  });
+});
 
 describe("terminal provider and model selection", () => {
   test("presents provider then model choices and returns the selected pair", async () => {
@@ -188,13 +257,21 @@ describe("terminal provider and model selection", () => {
     expect(diagnostics.join("\n")).toContain("model-list (ollama)");
   });
 
-  test("offers provider default only for supported CLI providers", async () => {
+  test("offers default model only for supported CLI providers", async () => {
+    const prompter = choices("codex-cli", false);
     const cli = await selectProviderAndModel({
       runtime: gateway({ providers: ["codex-cli"] }).value,
-      prompter: choices("codex-cli", false),
+      prompter,
       diagnostic: () => {},
     });
     expect(cli).toEqual({ kind: "selected", provider: "codex-cli", model: null });
+    expect(prompter.seen[1]).toEqual([{ value: false, label: "default model" }]);
+    expect(formatSelection({ provider: "codex-cli", model: null })).toBe(
+      "Codex CLI · default model",
+    );
+    expect(formatSelection({ provider: "codex-cli", model: "gpt-5" })).toBe(
+      "Codex CLI · gpt-5",
+    );
 
     const diagnostics: string[] = [];
     const requiredModel = await selectProviderAndModel({
