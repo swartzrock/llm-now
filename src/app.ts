@@ -47,6 +47,7 @@ import {
   formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
   providerLabel,
+  selectAlias,
   selectAliasOrFresh,
   selectProviderAndModel,
   sanitizePromptText,
@@ -62,7 +63,9 @@ const DEFAULT_MODEL_LIST_TIMEOUT_MS = 10_000;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
 const MANAGE_API_KEYS_VALUE = "setup:manage-api-keys";
 const DISCOVER_PROVIDERS_VALUE = "setup:discover-providers";
-const ALIAS_SETUP_PREFIX = "setup:alias:";
+const RUN_SHORTCUT_VALUE = "launcher:run-shortcut";
+const CHOOSE_MODEL_VALUE = "launcher:choose-model";
+const MANAGE_CONNECTIONS_VALUE = "launcher:manage-connections";
 
 export type ApplicationPrompter = SearchablePrompter;
 
@@ -93,6 +96,11 @@ interface ResolvedSelection {
   selection: AliasRecord;
   named: boolean;
   existingAlias?: string;
+}
+
+interface LauncherWork {
+  prompt: string;
+  selection: ResolvedSelection;
 }
 
 function recognizedCredentialValues(env: ByokEnvironment): string[] {
@@ -195,6 +203,17 @@ function aliasPromptMessage(
     : sanitizePromptText(selection.model);
   return sanitizeDiagnostic(
     `Prompt for ${sanitizePromptText(alias)} · ${providerLabel(selection.provider)} · ${model}`,
+    deps.env,
+    deps.sensitive,
+  );
+}
+
+function freshPromptMessage(
+  deps: ApplicationDependencies,
+  selection: AliasRecord,
+): string {
+  return sanitizeDiagnostic(
+    `Prompt for ${formatSelection(selection)}`,
     deps.env,
     deps.sensitive,
   );
@@ -413,6 +432,14 @@ async function resolveSelection(
     }
   }
 
+  return resolveFreshSelection(deps, aliases, diagnostic);
+}
+
+async function resolveFreshSelection(
+  deps: ApplicationDependencies,
+  aliases: Readonly<Record<string, AliasRecord>>,
+  diagnostic: (text: string) => void,
+): Promise<ResolvedSelection | number> {
   const result = await selectProviderAndModel({
     runtime: {
       ...deps.runtime,
@@ -627,57 +654,33 @@ async function runCredentialManagement(
   }
 }
 
-async function runSetup(
+async function runProviderDiscovery(
   deps: ApplicationDependencies,
   diagnostic: (text: string) => void,
 ): Promise<number> {
-  const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
-    applicationAliasPath(deps),
-  )).aliases;
+  const providers: readonly ByokProviderId[] = [...new Set(await deps.runtime.discover())];
+  if (providers.length === 0) {
+    diagnostic(NO_PROVIDER_DIAGNOSTIC);
+    return 1;
+  }
+  const providerOptions = discoveredProviderOptions(providers);
+  const provider = await deps.prompter.select("Choose an available provider", providerOptions);
+  if (provider === null) return 130;
+  if (typeof provider !== "string" || !providers.includes(provider as ByokProviderId)) {
+    throw new RangeError("Provider choice was unavailable.");
+  }
+  deps.stderr.write(
+    `Provider ${providerLabel(provider as ByokProviderId)} is available. `
+    + `Run llm-now --provider ${provider} --model <id> --input "<prompt>".\n`,
+  );
+  return 0;
+}
 
-  const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => ({
-    value: `${ALIAS_SETUP_PREFIX}${alias}`,
-    label: sanitizeDiagnostic(alias, deps.env, deps.sensitive),
-    hint: safeFormatSelection(deps, selection),
-  })));
-  const selected = await deps.prompter.select("What would you like to set up?", [
-    ...aliasOptions,
-    { value: DISCOVER_PROVIDERS_VALUE, label: "Discover available providers…" },
-    { value: MANAGE_API_KEYS_VALUE, label: "Add or manage API keys…" },
-  ]);
-  if (selected === null) return 130;
-
-  if (typeof selected !== "string") {
-    throw new RangeError("Prompter returned an invalid setup choice.");
-  }
-  if (selected.startsWith(ALIAS_SETUP_PREFIX)) {
-    const alias = selected.slice(ALIAS_SETUP_PREFIX.length);
-    if (!Object.hasOwn(aliases, alias)) throw new RangeError("Alias choice was unavailable.");
-    deps.stderr.write(`Next: llm-now ${alias} --input "<prompt>"\n`);
-    return 0;
-  }
-  if (selected === DISCOVER_PROVIDERS_VALUE) {
-    const providers: readonly ByokProviderId[] = [...new Set(await deps.runtime.discover())];
-    if (providers.length === 0) {
-      diagnostic(NO_PROVIDER_DIAGNOSTIC);
-      return 1;
-    }
-    const providerOptions = discoveredProviderOptions(providers);
-    const provider = await deps.prompter.select("Choose an available provider", providerOptions);
-    if (provider === null) return 130;
-    if (typeof provider !== "string" || !providers.includes(provider as ByokProviderId)) {
-      throw new RangeError("Provider choice was unavailable.");
-    }
-    deps.stderr.write(
-      `Provider ${providerLabel(provider as ByokProviderId)} is available. `
-      + `Run llm-now --provider ${provider} --model <id> --input "<prompt>".\n`,
-    );
-    return 0;
-  }
-  if (selected !== MANAGE_API_KEYS_VALUE) {
-    throw new RangeError("Prompter returned an invalid setup choice.");
-  }
-
+async function runApiKeyManagement(
+  deps: ApplicationDependencies,
+  aliases: Readonly<Record<string, AliasRecord>>,
+  diagnostic: (text: string) => void,
+): Promise<number> {
   const cloudOptions = cloudCredentialProviderOptions();
   const providerValue = await deps.prompter.select("Choose an API-key provider", cloudOptions);
   if (providerValue === null) return 130;
@@ -693,6 +696,88 @@ async function runSetup(
     aliases,
     diagnostic,
   );
+}
+
+async function runManagement(
+  deps: ApplicationDependencies,
+  aliases: Readonly<Record<string, AliasRecord>>,
+  diagnostic: (text: string) => void,
+): Promise<number> {
+  const selected = await deps.prompter.select("What would you like to manage?", [
+    { value: DISCOVER_PROVIDERS_VALUE, label: "Discover available providers…" },
+    { value: MANAGE_API_KEYS_VALUE, label: "Add or manage API keys…" },
+  ]);
+  if (selected === null) return 130;
+  if (selected === DISCOVER_PROVIDERS_VALUE) {
+    return runProviderDiscovery(deps, diagnostic);
+  }
+  if (selected === MANAGE_API_KEYS_VALUE) {
+    return runApiKeyManagement(deps, aliases, diagnostic);
+  }
+  throw new RangeError("Prompter returned an invalid management choice.");
+}
+
+async function runLauncher(
+  deps: ApplicationDependencies,
+  diagnostic: (text: string) => void,
+): Promise<LauncherWork | number> {
+  const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
+    applicationAliasPath(deps),
+  )).aliases;
+  const hasAliases = Object.keys(aliases).length > 0;
+  const selected = await deps.prompter.select(
+    "What would you like to do?",
+    hasAliases
+      ? [
+        { value: RUN_SHORTCUT_VALUE, label: "Run with a saved shortcut…" },
+        { value: CHOOSE_MODEL_VALUE, label: "Choose another model…" },
+        { value: MANAGE_CONNECTIONS_VALUE, label: "Manage connections…" },
+      ]
+      : [
+        { value: CHOOSE_MODEL_VALUE, label: "Choose a model to use…" },
+        { value: MANAGE_CONNECTIONS_VALUE, label: "Manage connections…" },
+      ],
+  );
+  if (selected === null) return 130;
+
+  if (selected === MANAGE_CONNECTIONS_VALUE) {
+    return runManagement(deps, aliases, diagnostic);
+  }
+  if (selected === RUN_SHORTCUT_VALUE && hasAliases) {
+    const aliasResult = await selectAlias(
+      aliases,
+      deps.prompter,
+      (alias, selection) => ({
+        label: sanitizeDiagnostic(alias, deps.env, deps.sensitive),
+        hint: safeFormatSelection(deps, selection),
+      }),
+    );
+    if (aliasResult.kind === "cancelled") return aliasResult.exitCode;
+    const prompt = await collectAliasPrompt(
+      deps,
+      aliasPromptMessage(deps, aliasResult.alias, aliasResult.selection),
+    );
+    if (prompt === null) return 130;
+    return {
+      prompt,
+      selection: {
+        selection: aliasResult.selection,
+        named: true,
+      },
+    };
+  }
+  if (selected !== CHOOSE_MODEL_VALUE) {
+    throw new RangeError("Prompter returned an invalid launcher choice.");
+  }
+
+  const selection = await resolveFreshSelection(deps, aliases, diagnostic);
+  if (typeof selection === "number") return selection;
+  const prompt = await collectAliasPrompt(
+    deps,
+    freshPromptMessage(deps, selection.selection),
+  );
+  if (prompt === null) return 130;
+  return { prompt, selection };
 }
 
 function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
@@ -732,12 +817,14 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     }
 
     const interactive = isInteractive(deps.stdin, deps.stderr);
-    if (deps.args.length === 0 && interactive) {
-      return await runSetup(deps, diagnostic);
-    }
     let prompt: string;
     let selection: ResolvedSelection;
-    if (
+    if (deps.args.length === 0 && interactive) {
+      const outcome = await runLauncher(deps, diagnostic);
+      if (typeof outcome === "number") return outcome;
+      prompt = outcome.prompt;
+      selection = outcome.selection;
+    } else if (
       parsed.selection.kind === "alias"
       && parsed.input === undefined
       && interactive
