@@ -560,7 +560,11 @@ describe("one-shot application", () => {
       message: "What would you like to do?",
       options: [
         { value: "launcher:run-shortcut", label: "Run with a saved shortcut…" },
-        { value: "launcher:choose-model", label: "Choose another model…" },
+        { value: "launcher:create-shortcut", label: "Create a new shortcut…" },
+        {
+          value: "launcher:run-once",
+          label: "Run once with another provider and model…",
+        },
         { value: "launcher:manage-connections", label: "Manage connections…" },
       ],
     }]);
@@ -587,10 +591,90 @@ describe("one-shot application", () => {
     expect(seen).toEqual([{
       message: "What would you like to do?",
       options: [
-        { value: "launcher:choose-model", label: "Choose a model to use…" },
+        { value: "launcher:create-shortcut", label: "Create a new shortcut…" },
+        { value: "launcher:run-once", label: "Run once with a provider and model…" },
         { value: "launcher:manage-connections", label: "Manage connections…" },
       ],
     }]);
+  });
+
+  test("opens the exact static shortcut source menu without starting side effects", async () => {
+    const seen: Array<{ message: string; options: PromptOption[] }> = [];
+    let loads = 0;
+    let saves = 0;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({
+        choices: ["launcher:create-shortcut", null],
+        seen,
+      }),
+      loadAliases: async () => {
+        loads += 1;
+        return { version: 1, aliases: {} };
+      },
+      saveAlias: async () => {
+        saves += 1;
+        return "saved";
+      },
+      runtime: runtime({
+        discover: async () => {
+          throw new Error("opening shortcut creation must not discover providers");
+        },
+        listModels: async () => {
+          throw new Error("opening shortcut creation must not list models");
+        },
+        generate: async () => {
+          throw new Error("opening shortcut creation must not generate");
+        },
+      }),
+      credentialVault: {
+        get: async () => {
+          throw new Error("opening shortcut creation must not read the vault");
+        },
+        set: async () => {
+          throw new Error("opening shortcut creation must not write the vault");
+        },
+        delete: async () => {
+          throw new Error("opening shortcut creation must not delete from the vault");
+        },
+      },
+      credentialResolver: {
+        resolve: async () => {
+          throw new Error("opening shortcut creation must not resolve credentials");
+        },
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(loads).toBe(1);
+    expect(saves).toBe(0);
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+    expect(app.stdout.text()).toBe("");
+    expect(seen).toEqual([
+      {
+        message: "What would you like to do?",
+        options: [
+          { value: "launcher:create-shortcut", label: "Create a new shortcut…" },
+          { value: "launcher:run-once", label: "Run once with a provider and model…" },
+          { value: "launcher:manage-connections", label: "Manage connections…" },
+        ],
+      },
+      {
+        message: "How should this shortcut connect?",
+        options: [
+          {
+            value: "shortcut-source:available-provider",
+            label: "Use an available provider…",
+          },
+          {
+            value: "shortcut-source:add-api-key",
+            label: "Add a provider with an API key…",
+          },
+        ],
+      },
+    ]);
   });
 
   test("runs a selected shortcut with one alias snapshot through the shared output tail", async () => {
@@ -725,7 +809,7 @@ describe("one-shot application", () => {
     });
   });
 
-  test("configured and unconfigured model actions collect one prompt and generate once", async () => {
+  test("configured and unconfigured run-once actions generate once without save offers", async () => {
     const scenarios: Array<{
       name: string;
       aliases: AliasDocument["aliases"];
@@ -736,19 +820,16 @@ describe("one-shot application", () => {
       {
         name: "configured",
         aliases: { daily: { provider: "ollama" as const, model: "qwen" } },
-        actionLabel: "Choose another model…",
+        actionLabel: "Run once with another provider and model…",
         names: ["hello"],
         expectedInputMessages: ["Prompt for Ollama · qwen"],
       },
       {
         name: "unconfigured",
         aliases: {},
-        actionLabel: "Choose a model to use…",
-        names: ["hello", ""],
-        expectedInputMessages: [
-          "Prompt for Ollama · qwen",
-          "Enter an alias name for Ollama · qwen (Enter to exit)",
-        ],
+        actionLabel: "Run once with a provider and model…",
+        names: ["hello"],
+        expectedInputMessages: ["Prompt for Ollama · qwen"],
       },
     ];
 
@@ -756,13 +837,14 @@ describe("one-shot application", () => {
       const seen: Array<{ message: string; options: PromptOption[] }> = [];
       const inputMessages: string[] = [];
       let loads = 0;
+      let saves = 0;
       const app = dependencies({
         args: [],
         stdin: input("", true),
         stderrTty: true,
         env: { NO_COLOR: "1" },
         prompter: prompts({
-          choices: ["launcher:choose-model", "ollama", "qwen"],
+          choices: ["launcher:run-once", "ollama", "qwen"],
           names: scenario.names,
           seen,
           inputMessages,
@@ -782,13 +864,18 @@ describe("one-shot application", () => {
             return `${scenario.name} response`;
           },
         }),
+        saveAlias: async () => {
+          saves += 1;
+          return "saved";
+        },
       });
 
       expect(await runApplication(app.value), scenario.name).toBe(0);
       expect(loads, scenario.name).toBe(1);
+      expect(saves, scenario.name).toBe(0);
       expect(app.runtime.calls, scenario.name).toEqual({ discover: 1, list: 1, generate: 1 });
       expect(app.stdout.text(), scenario.name).toBe(`${scenario.name} response`);
-      expect(seen[0]?.options.find(({ value }) => value === "launcher:choose-model")?.label)
+      expect(seen[0]?.options.find(({ value }) => value === "launcher:run-once")?.label)
         .toBe(scenario.actionLabel);
       expect(seen.slice(1).map(({ message }) => message), scenario.name).toEqual([
         "Choose a provider",
@@ -810,8 +897,8 @@ describe("one-shot application", () => {
       stdin: input("", true),
       stderrTty: true,
       prompter: prompts({
-        choices: ["launcher:choose-model", "codex-cli", false],
-        names: ["hello", ""],
+        choices: ["launcher:run-once", "codex-cli", false],
+        names: ["hello"],
         inputMessages,
       }),
       loadAliases: async () => ({ version: 1, aliases: {} }),
@@ -831,27 +918,24 @@ describe("one-shot application", () => {
 
     expect(await runApplication(app.value)).toBe(0);
     expect(app.stdout.text()).toBe("default response");
-    expect(inputMessages).toEqual([
-      "Prompt for Codex CLI · default model",
-      expect.stringContaining("Codex CLI · default model"),
-    ]);
+    expect(inputMessages).toEqual(["Prompt for Codex CLI · default model"]);
   });
 
   test("cancels fresh provider, model, or target prompts before generation", async () => {
     const scenarios = [
       {
         name: "provider",
-        choices: ["launcher:choose-model", null],
+        choices: ["launcher:run-once", null],
         names: [] as Array<string | null>,
       },
       {
         name: "model",
-        choices: ["launcher:choose-model", "ollama", null],
+        choices: ["launcher:run-once", "ollama", null],
         names: [] as Array<string | null>,
       },
       {
         name: "target prompt",
-        choices: ["launcher:choose-model", "ollama", "qwen"],
+        choices: ["launcher:run-once", "ollama", "qwen"],
         names: [null],
       },
     ];

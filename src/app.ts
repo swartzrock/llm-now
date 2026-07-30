@@ -64,8 +64,11 @@ const MAX_DIAGNOSTIC_LENGTH = 1_024;
 const MANAGE_API_KEYS_VALUE = "setup:manage-api-keys";
 const DISCOVER_PROVIDERS_VALUE = "setup:discover-providers";
 const RUN_SHORTCUT_VALUE = "launcher:run-shortcut";
-const CHOOSE_MODEL_VALUE = "launcher:choose-model";
+const CREATE_SHORTCUT_VALUE = "launcher:create-shortcut";
+const RUN_ONCE_VALUE = "launcher:run-once";
 const MANAGE_CONNECTIONS_VALUE = "launcher:manage-connections";
+const AVAILABLE_PROVIDER_SOURCE_VALUE = "shortcut-source:available-provider";
+const ADD_API_KEY_SOURCE_VALUE = "shortcut-source:add-api-key";
 
 export type ApplicationPrompter = SearchablePrompter;
 
@@ -92,9 +95,11 @@ export interface ApplicationDependencies {
   nativeVaultEnabled: boolean;
 }
 
+type ShortcutFollowUp = "none" | "existing-only" | "legacy";
+
 interface ResolvedSelection {
   selection: AliasRecord;
-  named: boolean;
+  shortcutFollowUp: ShortcutFollowUp;
   existingAlias?: string;
 }
 
@@ -408,13 +413,13 @@ async function resolveSelection(
         applicationAliasPath(deps),
         deterministic.alias,
       ),
-      named: true,
+      shortcutFollowUp: "none",
     };
   }
   if (deterministic.kind === "explicit") {
     return {
       selection: { provider: deterministic.provider, model: deterministic.model },
-      named: false,
+      shortcutFollowUp: "legacy",
     };
   }
 
@@ -427,18 +432,19 @@ async function resolveSelection(
     if (aliasResult.kind === "selected") {
       return {
         selection: aliasResult.selection,
-        named: true,
+        shortcutFollowUp: "none",
       };
     }
   }
 
-  return resolveFreshSelection(deps, aliases, diagnostic);
+  return resolveFreshSelection(deps, aliases, diagnostic, "legacy");
 }
 
 async function resolveFreshSelection(
   deps: ApplicationDependencies,
   aliases: Readonly<Record<string, AliasRecord>>,
   diagnostic: (text: string) => void,
+  shortcutFollowUp: ShortcutFollowUp,
 ): Promise<ResolvedSelection | number> {
   const result = await selectProviderAndModel({
     runtime: {
@@ -463,7 +469,7 @@ async function resolveFreshSelection(
     .map(([alias]) => ({ value: alias, label: alias })))[0]?.value;
   return {
     selection: resolved,
-    named: false,
+    shortcutFollowUp,
     existingAlias: typeof existingAlias === "string" ? existingAlias : undefined,
   };
 }
@@ -730,11 +736,16 @@ async function runLauncher(
     hasAliases
       ? [
         { value: RUN_SHORTCUT_VALUE, label: "Run with a saved shortcut…" },
-        { value: CHOOSE_MODEL_VALUE, label: "Choose another model…" },
+        { value: CREATE_SHORTCUT_VALUE, label: "Create a new shortcut…" },
+        {
+          value: RUN_ONCE_VALUE,
+          label: "Run once with another provider and model…",
+        },
         { value: MANAGE_CONNECTIONS_VALUE, label: "Manage connections…" },
       ]
       : [
-        { value: CHOOSE_MODEL_VALUE, label: "Choose a model to use…" },
+        { value: CREATE_SHORTCUT_VALUE, label: "Create a new shortcut…" },
+        { value: RUN_ONCE_VALUE, label: "Run once with a provider and model…" },
         { value: MANAGE_CONNECTIONS_VALUE, label: "Manage connections…" },
       ],
   );
@@ -742,6 +753,26 @@ async function runLauncher(
 
   if (selected === MANAGE_CONNECTIONS_VALUE) {
     return runManagement(deps, aliases, diagnostic);
+  }
+  if (selected === CREATE_SHORTCUT_VALUE) {
+    const source = await deps.prompter.select("How should this shortcut connect?", [
+      {
+        value: AVAILABLE_PROVIDER_SOURCE_VALUE,
+        label: "Use an available provider…",
+      },
+      {
+        value: ADD_API_KEY_SOURCE_VALUE,
+        label: "Add a provider with an API key…",
+      },
+    ]);
+    if (source === null) return 130;
+    if (
+      source !== AVAILABLE_PROVIDER_SOURCE_VALUE
+      && source !== ADD_API_KEY_SOURCE_VALUE
+    ) {
+      throw new RangeError("Prompter returned an invalid shortcut connection source.");
+    }
+    throw new RangeError("Shortcut creation source is not implemented.");
   }
   if (selected === RUN_SHORTCUT_VALUE && hasAliases) {
     const aliasResult = await selectAlias(
@@ -762,15 +793,20 @@ async function runLauncher(
       prompt,
       selection: {
         selection: aliasResult.selection,
-        named: true,
+        shortcutFollowUp: "none",
       },
     };
   }
-  if (selected !== CHOOSE_MODEL_VALUE) {
+  if (selected !== RUN_ONCE_VALUE) {
     throw new RangeError("Prompter returned an invalid launcher choice.");
   }
 
-  const selection = await resolveFreshSelection(deps, aliases, diagnostic);
+  const selection = await resolveFreshSelection(
+    deps,
+    aliases,
+    diagnostic,
+    "existing-only",
+  );
   if (typeof selection === "number") return selection;
   const prompt = await collectOneShotPrompt(
     deps,
@@ -864,7 +900,11 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     await writeResponse(deps.stdout, response);
 
     if (interactive) writeInteractiveBoundary(deps.stderr, response);
-    if (interactive && selection.existingAlias !== undefined) {
+    if (
+      interactive
+      && selection.shortcutFollowUp !== "none"
+      && selection.existingAlias !== undefined
+    ) {
       const colors = createTerminalColors(deps.stderr, deps.env);
       const target = safeFormatSelection(deps, selection.selection);
       deps.stderr.write(
@@ -875,7 +915,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         + colors.white(`llm-now ${selection.existingAlias} --input "<prompt>"`)
         + "\n",
       );
-    } else if (interactive && !selection.named) {
+    } else if (interactive && selection.shortcutFollowUp === "legacy") {
       if (!(await offerAliasSave(deps, selection.selection, diagnostic))) return 1;
     }
     return 0;
