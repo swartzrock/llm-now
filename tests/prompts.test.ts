@@ -346,6 +346,72 @@ describe("terminal provider and model selection", () => {
     expect(prompter.seen[1]?.[0]?.label).toBe("GPT");
   });
 
+  test("applies an optional model predicate before constructing creation options", async () => {
+    const prompter = choices("openai", "safe-model");
+    const diagnostics: string[] = [];
+    const result = await selectProviderAndModel({
+      runtime: gateway({
+        providers: ["openai"],
+        models: {
+          openai: [
+            { id: "unsafe-secret", label: "Unsafe secret" },
+            { id: "safe-model", label: "Safe model" },
+          ],
+        },
+      }).value,
+      prompter,
+      diagnostic: (text) => diagnostics.push(text),
+      modelEligible: (model) => !model.id.includes("secret"),
+    });
+
+    expect(result).toEqual({ kind: "selected", provider: "openai", model: "safe-model" });
+    expect(prompter.seen[1]).toEqual([
+      { value: "safe-model", label: "Safe model", hint: "safe-model" },
+    ]);
+    expect(diagnostics).toEqual([]);
+  });
+
+  test("reports an explicit failure when creation has no eligible model", async () => {
+    const prompter = choices("openai");
+    const diagnostics: string[] = [];
+    const result = await selectProviderAndModel({
+      runtime: gateway({
+        providers: ["openai"],
+        models: { openai: [{ id: "unsafe-secret", label: "Unsafe secret" }] },
+      }).value,
+      prompter,
+      diagnostic: (text) => diagnostics.push(text),
+      modelEligible: () => false,
+    });
+
+    expect(result).toEqual({ kind: "failed", exitCode: 1, stage: "model-list" });
+    expect(prompter.seen).toHaveLength(1);
+    expect(diagnostics).toEqual([
+      "model-list (openai): provider returned no eligible models.",
+    ]);
+  });
+
+  test("keeps legacy model choices unchanged when no predicate is supplied", async () => {
+    const prompter = choices("openai", "unsafe-secret");
+    const result = await selectProviderAndModel({
+      runtime: gateway({
+        providers: ["openai"],
+        models: { openai: [{ id: "unsafe-secret", label: "Unsafe secret" }] },
+      }).value,
+      prompter,
+      diagnostic: () => {},
+    });
+
+    expect(result).toEqual({
+      kind: "selected",
+      provider: "openai",
+      model: "unsafe-secret",
+    });
+    expect(prompter.seen[1]).toEqual([
+      { value: "unsafe-secret", label: "Unsafe secret", hint: "unsafe-secret" },
+    ]);
+  });
+
   test("real Clack adapter filters provider hints and renders only to its output stream", async () => {
     const input = new PassThrough();
     const output = new PassThrough();

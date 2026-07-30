@@ -8,6 +8,7 @@ import {
 } from "@swartzrock/byok-runtime";
 import pc from "picocolors";
 import type { Readable, Writable } from "node:stream";
+import { dirname } from "node:path";
 import {
   type AliasRecord,
   AliasStoreError,
@@ -34,12 +35,15 @@ import {
 } from "./io.ts";
 import {
   CredentialVaultError,
+  withCredentialMutationLock,
+  type CredentialMutationLock,
   type CredentialResolver,
   type CredentialVault,
   type SensitiveValueRegistry,
 } from "./credentials.ts";
 import {
   cloudCredentialProviderOptions,
+  CLOUD_CREDENTIAL_PROVIDERS,
   createSearchablePrompter,
   createTerminalColors,
   discoveredProviderOptions,
@@ -93,6 +97,7 @@ export interface ApplicationDependencies {
   credentialResolver: CredentialResolver;
   sensitive: SensitiveValueRegistry;
   nativeVaultEnabled: boolean;
+  credentialMutationLock?: CredentialMutationLock;
 }
 
 type ShortcutFollowUp = "none" | "existing-only" | "legacy";
@@ -345,12 +350,132 @@ async function prepareCredentialAlias(
   }
 }
 
+function isShortcutSafeModel(
+  deps: ApplicationDependencies,
+  model: ByokModelOption,
+): boolean {
+  return sanitizePromptText(model.id) === model.id
+    && deps.sensitive.redact(model.id) === model.id
+    && deps.sensitive.redact(sanitizePromptText(model.label)) === sanitizePromptText(model.label);
+}
+
+type RequiredShortcutTarget =
+  | { kind: "selected"; selection: AliasRecord }
+  | {
+    kind: "validated-models";
+    provider: ByokCloudProviderId;
+    models: readonly ByokModelOption[];
+  };
+
+type RequiredShortcutResult =
+  | { kind: "saved"; name: string; selection: AliasRecord }
+  | { kind: "cancelled" }
+  | { kind: "failed"; reason: "no-eligible-model" };
+
+async function prepareRequiredShortcut(
+  deps: ApplicationDependencies,
+  target: RequiredShortcutTarget,
+  diagnostic: (text: string) => void,
+): Promise<RequiredShortcutResult> {
+  let selection: AliasRecord;
+  if (target.kind === "selected") {
+    selection = target.selection;
+  } else {
+    const models = target.models.filter((model) => isShortcutSafeModel(deps, model));
+    if (models.length === 0) {
+      return { kind: "failed", reason: "no-eligible-model" };
+    }
+    const options = sortPromptOptions(models.map((model) => {
+      const id = sanitizePromptText(model.id);
+      const label = sanitizePromptText(model.label) || id;
+      return {
+        value: model.id,
+        label,
+        ...(label.toLowerCase() !== id.toLowerCase() ? { hint: id } : {}),
+      };
+    }));
+    const model = selectedCredentialModel(
+      await deps.prompter.select("Choose a model for the shortcut", options),
+      models,
+    );
+    if (model === null) return { kind: "cancelled" };
+    selection = { provider: target.provider, model };
+  }
+
+  const save = deps.saveAlias ?? saveStoredAlias;
+  const targetLabel = safeFormatSelection(deps, selection);
+  while (true) {
+    const name = await deps.prompter.input("Name this shortcut", {
+      validate: (value) => {
+        if (value === undefined || value === "") return "Enter a shortcut name.";
+        if (deps.sensitive.redact(value) !== value) {
+          return "Shortcut names must not contain an API key.";
+        }
+        return isValidAliasName(value)
+          ? undefined
+          : "Use 1-64 ASCII letters, numbers, hyphens, or underscores.";
+      },
+    });
+    if (name === null) return { kind: "cancelled" };
+    if (name === "") {
+      diagnostic("config: enter a shortcut name.");
+      continue;
+    }
+    if (deps.sensitive.redact(name) !== name) {
+      diagnostic("config: shortcut names must not contain an API key.");
+      continue;
+    }
+    if (!isValidAliasName(name)) {
+      diagnostic("config: invalid shortcut name; use 1-64 ASCII letters, numbers, hyphens, or underscores.");
+      continue;
+    }
+
+    let overwriteCancelled = false;
+    const result = await save(applicationAliasPath(deps), name, selection, {
+      confirmOverwrite: async (_name, current) => {
+        const overwrite = await deps.prompter.confirm(
+          `Overwrite shortcut ${name}?\nOld: ${
+            current === undefined ? "(not present)" : safeFormatSelection(deps, current)
+          }\nNew: ${targetLabel}`,
+          { initialValue: false },
+        );
+        overwriteCancelled = overwrite === null;
+        return overwrite === true;
+      },
+    });
+    if (result === "declined") {
+      if (overwriteCancelled) return { kind: "cancelled" };
+      continue;
+    }
+
+    const colors = createTerminalColors(deps.stderr, deps.env);
+    deps.stderr.write(
+      result === "already-saved"
+        ? `${colors.green(`◆ Shortcut already saved ${name} → ${targetLabel}`)}\n`
+        : `${colors.green(`◆ Saved shortcut ${name} → ${targetLabel}`)}\n`,
+    );
+    return { kind: "saved", name, selection };
+  }
+}
+
 function applicationAliasPath(deps: ApplicationDependencies): string {
   return deps.aliasPath ?? resolveAliasPath({
     platform: deps.platform,
     home: deps.home,
     env: deps.env,
   });
+}
+
+function runWithCredentialMutationLock<T>(
+  deps: ApplicationDependencies,
+  provider: ByokCloudProviderId,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return (deps.credentialMutationLock ?? withCredentialMutationLock)(
+    dirname(applicationAliasPath(deps)),
+    provider,
+    operation,
+  );
 }
 
 async function generateWithTimeout(
@@ -445,6 +570,7 @@ async function resolveFreshSelection(
   aliases: Readonly<Record<string, AliasRecord>>,
   diagnostic: (text: string) => void,
   shortcutFollowUp: ShortcutFollowUp,
+  modelEligible?: (model: ByokModelOption) => boolean,
 ): Promise<ResolvedSelection | number> {
   const result = await selectProviderAndModel({
     runtime: {
@@ -458,6 +584,7 @@ async function resolveFreshSelection(
     },
     prompter: deps.prompter,
     diagnostic,
+    modelEligible,
   });
   if (result.kind !== "selected") return result.exitCode;
 
@@ -525,6 +652,77 @@ async function offerAliasSave(
   }
 }
 
+function registerResolvedCredential(
+  sensitive: SensitiveValueRegistry,
+  credential: Awaited<ReturnType<CredentialResolver["resolve"]>>,
+): void {
+  if (credential.source === "environment" || credential.source === "vault") {
+    sensitive.register(credential.apiKey);
+  }
+}
+
+type AddCredentialResult =
+  | { kind: "saved"; models: readonly ByokModelOption[] }
+  | { kind: "stopped"; exitCode: number };
+
+async function addCredential(
+  deps: ApplicationDependencies,
+  provider: ByokCloudProviderId,
+  diagnostic: (text: string) => void,
+): Promise<AddCredentialResult> {
+  let candidate: string;
+  while (true) {
+    const value = await deps.prompter.password(`Enter the ${providerLabel(provider)} API key`, {
+      validate: validateCredentialCandidate,
+    });
+    if (value === null) return { kind: "stopped", exitCode: 130 };
+    deps.sensitive.register(value);
+    const validationMessage = validateCredentialCandidate(value);
+    if (validationMessage !== undefined) {
+      diagnostic(`credential: ${validationMessage}`);
+      continue;
+    }
+    candidate = value;
+    break;
+  }
+
+  const models = await withStageTimeout(
+    deps.runtime.validateCredential(provider, candidate),
+    deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
+    "model-list",
+    provider,
+  );
+  const save = await deps.prompter.confirm(
+    `Save this verified ${providerLabel(provider)} API key?`,
+    { initialValue: false },
+  );
+  if (save === null) return { kind: "stopped", exitCode: 130 };
+  if (!save) return { kind: "stopped", exitCode: 0 };
+
+  const written = await runWithCredentialMutationLock(deps, provider, async () => {
+    deps.credentialResolver.invalidate?.(provider);
+    const current = await deps.credentialResolver.resolve(provider);
+    registerResolvedCredential(deps.sensitive, current);
+    if (current.source !== "missing") return false;
+    await deps.credentialVault.set(provider, candidate);
+    deps.credentialResolver.invalidate?.(provider);
+    return true;
+  });
+  if (!written) {
+    diagnostic(
+      `credential: the ${providerLabel(provider)} credential changed concurrently; the new API key was not saved.`,
+    );
+    return { kind: "stopped", exitCode: 1 };
+  }
+
+  const colors = createTerminalColors(deps.stderr, deps.env);
+  deps.stderr.write(
+    colors.green(`◆ ${providerLabel(provider)} · API key verified\n`)
+    + "  stored as: saved credential\n",
+  );
+  return { kind: "saved", models };
+}
+
 async function runCredentialManagement(
   deps: ApplicationDependencies,
   provider: ByokCloudProviderId,
@@ -565,8 +763,20 @@ async function runCredentialManagement(
       );
       if (confirmed === null) return 130;
       if (!confirmed) return 0;
-      const deleted = await vault.delete(provider);
-      resolver.invalidate?.(provider);
+      const deleted = await runWithCredentialMutationLock(deps, provider, async () => {
+        const current = await vault.get(provider);
+        if (current !== null) sensitive.register(current);
+        if (current !== stored) return null;
+        const result = await vault.delete(provider);
+        resolver.invalidate?.(provider);
+        return result;
+      });
+      if (deleted === null) {
+        diagnostic(
+          `credential: the saved ${providerLabel(provider)} API key changed concurrently; it was not deleted.`,
+        );
+        return 1;
+      }
       const activeEnv = BYOK_PROVIDER_API_KEY_ENV_VARS[provider]
         .find((name) => Boolean(deps.env[name]));
       if (!deleted) {
@@ -620,8 +830,20 @@ async function runCredentialManagement(
   if (save === null) return 130;
   if (!save) return 0;
 
-  await vault.set(provider, candidate);
-  resolver.invalidate?.(provider);
+  const written = await runWithCredentialMutationLock(deps, provider, async () => {
+    const current = await vault.get(provider);
+    if (current !== null) sensitive.register(current);
+    if (current !== stored) return false;
+    await vault.set(provider, candidate);
+    resolver.invalidate?.(provider);
+    return true;
+  });
+  if (!written) {
+    diagnostic(
+      `credential: the saved ${providerLabel(provider)} API key changed concurrently; the new API key was not saved.`,
+    );
+    return 1;
+  }
   const colors = createTerminalColors(deps.stderr, deps.env);
   deps.stderr.write(
     colors.green(`◆ ${providerLabel(provider)} · API key verified\n`)
@@ -680,6 +902,130 @@ async function runProviderDiscovery(
     + `Run llm-now --provider ${provider} --model <id> --input "<prompt>".\n`,
   );
   return 0;
+}
+
+async function eligibleCredentialProviders(
+  deps: ApplicationDependencies,
+): Promise<ByokCloudProviderId[]> {
+  const eligible: ByokCloudProviderId[] = [];
+  for (const provider of CLOUD_CREDENTIAL_PROVIDERS) {
+    const credential = await deps.credentialResolver.resolve(provider);
+    registerResolvedCredential(deps.sensitive, credential);
+    if (credential.source === "missing") eligible.push(provider);
+  }
+  return eligible;
+}
+
+async function finishCreatedShortcut(
+  deps: ApplicationDependencies,
+  shortcut: Extract<RequiredShortcutResult, { kind: "saved" }>,
+  diagnostic: (text: string) => void,
+): Promise<LauncherWork | number> {
+  const prompt = await collectOneShotPrompt(
+    deps,
+    aliasPromptMessage(deps, shortcut.name, shortcut.selection),
+  );
+  if (prompt === null) {
+    diagnostic("The shortcut was saved, but its first prompt was cancelled; no generation ran.");
+    return 0;
+  }
+  return {
+    prompt,
+    selection: {
+      selection: shortcut.selection,
+      shortcutFollowUp: "none",
+    },
+  };
+}
+
+async function createShortcutFromAvailableProvider(
+  deps: ApplicationDependencies,
+  aliases: Readonly<Record<string, AliasRecord>>,
+  diagnostic: (text: string) => void,
+): Promise<LauncherWork | number> {
+  const selection = await resolveFreshSelection(
+    deps,
+    aliases,
+    diagnostic,
+    "none",
+    (model) => isShortcutSafeModel(deps, model),
+  );
+  if (typeof selection === "number") return selection;
+  const shortcut = await prepareRequiredShortcut(
+    deps,
+    { kind: "selected", selection: selection.selection },
+    diagnostic,
+  );
+  if (shortcut.kind === "cancelled") return 130;
+  if (shortcut.kind === "failed") return 1;
+  return finishCreatedShortcut(deps, shortcut, diagnostic);
+}
+
+async function createShortcutWithApiKey(
+  deps: ApplicationDependencies,
+  diagnostic: (text: string) => void,
+): Promise<LauncherWork | number> {
+  if (deps.nativeVaultEnabled !== true) {
+    diagnostic(
+      `native credential storage unavailable on this target; use environment variable ${
+        BYOK_API_KEY_ENV_VARS.join(" or ")
+      }.`,
+    );
+    return 1;
+  }
+
+  const eligible = await eligibleCredentialProviders(deps);
+  if (eligible.length === 0) {
+    diagnostic(
+      "credential: no API-key provider needs a saved credential; use an available provider or manage an existing credential.",
+    );
+    return 1;
+  }
+  const options = cloudCredentialProviderOptions(eligible);
+  const selected = await deps.prompter.select("Choose a provider to add", options);
+  if (selected === null) return 130;
+  if (
+    typeof selected !== "string"
+    || !options.some((option) => option.value === selected)
+  ) {
+    throw new RangeError("Prompter returned an invalid credential provider choice.");
+  }
+  const provider = selected as ByokCloudProviderId;
+  const credential = await addCredential(deps, provider, diagnostic);
+  if (credential.kind === "stopped") return credential.exitCode;
+
+  let shortcut: RequiredShortcutResult;
+  try {
+    shortcut = await prepareRequiredShortcut(
+      deps,
+      {
+        kind: "validated-models",
+        provider,
+        models: credential.models,
+      },
+      diagnostic,
+    );
+  } catch (error) {
+    diagnostic(
+      `The API key was saved, but the shortcut was not saved: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return 1;
+  }
+  if (shortcut.kind === "cancelled") {
+    diagnostic("The API key was saved, but shortcut creation was cancelled.");
+    return 0;
+  }
+  if (shortcut.kind === "failed") {
+    diagnostic(
+      `model-list (${provider}): provider returned ${
+        credential.models.length === 0 ? "no models" : "no shortcut-safe models"
+      }; the API key was saved without a shortcut.`,
+    );
+    return 1;
+  }
+  return finishCreatedShortcut(deps, shortcut, diagnostic);
 }
 
 async function runApiKeyManagement(
@@ -772,7 +1118,9 @@ async function runLauncher(
     ) {
       throw new RangeError("Prompter returned an invalid shortcut connection source.");
     }
-    throw new RangeError("Shortcut creation source is not implemented.");
+    return source === AVAILABLE_PROVIDER_SOURCE_VALUE
+      ? createShortcutFromAvailableProvider(deps, aliases, diagnostic)
+      : createShortcutWithApiKey(deps, diagnostic);
   }
   if (selected === RUN_SHORTCUT_VALUE && hasAliases) {
     const aliasResult = await selectAlias(
@@ -897,6 +1245,10 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       selection.selection.model,
       prompt,
     );
+    if (deps.sensitive.redact(response) !== response) {
+      diagnostic("generation: response withheld because it contained a registered credential.");
+      return 1;
+    }
     await writeResponse(deps.stdout, response);
 
     if (interactive) writeInteractiveBoundary(deps.stderr, response);

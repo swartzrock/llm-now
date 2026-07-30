@@ -3,6 +3,8 @@ import {
   type ByokCloudProviderId,
   type ByokEnvironment,
 } from "@swartzrock/byok-runtime";
+import { chmod, lstat, mkdir, open, unlink } from "node:fs/promises";
+import { join } from "node:path";
 
 export const NATIVE_VAULT_SERVICE = "llm-now";
 
@@ -48,6 +50,85 @@ export interface CredentialVault {
   get(provider: ByokCloudProviderId): Promise<string | null>;
   set(provider: ByokCloudProviderId, value: string): Promise<void>;
   delete(provider: ByokCloudProviderId): Promise<boolean>;
+}
+
+export interface CredentialMutationLockOptions {
+  lockTimeoutMs?: number;
+  retryDelayMs?: number;
+  staleLockMs?: number;
+}
+
+export type CredentialMutationLock = <T>(
+  directory: string,
+  provider: ByokCloudProviderId,
+  operation: () => Promise<T>,
+) => Promise<T>;
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export async function withCredentialMutationLock<T>(
+  directory: string,
+  provider: ByokCloudProviderId,
+  operation: () => Promise<T>,
+  options: CredentialMutationLockOptions = {},
+): Promise<T> {
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") await chmod(directory, 0o700);
+
+  const lockPath = join(directory, `credential-${provider}.lock`);
+  const lockTimeoutMs = options.lockTimeoutMs ?? 2_000;
+  const retryDelayMs = options.retryDelayMs ?? 20;
+  const staleLockMs = options.staleLockMs ?? 30_000;
+  const startedAt = Date.now();
+
+  while (true) {
+    try {
+      const handle = await open(lockPath, "wx", 0o600);
+      try {
+        await handle.writeFile(`${process.pid}\n`);
+      } catch (error) {
+        await unlink(lockPath).catch(() => undefined);
+        throw error;
+      } finally {
+        await handle.close();
+      }
+      break;
+    } catch (error) {
+      if (!hasErrorCode(error, "EEXIST")) throw error;
+      let lock;
+      try {
+        lock = await lstat(lockPath);
+      } catch (statError) {
+        if (hasErrorCode(statError, "ENOENT")) continue;
+        throw statError;
+      }
+      if (!lock.isFile()) {
+        throw new Error(`invalid credential mutation lock: ${lockPath}`);
+      }
+      if (Date.now() - lock.mtimeMs > staleLockMs) {
+        await unlink(lockPath).catch((unlinkError: unknown) => {
+          if (!hasErrorCode(unlinkError, "ENOENT")) throw unlinkError;
+        });
+        continue;
+      }
+      if (Date.now() - startedAt >= lockTimeoutMs) {
+        throw new Error(`timed out waiting for credential mutation lock: ${lockPath}`);
+      }
+      await delay(retryDelayMs);
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    await unlink(lockPath).catch(() => undefined);
+  }
 }
 
 export function nativeVaultName(provider: ByokCloudProviderId): string {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   BYOK_PROVIDER_API_KEY_ENV_VARS,
   type ByokEnvironment,
@@ -11,8 +11,19 @@ import {
   createSensitiveValueRegistry,
   isNativeVaultEnabled,
   nativeVaultName,
+  withCredentialMutationLock,
   type NativeSecretStore,
 } from "../src/credentials.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map((path) =>
+    rm(path, { recursive: true, force: true })
+  ));
+});
 
 function memoryStore(overrides: Partial<NativeSecretStore> = {}): NativeSecretStore {
   return {
@@ -262,5 +273,68 @@ describe("credential resolution and redaction", () => {
     expect(sensitive.redact("secret-long secret another")).toBe(
       "[REDACTED] [REDACTED] [REDACTED]",
     );
+  });
+});
+
+describe("credential mutation locks", () => {
+  test("serializes the same provider across concurrent mutation attempts", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-credential-lock-"));
+    temporaryDirectories.push(directory);
+    const events: string[] = [];
+    let releaseFirst!: () => void;
+    let markFirstEntered!: () => void;
+    const firstMayExit = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstEntered = new Promise<void>((resolve) => {
+      markFirstEntered = resolve;
+    });
+
+    const first = withCredentialMutationLock(directory, "openai", async () => {
+      events.push("first:entered");
+      markFirstEntered();
+      await firstMayExit;
+      events.push("first:leaving");
+    });
+    await firstEntered;
+    const second = withCredentialMutationLock(directory, "openai", async () => {
+      events.push("second:entered");
+    });
+    await Bun.sleep(30);
+
+    expect(events).toEqual(["first:entered"]);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(events).toEqual([
+      "first:entered",
+      "first:leaving",
+      "second:entered",
+    ]);
+  });
+
+  test("does not block mutations for different providers", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-credential-lock-"));
+    temporaryDirectories.push(directory);
+    let releaseOpenAi!: () => void;
+    let markOpenAiEntered!: () => void;
+    const openAiMayExit = new Promise<void>((resolve) => {
+      releaseOpenAi = resolve;
+    });
+    const openAiEntered = new Promise<void>((resolve) => {
+      markOpenAiEntered = resolve;
+    });
+    const openAi = withCredentialMutationLock(directory, "openai", async () => {
+      markOpenAiEntered();
+      await openAiMayExit;
+    });
+    await openAiEntered;
+
+    let anthropicEntered = false;
+    await withCredentialMutationLock(directory, "anthropic", async () => {
+      anthropicEntered = true;
+    });
+    expect(anthropicEntered).toBe(true);
+    releaseOpenAi();
+    await openAi;
   });
 });
