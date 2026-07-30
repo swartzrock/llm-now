@@ -38,11 +38,19 @@ ${heading("Usage:")}
 
 ${heading("Rules:")}
   Run ${literal("llm-now")} with no arguments in a terminal to open the adaptive launcher.
-  Launcher work asks for one prompt and generates in the same invocation.
-  Provider discovery starts only after you choose a route that needs it.
+  With shortcuts: “Run with a saved shortcut…”, “Create a new shortcut…”,
+  “Run once with another provider and model…”, then “Manage connections…”.
+  Without shortcuts: “Create a new shortcut…”, “Run once with a provider and model…”,
+  then “Manage connections…”.
+  Creation uses “Use an available provider…” or “Add a provider with an API key…”.
+  Creation saves the provider/model target before its first prompt, then runs it once.
+  Run once generates without saving or offering a shortcut.
+  Manage connections owns discovery and API-key addition, replacement, and deletion.
+  Opening a launcher menu performs no provider discovery or credential access.
   A terminal alias with no input source also asks for one prompt.
   Otherwise, input comes from exactly one of ${literal("--input")} or stdin.
-  Omit selection for interactive choice; otherwise use an alias or provider/model.
+  Arguments, ${literal("--input")}, piped input, and noninteractive calls bypass the launcher.
+  Deterministic calls use an alias or both ${literal("--provider")} and ${literal("--model")}.
   Model "default" is available only for codex-cli and claude-cli.
 
 ${heading("Options:")}

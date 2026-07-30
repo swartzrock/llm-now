@@ -87,6 +87,111 @@ $Bin = Join-Path $TestRoot "llm-now.exe"
 
 Use a disposable VM or shell profile for tests that require no provider to be available. Do not uninstall or alter a developer's working CLI authentication.
 
+## Branch-built PTY launcher acceptance
+
+Run these supplemental scenarios from the exact implementation branch before packaging. They exercise a real terminal against an explicit compiled executable; they do not replace the native-archive checks below. Do not start a development server.
+
+On macOS or Linux, from the repository root:
+
+```bash
+PTY_ROOT="$(mktemp -d)"
+mkdir -p "$PTY_ROOT/bin" "$PTY_ROOT/config" "$PTY_ROOT/work"
+BRANCH_SHA="$(git rev-parse HEAD)"
+BRANCH_BIN="$PTY_ROOT/bin/llm-now-$BRANCH_SHA"
+FAKE_CODEX="$PTY_ROOT/bin/codex"
+
+bun build ./index.ts --compile --outfile "$BRANCH_BIN"
+bun build ./tests/fixtures/fake-cli.ts --compile --outfile "$FAKE_CODEX"
+chmod +x "$BRANCH_BIN" "$FAKE_CODEX"
+
+export XDG_CONFIG_HOME="$PTY_ROOT/config"
+export PATH="$PTY_ROOT/bin:$PATH"
+export SHELL="$PTY_ROOT/bin/missing-login-shell"
+cd "$PTY_ROOT/work"
+```
+
+The maintained fake `codex` fixture provides credential-free provider discovery, model listing, and generation. Keep stdin and stderr attached to the PTY; redirect stdout where each scenario says to do so. Use a fresh `PTY_ROOT` when an empty store is required.
+
+### SC-01: Empty root is exact and lazy
+
+Run `"$BRANCH_BIN" >stdout.bin`, without selecting an action. The root must contain exactly, in order:
+
+1. `Create a new shortcut…`
+2. `Run once with a provider and model…`
+3. `Manage connections…`
+
+It must not show a saved-shortcut row. Merely rendering the root must perform no discovery, model listing, generation, credential read, or write. Cancel with Escape, then repeat with Ctrl-C. Each must exit `130`, leave stdout empty, and leave the isolated config unchanged.
+
+### SC-02: Create from an available provider and run it once
+
+From the empty root, choose `Create a new shortcut…`. Confirm `How should this shortcut connect?` offers exactly `Use an available provider…` followed by `Add a provider with an API key…`, with no discovery before a source is chosen. Select the available-provider route, then the fake Codex provider and its safe model. At `Name this shortcut`, enter `daily`.
+
+When `Prompt for daily · Codex CLI · MODEL` appears, inspect the isolated alias file from a second terminal before entering a prompt. It must already contain only `provider` and `model` identity for `daily`; no prompt, response, or credential may be present. Enter `Reply with one short sentence.` The command must generate exactly once, exit `0`, and write only `fake:Reply with one short sentence.` to `stdout.bin`. The shortcut-save receipt must precede the work prompt on stderr.
+
+### SC-03: Configured root and saved-shortcut route
+
+Run bare `"$BRANCH_BIN" >stdout.bin` after SC-02. The configured root must contain exactly, in order:
+
+1. `Run with a saved shortcut…`
+2. `Create a new shortcut…`
+3. `Run once with another provider and model…`
+4. `Manage connections…`
+
+Choose the saved-shortcut route, filter to `daily`, and confirm `Prompt for daily · Codex CLI · MODEL`. Enter one prompt. It must generate once without discovery, model listing, or another shortcut offer.
+
+### SC-04: True run once never saves
+
+Record a checksum or byte-for-byte copy of the alias file. From both empty and configured roots, choose the state-appropriate `Run once…` action, select the fake provider/model, and enter one prompt at `Prompt for Codex CLI · MODEL`.
+
+Each invocation must generate exactly once and exit without showing a naming, save, or overwrite prompt. The alias file must remain byte-for-byte unchanged, including when the selected target already belongs to `daily`.
+
+### SC-05: Cancellation before durable work
+
+With a fresh empty store, repeat shortcut creation and cancel separately at the root, `How should this shortcut connect?`, provider picker, model picker, and `Name this shortcut`. Each cancellation must exit `130`, generate nothing, leave stdout empty, and create neither a credential nor a shortcut. Repeat at the run-once provider, model, and work prompts with the same result.
+
+### SC-06: Cancellation after a shortcut write
+
+Create a shortcut and wait until its save receipt and contextual first prompt appear. Cancel that prompt with Escape, then repeat with Ctrl-C using another name. Each invocation must exit `0`, preserve the saved shortcut, report that creation completed but generation did not, and leave stdout empty. Running the saved shortcut on a later invocation must work.
+
+### SC-07: Required naming and collision handling
+
+Create the same name and target again. It must report the identical saved target and continue to the first prompt without rewriting unrelated aliases. Next make a second safe provider/model available and try the same name for that different target. The overwrite confirmation must show the old and new targets and default to No. Declining must return to `Name this shortcut` with the existing record unchanged; accepting on a later attempt must replace only that shortcut before its first prompt.
+
+### SC-08: API-key creation without credential exposure
+
+First use the maintained test suite’s injected fake candidate to exercise the full successful transaction without a network credential:
+
+From the repository root:
+
+```bash
+bun test tests/app.test.ts --test-name-pattern "adds a missing API-key provider"
+```
+
+For the real PTY boundary, use only a dedicated disposable provider test account and a temporary revocable key. Disable terminal recording before entry. Never assign the key to a shell variable, put it in arguments/stdin, paste it into notes, or include it in the test report. Select `Create a new shortcut…`, `Add a provider with an API key…`, and an eligible provider, then paste the key only into the hidden field.
+
+Confirm validation happens before the default-No save consent. Accept saving, then cancel once at model selection or naming: the key receipt must remain visible, the invocation must exit `0`, no shortcut may exist, and no secret may appear in stdout, stderr, config files, or shell logs. Repeat with a new isolated account/store through model choice, shortcut save, and one first prompt; the key must be durable before the shortcut, the shortcut before generation, and the response must be the only stdout bytes. Revoke the temporary key and delete the disposable native-vault record immediately afterward.
+
+### SC-09: Management remains separate
+
+Choose `Manage connections…` from either root. Its menu must contain only `Discover available providers…` and `Add or manage API keys…`. Opening either the root or management menu alone must not discover providers or access the credential store. Addition, replacement, and deletion remain available here; replacement and deletion must not appear inside shortcut creation.
+
+### SC-10: Direct invocation, bypass, and redirected stdout
+
+With `daily` configured, run:
+
+```bash
+"$BRANCH_BIN" daily --input "direct" >stdout.bin 2>stderr.txt
+printf 'piped' | "$BRANCH_BIN" daily >stdout.bin 2>stderr.txt
+"$BRANCH_BIN" --alias daily --input "long form" >stdout.bin 2>stderr.txt
+"$BRANCH_BIN" --provider codex-cli --model default --input "explicit" >stdout.bin 2>stderr.txt
+```
+
+Arguments, `--input`, piped stdin, and noninteractive execution must bypass the launcher deterministically. Each command must generate exactly once and write only the unchanged response to stdout. Existing alias/direct terminology, diagnostics, exit codes, and redaction remain unchanged. Also run bare `"$BRANCH_BIN" >stdout.bin` with stderr attached to the PTY and complete one launcher action; menus and prompts must remain on stderr while only the model response reaches the redirected file.
+
+### User-owned visual gate
+
+The implementation may open as a draft pull request with only the updated VHS source. Before that draft is marked ready, merged, or released, the user must render `docs/demos/demo.gif` from the committed tape against the explicit branch-built executable, review the animation for exact copy and credential-free behavior, and commit the refreshed GIF. Agents must not render or modify the GIF or other binary media for this change.
+
 ## Artifact integrity and portability
 
 ### MT-01: Verify checksums
@@ -224,48 +329,33 @@ Repeat with `codex-cli`. Both must use the authenticated CLI's default model. Co
 
 ### MT-10: Adaptive launcher and interactive discovery
 
-Start with an isolated config that contains no aliases, make at least two providers available,
-then run the bare executable with stdout redirected:
+Repeat SC-01 through SC-10 against the packaged candidate, starting with an isolated empty alias store and at least two available providers. Run the bare executable with stdout redirected:
 
 ```bash
 "$BIN" >stdout.txt
 ```
 
-Keep stderr attached to the terminal. Confirm that the root asks “What would you like to do?”
-and contains exactly:
+Keep stderr attached to the terminal. Confirm the empty root asks `What would you like to do?` and contains, in exact order, `Create a new shortcut…`, `Run once with a provider and model…`, and `Manage connections…`. After creating `daily`, the configured root must contain, in exact order, `Run with a saved shortcut…`, `Create a new shortcut…`, `Run once with another provider and model…`, and `Manage connections…`.
 
-- “Choose a model to use…”; and
-- “Manage connections…”.
-
-Opening the root must not display discovery progress or access a provider. Choose “Choose a
-model to use…” and confirm that discovery begins only then. Select a provider and model, enter
-`Write a two-line poem about rain.` at `Prompt for PROVIDER · MODEL`, and confirm that:
+Opening either root and opening the creation-source menu must not display discovery progress or access a provider or credential. Exercise both `Use an available provider…` and `Add a provider with an API key…`, and confirm that:
 
 - providers and models are sorted deterministically, and typing filters each list without changing the selected raw identifier;
 - selecting a provider displays its filtered model picker;
 - arrow keys and Enter select the highlighted option;
 - the final response appears only in `stdout.txt`;
 - the response is followed by a clean terminal boundary on stderr even when it has no trailing newline or leaves SGR styling active;
-- the green contextual alias field emphasizes the selected provider and raw model and explains that Enter exits; and
+- shortcut creation saves before its contextual first prompt and generates exactly once;
+- run once generates without a shortcut naming or save offer;
+- connection management retains only discovery and API-key management; and
 - machine-controlled work completes within approximately 60 seconds, excluding human menu time.
 
-Save that target as `daily`, then run bare `"$BIN" >stdout.txt` again. The configured root must
-contain exactly “Run with a saved shortcut…”, “Choose another model…”, and “Manage
-connections…”. Choosing the shortcut route must open “Choose a saved shortcut”, filter to
-`daily`, ask `Prompt for daily · PROVIDER · MODEL`, generate once, and bypass provider
-discovery and model listing. A delegated CLI model must appear as `default model`.
-
-Finally, repeat and cancel at the root, shortcut picker, provider picker, model picker, work
-prompt, and “What would you like to manage?” submenu. Escape or Ctrl-C at every
-pre-generation boundary must exit `130`, generate nothing, and leave stdout empty.
-Management must contain only “Discover available providers…” and “Add or manage API keys…”;
-opening it alone must not discover providers or access the credential store.
+Cancel before and after each durable boundary. Pre-write cancellation must exit `130` without mutation. Cancellation after a key or shortcut receipt must preserve the completed write, report the incomplete later step, exit `0`, and generate nothing. A delegated CLI model must appear as `default model`.
 
 ## Alias lifecycle
 
 ### MT-11: Save an alias
 
-After an unnamed interactive success, enter `daily` in the contextual alias field. Confirm the green success message names `daily` and the exact provider/model target, then inspect the isolated alias file. It must have this shape:
+Run an interactive direct fresh selection such as `"$BIN" --input "Save this target"` with no alias or explicit provider/model. After generation, enter `daily` in the optional contextual alias field. Confirm the green success message names `daily` and the exact provider/model target, then inspect the isolated alias file. It must have this shape:
 
 ```json
 {
@@ -286,9 +376,9 @@ The model value is `null` when a supported CLI provider uses its default. Confir
 First run the bare command and choose “Run with a saved shortcut…”. Confirm that the focused
 “Choose a saved shortcut” picker is sorted, typing `dai` filters to `daily`, and selecting it
 bypasses provider/model discovery and does not show another alias field. Repeat through
-“Choose another model…”, choose the provider/model already stored as `daily`, and confirm the
-CLI reports that existing alias, suggests `llm-now daily --input "<prompt>"`, and does not
-show the alias field. Then verify deterministic non-interactive reuse from another directory:
+`Run once with another provider and model…`, choose the provider/model already stored as
+`daily`, and confirm the CLI may report that existing alias but does not show a naming, save,
+or overwrite field. Then verify deterministic non-interactive reuse from another directory:
 
 ```bash
 mkdir -p "$TEST_ROOT/alias-reuse"
@@ -420,7 +510,7 @@ inventory mode.
 
 ### MT-18: Decline alias saving
 
-Complete an unnamed interactive generation and press Enter without typing a name. Repeat and cancel the field with Ctrl-C. Both commands must exit `0` without creating or modifying the alias file.
+Complete an interactive direct fresh selection using `--input`, then press Enter without typing a name in its legacy optional alias follow-up. Repeat and cancel the field with Ctrl-C. Both commands must exit `0` without creating or modifying the alias file. Launcher run-once work must not show this field at all.
 
 ### MT-19: Validate alias names
 
@@ -438,13 +528,15 @@ coexist as separate targets.
 ### MT-20: Handle alias collisions
 
 Save `Daily` and confirm the file contains the canonical key `daily`. Complete
-another unnamed call with the same provider/model and enter `DAILY`. The CLI
-must report that the target is already saved without asking to overwrite it.
-Next complete a call with another provider/model and enter `dAiLy`. Confirm the
+`Create a new shortcut…` with the same provider/model and enter `DAILY`. The CLI
+must report that the target is already saved and continue to the first prompt
+without asking to overwrite it. Next create a shortcut for another
+provider/model and enter `dAiLy`. Confirm the
 prompt identifies the canonical alias `daily`, shows the old and new targets,
-and defaults to No. First decline the overwrite: the command must exit `0` and
-leave the record unchanged. Repeat and accept the overwrite: only `daily` should
-change, with every other alias preserved.
+and defaults to No. First decline the overwrite: the flow must return to
+required naming and leave the record unchanged. Repeat and accept the overwrite:
+only `daily` should change, the durable receipt must precede its first prompt,
+and every other alias must remain preserved.
 
 ### MT-21: Fail closed on missing or stale aliases
 

@@ -72,7 +72,11 @@ try {
       stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>\n  llm-now <alias>",
       stdoutLandmarks: [
         "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>\n  llm-now <alias>",
-        "Rules:\n  Run llm-now with no arguments in a terminal to open the adaptive launcher.\n  Launcher work asks for one prompt and generates in the same invocation.\n  Provider discovery starts only after you choose a route that needs it.\n  A terminal alias with no input source also asks for one prompt.\n  Otherwise, input comes from exactly one of --input or stdin.",
+        "Rules:\n  Run llm-now with no arguments in a terminal to open the adaptive launcher.",
+        "With shortcuts: “Run with a saved shortcut…”, “Create a new shortcut…”,\n  “Run once with another provider and model…”, then “Manage connections…”.\n  Without shortcuts: “Create a new shortcut…”, “Run once with a provider and model…”,\n  then “Manage connections…”.",
+        "Creation uses “Use an available provider…” or “Add a provider with an API key…”.\n  Creation saves the provider/model target before its first prompt, then runs it once.\n  Run once generates without saving or offering a shortcut.",
+        "Manage connections owns discovery and API-key addition, replacement, and deletion.\n  Opening a launcher menu performs no provider discovery or credential access.",
+        "Arguments, --input, piped input, and noninteractive calls bypass the launcher.\n  Deterministic calls use an alias or both --provider and --model.",
         "Options:\n  --aliases            List saved aliases\n  --input <text>       Prompt text",
         "API key environment variables:\n  ANTHROPIC_API_KEY",
         "  DEEPINFRA_TOKEN",
