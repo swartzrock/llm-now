@@ -370,7 +370,7 @@ type RequiredShortcutTarget =
 type RequiredShortcutResult =
   | { kind: "saved"; name: string; selection: AliasRecord }
   | { kind: "cancelled" }
-  | { kind: "failed"; reason: "no-eligible-model" };
+  | { kind: "failed" };
 
 async function prepareRequiredShortcut(
   deps: ApplicationDependencies,
@@ -383,7 +383,7 @@ async function prepareRequiredShortcut(
   } else {
     const models = target.models.filter((model) => isShortcutSafeModel(deps, model));
     if (models.length === 0) {
-      return { kind: "failed", reason: "no-eligible-model" };
+      return { kind: "failed" };
     }
     const options = sortPromptOptions(models.map((model) => {
       const id = sanitizePromptText(model.id);
@@ -665,11 +665,15 @@ type AddCredentialResult =
   | { kind: "saved"; models: readonly ByokModelOption[] }
   | { kind: "stopped"; exitCode: number };
 
-async function addCredential(
+type VerifiedCredentialResult =
+  | { kind: "ready"; candidate: string; models: readonly ByokModelOption[] }
+  | { kind: "stopped"; exitCode: number };
+
+async function promptAndVerifyCredential(
   deps: ApplicationDependencies,
   provider: ByokCloudProviderId,
   diagnostic: (text: string) => void,
-): Promise<AddCredentialResult> {
+): Promise<VerifiedCredentialResult> {
   let candidate: string;
   while (true) {
     const value = await deps.prompter.password(`Enter the ${providerLabel(provider)} API key`, {
@@ -698,13 +702,22 @@ async function addCredential(
   );
   if (save === null) return { kind: "stopped", exitCode: 130 };
   if (!save) return { kind: "stopped", exitCode: 0 };
+  return { kind: "ready", candidate, models };
+}
 
+async function addCredential(
+  deps: ApplicationDependencies,
+  provider: ByokCloudProviderId,
+  diagnostic: (text: string) => void,
+): Promise<AddCredentialResult> {
+  const verified = await promptAndVerifyCredential(deps, provider, diagnostic);
+  if (verified.kind === "stopped") return verified;
   const written = await runWithCredentialMutationLock(deps, provider, async () => {
     deps.credentialResolver.invalidate?.(provider);
     const current = await deps.credentialResolver.resolve(provider);
     registerResolvedCredential(deps.sensitive, current);
     if (current.source !== "missing") return false;
-    await deps.credentialVault.set(provider, candidate);
+    await deps.credentialVault.set(provider, verified.candidate);
     deps.credentialResolver.invalidate?.(provider);
     return true;
   });
@@ -720,7 +733,7 @@ async function addCredential(
     colors.green(`◆ ${providerLabel(provider)} · API key verified\n`)
     + "  stored as: saved credential\n",
   );
-  return { kind: "saved", models };
+  return { kind: "saved", models: verified.models };
 }
 
 async function runCredentialManagement(
@@ -800,41 +813,14 @@ async function runCredentialManagement(
     if (!replace) return 0;
   }
 
-  let candidate: string;
-  while (true) {
-    const value = await deps.prompter.password(`Enter the ${providerLabel(provider)} API key`, {
-      validate: validateCredentialCandidate,
-    });
-    if (value === null) return 130;
-    sensitive.register(value);
-    const validationMessage = validateCredentialCandidate(value);
-    if (validationMessage !== undefined) {
-      diagnostic(`credential: ${validationMessage}`);
-      continue;
-    }
-    candidate = value;
-    break;
-  }
-
-  const models = await withStageTimeout(
-    deps.runtime.validateCredential(provider, candidate),
-    deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
-    "model-list",
-    provider,
-  );
-
-  const save = await deps.prompter.confirm(
-    `Save this verified ${providerLabel(provider)} API key?`,
-    { initialValue: false },
-  );
-  if (save === null) return 130;
-  if (!save) return 0;
+  const verified = await promptAndVerifyCredential(deps, provider, diagnostic);
+  if (verified.kind === "stopped") return verified.exitCode;
 
   const written = await runWithCredentialMutationLock(deps, provider, async () => {
     const current = await vault.get(provider);
     if (current !== null) sensitive.register(current);
     if (current !== stored) return false;
-    await vault.set(provider, candidate);
+    await vault.set(provider, verified.candidate);
     resolver.invalidate?.(provider);
     return true;
   });
@@ -850,7 +836,13 @@ async function runCredentialManagement(
     + "  stored as: saved credential\n",
   );
 
-  const pendingAlias = await prepareCredentialAlias(deps, aliases, provider, models, diagnostic);
+  const pendingAlias = await prepareCredentialAlias(
+    deps,
+    aliases,
+    provider,
+    verified.models,
+    diagnostic,
+  );
   if (pendingAlias === null) return 0;
   try {
     const saveAlias = deps.saveAlias ?? saveStoredAlias;
