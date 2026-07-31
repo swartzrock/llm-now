@@ -273,8 +273,10 @@ printf 'Summarize the idea of gravity.' |
 
 Repeat as `"$BIN" daily --input 'Summarize the idea of gravity.'` and with the
 long form `"$BIN" --alias daily --input 'Summarize the idea of gravity.'`. The commands
-must exit `0`, resolve the exact case-sensitive alias independently of option order and the
-working directory, write only the response to stdout, and skip the alias-save prompt. Also
+must exit `0`, resolve the spelling-exact alias independently of option order and the
+working directory, write only the response to stdout, and skip the alias-save prompt. Repeat
+with `Daily` and `DAILY`; both must resolve the same lowercase `daily` record. A misspelling
+such as `dailly` must fail instead of selecting `daily`. Also
 verify that aliases named `help`, `version`, and `run` work when supplied as bare positional
 names; only `--help` and `--version` select those standalone modes.
 
@@ -284,16 +286,27 @@ Complete an unnamed interactive generation and press Enter without typing a name
 
 ### MT-14: Validate alias names
 
-Try these names through the save prompt:
+Try these names through the save prompt, using a fresh isolated store when
+needed:
 
 - valid: `daily`, `Daily`, and `work_model-2`;
 - invalid: ` bad`, `with space`, `a/b`, and a name longer than 64 characters.
 
-Invalid names must show Clack's alias-name validation guidance and reprompt. An empty field exits without saving. Names are case-sensitive, so `daily` and `Daily` may coexist.
+Invalid names must show Clack's alias-name validation guidance and reprompt. An
+empty field exits without saving. Valid mixed-case input is accepted but stored
+and displayed in lowercase. `daily` and `Daily` are one logical alias and cannot
+coexist as separate targets.
 
 ### MT-15: Handle alias collisions
 
-Save `daily`, then complete another unnamed call with the same provider/model and enter `daily`. The CLI must report that the target is already saved without asking to overwrite it. Next complete a call with another provider/model and enter `daily`. Confirm the prompt shows the old and new targets and defaults to No. First decline the overwrite: the command must exit `0` and leave the record unchanged. Repeat and accept the overwrite: only `daily` should change, with every other alias preserved.
+Save `Daily` and confirm the file contains the canonical key `daily`. Complete
+another unnamed call with the same provider/model and enter `DAILY`. The CLI
+must report that the target is already saved without asking to overwrite it.
+Next complete a call with another provider/model and enter `dAiLy`. Confirm the
+prompt identifies the canonical alias `daily`, shows the old and new targets,
+and defaults to No. First decline the overwrite: the command must exit `0` and
+leave the record unchanged. Repeat and accept the overwrite: only `daily` should
+change, with every other alias preserved.
 
 ### MT-16: Fail closed on missing or stale aliases
 
@@ -305,7 +318,22 @@ Then edit an isolated alias to reference a nonexistent model and run it. A missi
 
 ### MT-17: Reject corrupt alias files
 
-Replace the isolated alias file first with malformed JSON, then with a structurally invalid record containing an extra `apiKey` field. Both calls must exit `1`, identify a configuration load failure, preserve the corrupt content for diagnosis, and avoid generation.
+Replace the isolated alias file first with malformed JSON, then with a
+structurally invalid record containing an extra `apiKey` field. Both calls must
+exit `1`, identify a configuration load failure, preserve the corrupt content
+for diagnosis, and avoid generation.
+
+Next write a valid legacy file containing `fred` and `Fred` with identical
+provider/model records. Loading or invoking either capitalization must succeed
+without rewriting the file. Save an unrelated alias, then confirm that the
+successful write persists `fred` and the new alias as lowercase keys with only
+one `fred` record.
+
+Finally, give `fred` and `Fred` different provider/model records. Any command
+that loads aliases must exit `1` before generation, preserve the file, and
+report a configuration diagnostic that identifies both conflicting entries,
+their targets, the canonical name `fred`, and the alias-file path with repair
+guidance. It must never select either target.
 
 ### MT-18: Resolve platform config paths
 

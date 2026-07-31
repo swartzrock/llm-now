@@ -15,7 +15,7 @@ This Shortcut moves data across several trust boundaries:
 
 - Dictation may send audio or a transcript to Apple, depending on your language
   and Dictation settings.
-- The exact alias selects the provider that receives your transcribed question.
+- The alias spelling selects the provider that receives your transcribed question.
   That provider may retain or use questions and responses according to its
   account settings and policies.
 - The script briefly stores the prompt, response, and diagnostics in a private
@@ -41,22 +41,26 @@ You need:
 
 1. macOS Sequoia 15.7.
 2. A working `llm-now` installation.
-3. One short, lowercase, speech-friendly alias, such as `qwen` or `codex`.
+3. One short, speech-friendly alias, such as `qwen` or `codex`. `llm-now`
+   stores and displays it in lowercase.
 4. Provider credentials that work outside an interactive Terminal session.
 
-Alias matching stays exact and case-sensitive. `qwen`, `Qwen`, and `kwen` are
-different names; the Shortcut never chooses a nearby alias.
+Alias matching is case-insensitive but spelling-exact. `qwen`, `Qwen`, and
+`QWEN` select the same saved alias, while `kwen` does not. There is no fuzzy,
+proximity, or pronunciation matching. The Shortcut passes Dictation's alias
+unchanged and `llm-now` owns the case normalization, so do not create duplicate
+case-only aliases or add lowercasing to the Shortcut.
 
 In Terminal, resolve the executable and test your alias:
 
 ```bash
 command -v llm-now
 printf 'Reply with the word ready.' |
-  /absolute/path/from-the-command-above --alias qwen
+  /absolute/path/from-the-command-above --alias Qwen
 ```
 
-Keep the absolute path from the first command. Replace `qwen` with your exact
-alias. If the second command fails, finish `llm-now` or provider setup before
+Keep the absolute path from the first command. Replace `Qwen` with any
+capitalization of your saved alias. If the second command fails, finish `llm-now` or provider setup before
 continuing. A Terminal success is preliminary; you will also test the provider
 inside Shortcuts.
 
@@ -283,9 +287,10 @@ fi
 ```
 
 The script treats the dictated phrase as data, never shell source. It accepts
-`Hey` in any capitalization but preserves the alias exactly. Questions are
-limited to 4,096 characters. A valid response is copied before the script
-returns the short speech text.
+`Hey` in any capitalization and passes the extracted alias to `llm-now`
+unchanged. `llm-now` resolves ASCII capitalization; the Shortcut does not.
+Questions are limited to 4,096 characters. A valid response is copied before
+the script returns the short speech text.
 
 If the model ignores the response markers or emits unsafe speech text, the raw
 response is copied and the Shortcut says, “I copied an unvalidated response.
@@ -297,8 +302,8 @@ responses leave the clipboard unchanged.
 Do this after reading the privacy notes and before assigning a global hotkey:
 
 1. Temporarily replace **Dictate Text** with a **Text** action.
-2. Enter `hey qwen, explain a perfect chord in one sentence`, using your exact
-   alias.
+2. Enter `hey Qwen, explain a perfect chord in one sentence`, using a
+   capitalization that differs from the lowercase saved alias.
 3. Run the Shortcut from the editor.
 4. Confirm you hear a short answer and can paste a more detailed answer.
 5. Restore **Dictate Text**.
@@ -317,10 +322,10 @@ system shortcut.
 
 Press the shortcut from an unrelated app, then say:
 
-> Hey qwen, what is a perfect chord in music theory?
+> Hey Qwen, what is a perfect chord in music theory?
 
 Pause after the alias so Dictation inserts a comma. The comma is optional to the
-parser; the alias spelling and capitalization are not. Wait for spoken success
+parser. Alias spelling must match, but capitalization may differ. Wait for spoken success
 or failure before invoking the Shortcut again. On macOS 15.7, also confirm the
 Shortcuts running control remains visible while the request is active.
 
@@ -337,9 +342,9 @@ check.
 
 | Check | Action | Expected result |
 | --- | --- | --- |
-| Deterministic success | Replace **Dictate Text** with **Text** and enter a valid phrase for your exact alias. | A short prose answer is spoken. The detailed answer is already on the clipboard, with no response markers. |
-| Live Dictation | Restore **Dictate Text**, invoke the hotkey from two unrelated apps, and dictate a valid phrase. | Dictation starts globally, one answer is spoken, and the detailed answer is copied. |
-| Wrong alias | Use a misspelling and then change only the alias’s case. | The request-failure message is spoken. No nearby alias is selected and `VOICE-SENTINEL` remains. |
+| Deterministic success | Replace **Dictate Text** with **Text** and enter a capitalized form of your lowercase saved alias. | A short prose answer is spoken. The detailed answer is already on the clipboard, with no response markers. |
+| Live Dictation | Restore **Dictate Text**, invoke the hotkey from two unrelated apps, and dictate a valid phrase, allowing Dictation to capitalize the alias. | Dictation starts globally, one answer is spoken, and the detailed answer is copied. |
+| Wrong alias | Use a misspelling such as an added, removed, or changed letter. | The request-failure message is spoken. No nearby alias is selected and `VOICE-SENTINEL` remains. |
 | Invalid input | Try no wake word, no alias, no question, a line break, and a question longer than 4,096 characters. | The input-failure message is spoken. The provider is not called and the sentinel remains. |
 | Spoken safety | Ask for a Python library that prints colored terminal text. | Speech contains no install command, code, URL, Markdown, marker, or raw diagnostic. The clipboard retains useful package details. |
 | Malformed model output | Use the disposable test copy described below with `TEST_MALFORMED`. | Raw output is copied. Only the fixed unvalidated-response warning is spoken. |
@@ -369,7 +374,7 @@ TEST_DIR=$(/usr/bin/mktemp -d -t llm-now-voice-test)
 #!/bin/zsh
 prompt=$(/bin/cat)
 /usr/bin/printf '1\n' >> "${0:A:h}/calls.txt"
-[[ "$1" == "--alias" && "$2" == "testalias" ]] || exit 1
+[[ "$1" == "--alias" && "${2:l}" == "testalias" ]] || exit 1
 
 envelope() {
   /usr/bin/printf '%s\n' \
@@ -473,7 +478,8 @@ wc -l < "$TEST_DIR/calls.txt" 2>/dev/null || printf '0\n'
 | --- | --- | --- | --- |
 | `hey testalias, TEST_OK` | `This is a safe spoken answer.` | `Detailed **clipboard** answer.` | 1 |
 | `hello testalias, TEST_OK` | The fixed input-failure message | `VOICE-SENTINEL` | 0 |
-| `hey TestAlias, TEST_OK` | The fixed request-failure message | `VOICE-SENTINEL` | 1 |
+| `hey TestAlias, TEST_OK` | `This is a safe spoken answer.` | `Detailed **clipboard** answer.` | 1 |
+| `hey testaliass, TEST_OK` | The fixed request-failure message | `VOICE-SENTINEL` | 1 |
 | `hey testalias, TEST_MALFORMED` | The fixed unvalidated-response warning | `raw **Markdown** response` | 1 |
 | `hey testalias, TEST_EMPTY_SPEAK` | The fixed unvalidated-response warning | Raw fake envelope, including markers | 1 |
 | `hey testalias, TEST_MARKER_COLLISION` | The fixed unvalidated-response warning | Raw fake envelope, including markers | 1 |
@@ -505,6 +511,7 @@ directory. Do not copy either fake-command path into the production Shortcut.
 | **Run Shell Script** is blocked | Open **Shortcuts > Settings > Advanced** and enable **Allow Running Scripts**. | Rerun the Text-action preflight. The shell action returns speech text. |
 | A permission was denied for this Shortcut | Open the Shortcut editor, choose **Details > Privacy**, and reset the relevant decision. If no Privacy tab appears, run once to trigger the request. | Rerun and choose **Allow Once** or **Always Allow** only for access you understand. The blocked action completes. |
 | The request works in Terminal but fails in Shortcuts | Recheck the absolute executable path and use the real-provider Text-action preflight. Configure credentials through `llm-now` or the provider’s supported mechanism, never in the script. | The same fixed script succeeds from **Run Shell Script** before a hotkey is assigned. |
+| A capitalized alias works but a similar spelling fails | This is expected. Keep one lowercase saved alias and use any capitalization of that spelling. Correct Dictation or rename the alias if it changes letters; do not add case-only duplicates or lowercase inside the Shortcut. | The corrected spelling reaches the saved alias. A misspelling still produces the fixed request-failure message without changing the clipboard. |
 | The warning is frequent | The model is not reliably following the response envelope. Try a clearer model or repair the prompt contract, then start a new fixed three-run window. | Three first-attempt runs complete without fallback. |
 | Speech fails after a successful copy | Paste into a safe text editor and inspect the answer before deciding whether to retry. | The detailed answer is present even though speech did not finish. |
 
