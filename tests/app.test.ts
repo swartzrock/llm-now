@@ -602,7 +602,7 @@ describe("one-shot application", () => {
         version: 1,
         aliases: {
           zebra: { provider: "ollama", model: "qwen" },
-          Daily: { provider: "ollama", model: "qwen" },
+          daily: { provider: "ollama", model: "qwen" },
         },
       }),
       saveAlias: async () => {
@@ -664,7 +664,7 @@ describe("one-shot application", () => {
       prompter: prompts({ choices: [false, "ollama", "qwen"] }),
       loadAliases: async () => ({
         version: 1,
-        aliases: { Daily: { provider: "ollama", model: "qwen" } },
+        aliases: { daily: { provider: "ollama", model: "qwen" } },
       }),
     });
 
@@ -1925,6 +1925,31 @@ describe("API-key management", () => {
     expect(confirmMessages[0]).toContain("Overwrite alias fast?");
     expect(confirmMessages[1]).toContain("Save this verified OpenAI API key and alias fast?");
     expect(app.events).toEqual(["get:openai", "set:openai"]);
+  });
+
+  test("treats inherited alias names as absent during credential preflight", async () => {
+    const confirmMessages: string[] = [];
+    const savedNames: string[] = [];
+    const app = management({
+      prompter: prompts({
+        choices: ["setup:manage-api-keys", "openai", "qwen"],
+        passwords: ["prototype-alias-sentinel"],
+        names: ["constructor"],
+        confirms: [true],
+        confirmMessages,
+      }),
+      runtime: runtime({ providers: [] }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async (_path, name) => {
+        savedNames.push(name);
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(confirmMessages).toHaveLength(1);
+    expect(confirmMessages[0]).toContain("Save this verified OpenAI API key and alias constructor?");
+    expect(savedNames).toEqual(["constructor"]);
   });
 
   test("disabled target returns environment-only guidance without reading the vault", async () => {
