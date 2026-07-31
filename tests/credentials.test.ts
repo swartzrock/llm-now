@@ -14,7 +14,7 @@ import {
   withCredentialMutationLock,
   type NativeSecretStore,
 } from "../src/credentials.ts";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const temporaryDirectories: string[] = [];
@@ -336,5 +336,112 @@ describe("credential mutation locks", () => {
     expect(anthropicEntered).toBe(true);
     releaseOpenAi();
     await openAi;
+  });
+
+  test("does not reclaim an active owner after the stale threshold", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-credential-lock-"));
+    temporaryDirectories.push(directory);
+    const events: string[] = [];
+    let releaseFirst!: () => void;
+    let markFirstEntered!: () => void;
+    const firstMayExit = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstEntered = new Promise<void>((resolve) => {
+      markFirstEntered = resolve;
+    });
+    const options = {
+      lockTimeoutMs: 250,
+      retryDelayMs: 2,
+      staleLockMs: 5,
+    };
+
+    const first = withCredentialMutationLock(directory, "openai", async () => {
+      events.push("first:entered");
+      markFirstEntered();
+      await firstMayExit;
+      events.push("first:leaving");
+    }, options);
+    await firstEntered;
+    const second = withCredentialMutationLock(directory, "openai", async () => {
+      events.push("second:entered");
+    }, options);
+    await Bun.sleep(30);
+
+    expect(events).toEqual(["first:entered"]);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(events).toEqual([
+      "first:entered",
+      "first:leaving",
+      "second:entered",
+    ]);
+  });
+
+  test("serializes two waiters while reclaiming an orphaned lock", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-credential-lock-"));
+    temporaryDirectories.push(directory);
+    await mkdir(directory, { recursive: true });
+    const lockPath = join(directory, "credential-openai.lock");
+    await writeFile(
+      lockPath,
+      JSON.stringify({ pid: 99_999_999, token: "orphaned-owner" }),
+      { mode: 0o600 },
+    );
+    const epoch = new Date(0);
+    await utimes(lockPath, epoch, epoch);
+
+    const events: string[] = [];
+    let releaseWinner!: () => void;
+    let markWinnerEntered!: () => void;
+    const winnerMayExit = new Promise<void>((resolve) => {
+      releaseWinner = resolve;
+    });
+    const winnerEntered = new Promise<void>((resolve) => {
+      markWinnerEntered = resolve;
+    });
+    const options = {
+      lockTimeoutMs: 250,
+      retryDelayMs: 2,
+      staleLockMs: 5,
+    };
+    const contend = (label: string) =>
+      withCredentialMutationLock(directory, "openai", async () => {
+        events.push(`${label}:entered`);
+        if (events.length === 1) {
+          markWinnerEntered();
+          await winnerMayExit;
+          events.push(`${label}:leaving`);
+        }
+      }, options);
+
+    const first = contend("first");
+    const second = contend("second");
+    await winnerEntered;
+    await Bun.sleep(30);
+
+    expect(events).toHaveLength(1);
+    releaseWinner();
+    await Promise.all([first, second]);
+    expect(events).toHaveLength(3);
+    expect(events.filter((event) => event.endsWith(":entered")).sort()).toEqual([
+      "first:entered",
+      "second:entered",
+    ]);
+  });
+
+  test("releases an owned lock when the mutation throws", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-credential-lock-"));
+    temporaryDirectories.push(directory);
+
+    await expect(withCredentialMutationLock(directory, "openai", async () => {
+      throw new Error("mutation failed");
+    })).rejects.toThrow("mutation failed");
+
+    let entered = false;
+    await withCredentialMutationLock(directory, "openai", async () => {
+      entered = true;
+    });
+    expect(entered).toBe(true);
   });
 });

@@ -159,6 +159,7 @@ function dependencies(options: {
   sensitive?: SensitiveValueRegistry;
   nativeVaultEnabled?: boolean;
   platform?: NodeJS.Platform;
+  home?: string;
   aliasPath?: string;
   credentialMutationLock?: CredentialMutationLock;
 }) {
@@ -189,7 +190,7 @@ function dependencies(options: {
       prompter: options.prompter ?? prompts(),
       env: options.env ?? {},
       platform: options.platform ?? "linux",
-      home: "/home/test",
+      home: options.home ?? "/home/test",
       version: "1.2.3",
       aliasPath: options.aliasPath ?? "/config/aliases.json",
       loadAliases: options.loadAliases,
@@ -856,6 +857,62 @@ describe("one-shot application", () => {
     expect(app.stdout.text()).toBe("");
     expect(app.stderr.text()).toContain("response withheld");
     expect(app.stderr.text()).not.toContain("u2-output-secret");
+  });
+
+  test("withholds a registered sensitive value split by terminal control sequences", async () => {
+    const sensitive = createSensitiveValueRegistry(["u2-output-secret"]);
+    const app = dependencies({
+      args: ["--provider", "ollama", "--model", "qwen", "--input", "hello"],
+      sensitive,
+      runtime: runtime({ response: "prefix u2-output-\u001b[31msecret suffix" }),
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toContain("response withheld");
+    expect(stripTerminalSequences(app.stderr.text())).not.toContain("u2-output-secret");
+  });
+
+  test("uses one user-wide credential lock namespace across alias config roots", async () => {
+    const lockDirectories: string[] = [];
+    for (const aliasPath of [
+      "/config-one/aliases.json",
+      "/config-two/aliases.json",
+    ]) {
+      const app = dependencies({
+        args: [],
+        stdin: input("", true),
+        stderrTty: true,
+        home: "/home/shared",
+        aliasPath,
+        credentialVault: {
+          get: async () => "saved-key",
+          set: async () => {},
+          delete: async () => true,
+        },
+        credentialMutationLock: async (directory, _provider, operation) => {
+          lockDirectories.push(directory);
+          return operation();
+        },
+        prompter: prompts({
+          choices: [
+            "launcher:manage-connections",
+            "setup:manage-api-keys",
+            "openai",
+            "delete",
+          ],
+          confirms: [true],
+        }),
+        loadAliases: async () => ({ version: 1, aliases: {} }),
+      });
+
+      expect(await runApplication(app.value)).toBe(0);
+    }
+
+    expect(lockDirectories).toEqual([
+      "/home/shared/.llm-now/credential-locks",
+      "/home/shared/.llm-now/credential-locks",
+    ]);
   });
 
   test("rejects a stale management replacement inside the provider mutation lock", async () => {

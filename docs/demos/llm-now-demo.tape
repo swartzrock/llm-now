@@ -74,11 +74,11 @@ Wait+Screen@10 s /Add a provider with an API key…/
 Type "Use"
 Sleep 500 ms
 Enter
-Wait+Screen@30 s /Choose an available provider/
+Wait+Screen@30 s /Choose a provider/
 Type "Codex"
 Sleep 500 ms
 Enter
-Wait+Screen@10 s /Choose a model for the shortcut/
+Wait+Screen@10 s /Choose a model/
 Type "fake-model"
 Sleep 500 ms
 Enter

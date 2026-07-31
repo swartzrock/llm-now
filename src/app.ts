@@ -8,7 +8,6 @@ import {
 } from "@swartzrock/byok-runtime";
 import pc from "picocolors";
 import type { Readable, Writable } from "node:stream";
-import { dirname } from "node:path";
 import {
   type AliasRecord,
   AliasStoreError,
@@ -35,6 +34,7 @@ import {
 } from "./io.ts";
 import {
   CredentialVaultError,
+  resolveCredentialLockDirectory,
   withCredentialMutationLock,
   type CredentialMutationLock,
   type CredentialResolver,
@@ -472,7 +472,7 @@ function runWithCredentialMutationLock<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
   return (deps.credentialMutationLock ?? withCredentialMutationLock)(
-    dirname(applicationAliasPath(deps)),
+    resolveCredentialLockDirectory(deps.home),
     provider,
     operation,
   );
@@ -1237,7 +1237,11 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       selection.selection.model,
       prompt,
     );
-    if (deps.sensitive.redact(response) !== response) {
+    const terminalResponse = stripTerminalSequences(response);
+    if (
+      deps.sensitive.redact(response) !== response
+      || deps.sensitive.redact(terminalResponse) !== terminalResponse
+    ) {
       diagnostic("generation: response withheld because it contained a registered credential.");
       return 1;
     }
