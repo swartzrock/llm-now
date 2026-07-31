@@ -109,15 +109,22 @@ function emptyDocument(): AliasDocument {
 function canonicalizeDocument(document: AliasDocument, path: string): AliasDocument {
   const aliases: Record<string, AliasRecord> = {};
   const seenAliases = new Map<string, { originalName: string; record: AliasRecord }>();
-  const entries = Object.entries(document.aliases).sort(([left], [right]) => {
-    const canonicalLeft = left.toLowerCase();
-    const canonicalRight = right.toLowerCase();
-    if (canonicalLeft !== canonicalRight) return canonicalLeft < canonicalRight ? -1 : 1;
-    return left < right ? -1 : left > right ? 1 : 0;
-  });
+  const entries = Object.entries(document.aliases)
+    .map(([originalName, record]) => ({
+      originalName,
+      canonicalName: normalizeAliasName(originalName),
+      record,
+    }))
+    .sort((left, right) => {
+      if (left.canonicalName !== right.canonicalName) {
+        return left.canonicalName < right.canonicalName ? -1 : 1;
+      }
+      return left.originalName < right.originalName
+        ? -1
+        : left.originalName > right.originalName ? 1 : 0;
+    });
 
-  for (const [originalName, record] of entries) {
-    const canonicalName = originalName.toLowerCase();
+  for (const { originalName, canonicalName, record } of entries) {
     const current = seenAliases.get(canonicalName);
     if (current === undefined) {
       aliases[canonicalName] = record;

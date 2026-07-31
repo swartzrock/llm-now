@@ -259,7 +259,7 @@ async function prepareCredentialAlias(
     }
 
     const canonicalName = normalizeAliasName(name);
-    const current = aliases[canonicalName];
+    const current = Object.hasOwn(aliases, canonicalName) ? aliases[canonicalName] : undefined;
     if (current !== undefined && !sameAliasRecord(current, selection)) {
       const overwrite = await deps.prompter.confirm(
         `Overwrite alias ${canonicalName}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, selection)}`,
@@ -384,10 +384,7 @@ async function resolveSelection(
     .filter(([, candidate]) =>
       candidate.provider === resolved.provider && candidate.model === resolved.model
     )
-    .map(([alias]) => {
-      const canonicalAlias = normalizeAliasName(alias);
-      return { value: canonicalAlias, label: canonicalAlias };
-    }))[0]?.value;
+    .map(([alias]) => ({ value: alias, label: alias })))[0]?.value;
   return {
     selection: resolved,
     named: false,
@@ -586,14 +583,11 @@ async function runSetup(
     applicationAliasPath(deps),
   )).aliases;
 
-  const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => {
-    const canonicalAlias = normalizeAliasName(alias);
-    return {
-      value: `${ALIAS_SETUP_PREFIX}${alias}`,
-      label: sanitizeDiagnostic(canonicalAlias, deps.env, deps.sensitive),
-      hint: safeFormatSelection(deps, selection),
-    };
-  }));
+  const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => ({
+    value: `${ALIAS_SETUP_PREFIX}${alias}`,
+    label: sanitizeDiagnostic(alias, deps.env, deps.sensitive),
+    hint: safeFormatSelection(deps, selection),
+  })));
   const selected = await deps.prompter.select("What would you like to set up?", [
     ...aliasOptions,
     { value: DISCOVER_PROVIDERS_VALUE, label: "Discover available providers…" },
@@ -607,7 +601,7 @@ async function runSetup(
   if (selected.startsWith(ALIAS_SETUP_PREFIX)) {
     const alias = selected.slice(ALIAS_SETUP_PREFIX.length);
     if (!Object.hasOwn(aliases, alias)) throw new RangeError("Alias choice was unavailable.");
-    deps.stderr.write(`Next: llm-now ${normalizeAliasName(alias)} --input "<prompt>"\n`);
+    deps.stderr.write(`Next: llm-now ${alias} --input "<prompt>"\n`);
     return 0;
   }
   if (selected === DISCOVER_PROVIDERS_VALUE) {
