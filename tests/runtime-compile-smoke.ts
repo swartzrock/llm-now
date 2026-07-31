@@ -110,7 +110,7 @@ try {
     {
       name: "fake CLI generation through positional alias",
       executable: spike,
-      args: ["Daily", "--input", "smoke"],
+      args: ["dAiLy", "--input", "smoke"],
       exitCode: 0,
       stdout: "fake:smoke",
       stderr: "",

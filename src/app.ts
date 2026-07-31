@@ -13,6 +13,7 @@ import {
   AliasStoreError,
   isValidAliasName,
   loadAliases as loadStoredAliases,
+  normalizeAliasName,
   resolveAlias as resolveStoredAlias,
   resolveAliasPath,
   saveAlias as saveStoredAlias,
@@ -257,16 +258,17 @@ async function prepareCredentialAlias(
       continue;
     }
 
-    const current = aliases[name];
+    const canonicalName = normalizeAliasName(name);
+    const current = aliases[canonicalName];
     if (current !== undefined && !sameAliasRecord(current, selection)) {
       const overwrite = await deps.prompter.confirm(
-        `Overwrite alias ${name}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, selection)}`,
+        `Overwrite alias ${canonicalName}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, selection)}`,
         { initialValue: false },
       );
       if (overwrite === null) return 130;
       if (!overwrite) continue;
     }
-    return { name, selection, expectedCurrent: current };
+    return { name: canonicalName, selection, expectedCurrent: current };
   }
 }
 
@@ -382,7 +384,10 @@ async function resolveSelection(
     .filter(([, candidate]) =>
       candidate.provider === resolved.provider && candidate.model === resolved.model
     )
-    .map(([alias]) => ({ value: alias, label: alias })))[0]?.value;
+    .map(([alias]) => {
+      const canonicalAlias = normalizeAliasName(alias);
+      return { value: canonicalAlias, label: canonicalAlias };
+    }))[0]?.value;
   return {
     selection: resolved,
     named: false,
@@ -413,24 +418,25 @@ async function offerAliasSave(
       diagnostic("config: invalid alias name; use 1-64 ASCII letters, numbers, hyphens, or underscores.");
       continue;
     }
+    const canonicalName = normalizeAliasName(name);
     try {
-      const result = await save(applicationAliasPath(deps), name, selection, {
+      const result = await save(applicationAliasPath(deps), canonicalName, selection, {
         confirmOverwrite: async (_alias, current) =>
           (await deps.prompter.confirm(
-            `Overwrite alias ${name}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}`,
+            `Overwrite alias ${canonicalName}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}`,
             { initialValue: false },
           )) === true,
       });
       if (result === "saved") {
         deps.stderr.write(
           colors.green("◆ Saved alias ")
-          + colors.white(name)
+          + colors.white(canonicalName)
           + colors.green(` → ${target}\n  Next time, use `)
-          + colors.white(`llm-now ${name} --input "<prompt>"`)
+          + colors.white(`llm-now ${canonicalName} --input "<prompt>"`)
           + "\n",
         );
       } else if (result === "already-saved") {
-        deps.stderr.write(`${colors.green(`◆ Already saved ${name} → ${target}`)}\n`);
+        deps.stderr.write(`${colors.green(`◆ Already saved ${canonicalName} → ${target}`)}\n`);
       }
       return true;
     } catch (error) {
@@ -580,11 +586,14 @@ async function runSetup(
     applicationAliasPath(deps),
   )).aliases;
 
-  const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => ({
-    value: `${ALIAS_SETUP_PREFIX}${alias}`,
-    label: sanitizeDiagnostic(alias, deps.env, deps.sensitive),
-    hint: safeFormatSelection(deps, selection),
-  })));
+  const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => {
+    const canonicalAlias = normalizeAliasName(alias);
+    return {
+      value: `${ALIAS_SETUP_PREFIX}${alias}`,
+      label: sanitizeDiagnostic(canonicalAlias, deps.env, deps.sensitive),
+      hint: safeFormatSelection(deps, selection),
+    };
+  }));
   const selected = await deps.prompter.select("What would you like to set up?", [
     ...aliasOptions,
     { value: DISCOVER_PROVIDERS_VALUE, label: "Discover available providers…" },
@@ -598,7 +607,7 @@ async function runSetup(
   if (selected.startsWith(ALIAS_SETUP_PREFIX)) {
     const alias = selected.slice(ALIAS_SETUP_PREFIX.length);
     if (!Object.hasOwn(aliases, alias)) throw new RangeError("Alias choice was unavailable.");
-    deps.stderr.write(`Next: llm-now ${alias} --input "<prompt>"\n`);
+    deps.stderr.write(`Next: llm-now ${normalizeAliasName(alias)} --input "<prompt>"\n`);
     return 0;
   }
   if (selected === DISCOVER_PROVIDERS_VALUE) {
