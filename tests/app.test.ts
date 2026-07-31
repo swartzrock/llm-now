@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
 import {
   BYOK_API_KEY_ENV_VARS,
   type ByokProviderId,
@@ -130,6 +132,7 @@ function dependencies(options: {
   sensitive?: SensitiveValueRegistry;
   nativeVaultEnabled?: boolean;
   platform?: NodeJS.Platform;
+  aliasPath?: string;
 }) {
   const stdout = output(options.stdoutTty ?? false);
   const stderr = output(options.stderrTty ?? false);
@@ -160,7 +163,7 @@ function dependencies(options: {
       platform: options.platform ?? "linux",
       home: "/home/test",
       version: "1.2.3",
-      aliasPath: "/config/aliases.json",
+      aliasPath: options.aliasPath ?? "/config/aliases.json",
       loadAliases: options.loadAliases,
       resolveAlias: options.resolveAlias,
       saveAlias: options.saveAlias,
@@ -612,8 +615,8 @@ describe("one-shot application", () => {
     expect(inputMessages).toEqual([]);
     expect(saves).toBe(0);
     expect(app.stderr.text()).toContain(
-      "◆ Ollama · qwen is already saved as alias Daily\n"
-      + "  Next time, use llm-now Daily --input \"<prompt>\"\n",
+      "◆ Ollama · qwen is already saved as alias daily\n"
+      + "  Next time, use llm-now daily --input \"<prompt>\"\n",
     );
   });
 
@@ -667,7 +670,7 @@ describe("one-shot application", () => {
 
     expect(await runApplication(app.value)).toBe(0);
     expect(app.stderr.text()).toContain(
-      "\u001b[37mllm-now Daily --input \"<prompt>\"\u001b[39m",
+      "\u001b[37mllm-now daily --input \"<prompt>\"\u001b[39m",
     );
   });
 
@@ -791,6 +794,91 @@ describe("one-shot application", () => {
       runtimeCalls: { discover: 0, list: 0, generate: 1 },
       calls: ["resolve:Daily", "claude-cli:null:hello"],
     });
+  });
+
+  test("resolves positional and long-form aliases case-insensitively through the real store", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-app-aliases-"));
+    const aliasPath = join(directory, "aliases.json");
+    try {
+      await Bun.write(aliasPath, JSON.stringify({
+        version: 1,
+        aliases: { Fred: { provider: "claude-cli", model: null } },
+      }));
+
+      for (const args of [
+        ["FRED", "--input", "hello"],
+        ["--input", "hello", "--alias", "fReD"],
+      ]) {
+        const app = dependencies({
+          args,
+          aliasPath,
+          runtime: runtime({ response: "alias-result" }),
+        });
+
+        expect(await runApplication(app.value)).toBe(0);
+        expect(app.stdout.text()).toBe("alias-result");
+        expect(app.stderr.text()).toBe("");
+        expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("reports conflicting legacy aliases before any runtime work", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-app-aliases-"));
+    const aliasPath = join(directory, "aliases.json");
+    try {
+      await Bun.write(aliasPath, JSON.stringify({
+        version: 1,
+        aliases: {
+          Fred: { provider: "openai", model: "gpt-5" },
+          FRED: { provider: "ollama", model: "qwen" },
+        },
+      }));
+
+      for (const args of [
+        ["fred", "--input", "hello"],
+        ["--input", "hello", "--alias", "Fred"],
+      ]) {
+        const app = dependencies({ args, aliasPath });
+
+        expect(await runApplication(app.value)).toBe(1);
+        expect(app.stdout.text()).toBe("");
+        expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+        expect(app.stderr.text()).toContain('conflicting case-insensitive alias "fred"');
+        expect(app.stderr.text()).toContain('"FRED" -> ollama/qwen');
+        expect(app.stderr.text()).toContain('"Fred" -> openai/gpt-5');
+        expect(app.stderr.text()).toContain(`Edit the alias store manually at ${aliasPath}`);
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit provider and model bypass an unrelated conflicting alias store", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-app-aliases-"));
+    const aliasPath = join(directory, "aliases.json");
+    try {
+      await Bun.write(aliasPath, JSON.stringify({
+        version: 1,
+        aliases: {
+          Fred: { provider: "openai", model: "gpt-5" },
+          FRED: { provider: "ollama", model: "qwen" },
+        },
+      }));
+      const app = dependencies({
+        args: ["--input", "hello", "--provider", "ollama", "--model", "qwen"],
+        aliasPath,
+      });
+
+      expect(await runApplication(app.value)).toBe(0);
+      expect(app.stdout.text()).toBe("response");
+      expect(app.stderr.text()).toBe("");
+      expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   test("piped input works with a positional alias", async () => {
@@ -1113,15 +1201,20 @@ describe("one-shot application", () => {
   });
 
   test("reports a saved alias with the alias and next-time command in white", async () => {
+    const savedNames: string[] = [];
     const app = dependencies({
       args: ["--input", "hello", "--provider", "openai", "--model", "gpt-5"],
       stdin: input("", true),
       stderrTty: true,
-      prompter: prompts({ names: ["fast"] }),
-      saveAlias: async () => "saved",
+      prompter: prompts({ names: ["FAST"] }),
+      saveAlias: async (_path, name) => {
+        savedNames.push(name);
+        return "saved";
+      },
     });
 
     expect(await runApplication(app.value)).toBe(0);
+    expect(savedNames).toEqual(["fast"]);
     expect(app.stdout.text()).toBe("response");
     expect(app.stderr.text()).toContain(
       "\u001b[32m◆ Saved alias \u001b[39m\u001b[37mfast\u001b[39m",
@@ -1138,7 +1231,7 @@ describe("one-shot application", () => {
       stdin: input("", true),
       stderrTty: true,
       env: { NO_COLOR: "1" },
-      prompter: prompts({ names: ["fast"] }),
+      prompter: prompts({ names: ["Fast"] }),
       saveAlias: async () => "already-saved",
     });
 
@@ -1282,7 +1375,7 @@ describe("API-key management", () => {
       prompter: prompts({
         choices: ["setup:manage-api-keys", "openai", "gpt-5"],
         passwords: [candidate],
-        names: ["fast"],
+        names: ["FAST"],
         confirms: [true],
         seen,
         confirmInitialValues,
@@ -1808,7 +1901,7 @@ describe("API-key management", () => {
       prompter: prompts({
         choices: ["setup:manage-api-keys", "openai", "qwen"],
         passwords: ["u4-alias-preflight-sentinel"],
-        names: ["fast"],
+        names: ["FAST"],
         confirms: [true, true],
         confirmMessages,
       }),
@@ -1817,7 +1910,8 @@ describe("API-key management", () => {
         version: 1,
         aliases: { fast: { provider: "openai", model: "old-model" } },
       }),
-      saveAlias: async (_path, _name, _selection, options) => {
+      saveAlias: async (_path, name, _selection, options) => {
+        expect(name).toBe("fast");
         expect(await options?.confirmOverwrite?.(
           "fast",
           { provider: "openai", model: "old-model" },
