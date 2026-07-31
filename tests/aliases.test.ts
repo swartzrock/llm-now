@@ -48,6 +48,80 @@ describe("global aliases", () => {
     expect(store.aliases.claude).toEqual({ provider: "claude-cli", model: null });
   });
 
+  test("normalizes saved aliases and resolves every ASCII casing", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    const record = { provider: "ollama" as const, model: "llama3.1" };
+
+    expect(await saveAlias(path, "Fred", record)).toBe("saved");
+    expect(await loadAliases(path)).toEqual({ version: 1, aliases: { fred: record } });
+    await expect(resolveAlias(path, "fred")).resolves.toEqual(record);
+    await expect(resolveAlias(path, "Fred")).resolves.toEqual(record);
+    await expect(resolveAlias(path, "FRED")).resolves.toEqual(record);
+  });
+
+  test("collapses same-target legacy casing in memory without rewriting the store", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    const text = `${JSON.stringify({
+      version: 1,
+      aliases: {
+        Fred: { provider: "ollama", model: "llama3.1" },
+        fRED: { provider: "ollama", model: "llama3.1" },
+      },
+    }, null, 2)}\n`;
+    await writeFile(path, text);
+
+    expect(await loadAliases(path)).toEqual({
+      version: 1,
+      aliases: { fred: { provider: "ollama", model: "llama3.1" } },
+    });
+    expect(await readFile(path, "utf8")).toBe(text);
+
+    expect(await saveAlias(path, "Other", { provider: "ollama", model: "other" })).toBe("saved");
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      version: 1,
+      aliases: {
+        fred: { provider: "ollama", model: "llama3.1" },
+        other: { provider: "ollama", model: "other" },
+      },
+    });
+  });
+
+  test("fails closed deterministically for conflicting legacy casing in either JSON order", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    const variants = [
+      [
+        ["Fred", { provider: "ollama", model: "llama3.1" }],
+        ["fRED", { provider: "codex-cli", model: null }],
+      ],
+      [
+        ["fRED", { provider: "codex-cli", model: null }],
+        ["Fred", { provider: "ollama", model: "llama3.1" }],
+      ],
+    ] as const;
+    const messages: string[] = [];
+
+    for (const entries of variants) {
+      await writeFile(path, JSON.stringify({ version: 1, aliases: Object.fromEntries(entries) }));
+      try {
+        await loadAliases(path);
+        throw new Error("expected conflicting aliases to fail");
+      } catch (error) {
+        expect(error).toBeInstanceOf(AliasStoreError);
+        messages.push((error as Error).message);
+      }
+    }
+
+    expect(messages[0]).toBe(messages[1]);
+    expect(messages[0]).toContain('case-insensitive alias "fred"');
+    expect(messages[0]).toContain('"Fred" -> ollama/llama3.1');
+    expect(messages[0]).toContain('"fRED" -> codex-cli/(default)');
+    expect(messages[0]).toContain(path);
+    expect(messages[0]).toContain("Edit the alias store manually");
+  });
+
   test("fails closed for corrupt JSON and invalid schema values", async () => {
     await expect(loadAliases(join(import.meta.dir, "fixtures/aliases/corrupt.json"))).rejects.toBeInstanceOf(
       AliasStoreError,
@@ -67,6 +141,10 @@ describe("global aliases", () => {
       await writeFile(path, JSON.stringify(document));
       await expect(loadAliases(path)).rejects.toBeInstanceOf(AliasStoreError);
     }
+
+    await expect(resolveAlias(path, "bad name")).rejects.toThrow("invalid alias name: bad name");
+    await expect(saveAlias(path, "_bad", { provider: "ollama", model: "x" }))
+      .rejects.toThrow("invalid alias name: _bad");
   });
 
   test("writes only version, alias names, provider, and nullable model", async () => {
@@ -98,9 +176,22 @@ describe("global aliases", () => {
     await expect(resolveAlias(path, "constructor")).rejects.toThrow("alias not found");
     await expect(saveAlias(path, "toString", { provider: "ollama", model: "model" }))
       .resolves.toBe("saved");
+    await expect(saveAlias(path, "constructor", { provider: "ollama", model: "second" }))
+      .resolves.toBe("saved");
     await expect(resolveAlias(path, "toString")).resolves.toEqual({
       provider: "ollama",
       model: "model",
+    });
+    await expect(resolveAlias(path, "CONSTRUCTOR")).resolves.toEqual({
+      provider: "ollama",
+      model: "second",
+    });
+    expect(await loadAliases(path)).toEqual({
+      version: 1,
+      aliases: {
+        constructor: { provider: "ollama" as const, model: "second" },
+        tostring: { provider: "ollama" as const, model: "model" },
+      },
     });
   });
 
@@ -144,6 +235,26 @@ describe("global aliases", () => {
       confirmOverwrite: async () => true,
     })).toBe("saved");
     expect((await loadAliases(path)).aliases.daily?.model).toBe("new");
+  });
+
+  test("applies collision and overwrite behavior across alias casing", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    const oldRecord = { provider: "ollama" as const, model: "old" };
+    const newRecord = { provider: "ollama" as const, model: "new" };
+    await saveAlias(path, "Fred", oldRecord);
+
+    await expect(saveAlias(path, "FRED", oldRecord)).resolves.toBe("already-saved");
+    await expect(saveAlias(path, "fReD", newRecord)).rejects.toBeInstanceOf(AliasCollisionError);
+    const confirmations: string[] = [];
+    await expect(saveAlias(path, "FRED", newRecord, {
+      confirmOverwrite: async (name, current) => {
+        confirmations.push(`${name}:${current?.model}`);
+        return true;
+      },
+    })).resolves.toBe("saved");
+    expect(confirmations).toEqual(["fred:old"]);
+    expect(await loadAliases(path)).toEqual({ version: 1, aliases: { fred: newRecord } });
   });
 
   test("does not hold the alias lock while waiting for overwrite confirmation", async () => {
@@ -239,6 +350,22 @@ describe("global aliases", () => {
         first: { provider: "ollama", model: "model-a" },
         second: { provider: "ollama", model: "model-b" },
       },
+    });
+  });
+
+  test("serializes concurrent same-target saves across alias casing", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    const worker = join(import.meta.dir, "fixtures/alias-save-worker.ts");
+    const processes = [
+      Bun.spawn([process.execPath, worker, path, "Fred", "model"]),
+      Bun.spawn([process.execPath, worker, path, "FRED", "model"]),
+    ];
+
+    expect(await Promise.all(processes.map((process) => process.exited))).toEqual([0, 0]);
+    expect(await loadAliases(path)).toEqual({
+      version: 1,
+      aliases: { fred: { provider: "ollama", model: "model" } },
     });
   });
 
