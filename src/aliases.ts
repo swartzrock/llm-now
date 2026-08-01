@@ -4,6 +4,7 @@ import { dirname, join, posix, win32 } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const ALIAS_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH = 128;
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
 
 export function isValidAliasName(name: string): boolean {
@@ -133,11 +134,12 @@ function canonicalizeDocument(document: AliasDocument, path: string): AliasDocum
     }
     if (sameAliasRecord(current.record, record)) continue;
 
+    const displayPath = summarizeDiagnosticValue(path);
     throw new AliasStoreError(
-      `conflicting case-insensitive alias "${canonicalName}" in ${path}: `
+      `conflicting case-insensitive alias "${canonicalName}" in ${displayPath}: `
       + `"${current.originalName}" -> ${formatAliasTarget(current.record)}; `
       + `"${originalName}" -> ${formatAliasTarget(record)}. `
-      + `Edit the alias store manually at ${path} and keep only one target for "${canonicalName}".`,
+      + `Edit the alias store manually at ${displayPath} and keep only one target for "${canonicalName}".`,
     );
   }
 
@@ -145,7 +147,14 @@ function canonicalizeDocument(document: AliasDocument, path: string): AliasDocum
 }
 
 function formatAliasTarget(record: AliasRecord): string {
-  return `${record.provider}/${record.model ?? "(default)"}`;
+  return summarizeDiagnosticValue(`${record.provider}/${record.model ?? "(default)"}`);
+}
+
+function summarizeDiagnosticValue(value: string): string {
+  if (value.length <= MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH) return value;
+  const startLength = Math.floor((MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH - 1) / 2);
+  const endLength = MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH - startLength - 1;
+  return `${value.slice(0, startLength)}…${value.slice(-endLength)}`;
 }
 
 export async function loadAliases(path: string): Promise<AliasDocument> {

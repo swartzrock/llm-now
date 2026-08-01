@@ -861,6 +861,28 @@ describe("one-shot application", () => {
     }
   });
 
+  test("preserves conflict repair guidance when legacy model identifiers are oversized", async () => {
+    const directory = await temporaryDirectory();
+    const aliasPath = join(directory, "aliases.json");
+    await Bun.write(aliasPath, JSON.stringify({
+      version: 1,
+      aliases: {
+        FRED: { provider: "openai", model: `prefix-${"x".repeat(2_000)}-suffix` },
+        Fred: { provider: "ollama", model: "qwen" },
+      },
+    }));
+    const app = dependencies({ args: ["fred", "--input", "hello"], aliasPath });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+    expect(app.stderr.text()).toContain('"FRED" -> openai/prefix-');
+    expect(app.stderr.text()).toContain("-suffix");
+    expect(app.stderr.text()).toContain('"Fred" -> ollama/qwen');
+    expect(app.stderr.text()).toContain(`Edit the alias store manually at ${aliasPath}`);
+    expect(app.stderr.text()).toContain('keep only one target for "fred"');
+    expect(app.stderr.text().length).toBeLessThanOrEqual(1_025);
+  });
+
   test("explicit provider and model bypass an unrelated conflicting alias store", async () => {
     const directory = await temporaryDirectory();
     const aliasPath = join(directory, "aliases.json");
