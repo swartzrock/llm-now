@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -24,6 +24,25 @@ import {
   type PromptOption,
   type PromptValue,
 } from "../src/prompts.ts";
+
+const temporaryDirectories: string[] = [];
+const conflictingAliasDocument = JSON.stringify({
+  version: 1,
+  aliases: {
+    Fred: { provider: "openai", model: "gpt-5" },
+    FRED: { provider: "ollama", model: "qwen" },
+  },
+});
+
+async function temporaryDirectory(): Promise<string> {
+  const directory = await mkdtemp(join(process.cwd(), ".tmp-app-aliases-"));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+});
 
 function input(text = "", isTTY = false) {
   return {
@@ -797,88 +816,64 @@ describe("one-shot application", () => {
   });
 
   test("resolves positional and long-form aliases case-insensitively through the real store", async () => {
-    const directory = await mkdtemp(join(process.cwd(), ".tmp-app-aliases-"));
+    const directory = await temporaryDirectory();
     const aliasPath = join(directory, "aliases.json");
-    try {
-      await Bun.write(aliasPath, JSON.stringify({
-        version: 1,
-        aliases: { Fred: { provider: "claude-cli", model: null } },
-      }));
+    await Bun.write(aliasPath, JSON.stringify({
+      version: 1,
+      aliases: { Fred: { provider: "claude-cli", model: null } },
+    }));
 
-      for (const args of [
-        ["FRED", "--input", "hello"],
-        ["--input", "hello", "--alias", "fReD"],
-      ]) {
-        const app = dependencies({
-          args,
-          aliasPath,
-          runtime: runtime({ response: "alias-result" }),
-        });
+    for (const args of [
+      ["FRED", "--input", "hello"],
+      ["--input", "hello", "--alias", "fReD"],
+    ]) {
+      const app = dependencies({
+        args,
+        aliasPath,
+        runtime: runtime({ response: "alias-result" }),
+      });
 
-        expect(await runApplication(app.value)).toBe(0);
-        expect(app.stdout.text()).toBe("alias-result");
-        expect(app.stderr.text()).toBe("");
-        expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
-      }
-    } finally {
-      await rm(directory, { recursive: true, force: true });
+      expect(await runApplication(app.value)).toBe(0);
+      expect(app.stdout.text()).toBe("alias-result");
+      expect(app.stderr.text()).toBe("");
+      expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
     }
   });
 
   test("reports conflicting legacy aliases before any runtime work", async () => {
-    const directory = await mkdtemp(join(process.cwd(), ".tmp-app-aliases-"));
+    const directory = await temporaryDirectory();
     const aliasPath = join(directory, "aliases.json");
-    try {
-      await Bun.write(aliasPath, JSON.stringify({
-        version: 1,
-        aliases: {
-          Fred: { provider: "openai", model: "gpt-5" },
-          FRED: { provider: "ollama", model: "qwen" },
-        },
-      }));
+    await Bun.write(aliasPath, conflictingAliasDocument);
 
-      for (const args of [
-        ["fred", "--input", "hello"],
-        ["--input", "hello", "--alias", "Fred"],
-      ]) {
-        const app = dependencies({ args, aliasPath });
+    for (const args of [
+      ["fred", "--input", "hello"],
+      ["--input", "hello", "--alias", "Fred"],
+    ]) {
+      const app = dependencies({ args, aliasPath });
 
-        expect(await runApplication(app.value)).toBe(1);
-        expect(app.stdout.text()).toBe("");
-        expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
-        expect(app.stderr.text()).toContain('conflicting case-insensitive alias "fred"');
-        expect(app.stderr.text()).toContain('"FRED" -> ollama/qwen');
-        expect(app.stderr.text()).toContain('"Fred" -> openai/gpt-5');
-        expect(app.stderr.text()).toContain(`Edit the alias store manually at ${aliasPath}`);
-      }
-    } finally {
-      await rm(directory, { recursive: true, force: true });
+      expect(await runApplication(app.value)).toBe(1);
+      expect(app.stdout.text()).toBe("");
+      expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+      expect(app.stderr.text()).toContain('conflicting case-insensitive alias "fred"');
+      expect(app.stderr.text()).toContain('"FRED" -> ollama/qwen');
+      expect(app.stderr.text()).toContain('"Fred" -> openai/gpt-5');
+      expect(app.stderr.text()).toContain(`Edit the alias store manually at ${aliasPath}`);
     }
   });
 
   test("explicit provider and model bypass an unrelated conflicting alias store", async () => {
-    const directory = await mkdtemp(join(process.cwd(), ".tmp-app-aliases-"));
+    const directory = await temporaryDirectory();
     const aliasPath = join(directory, "aliases.json");
-    try {
-      await Bun.write(aliasPath, JSON.stringify({
-        version: 1,
-        aliases: {
-          Fred: { provider: "openai", model: "gpt-5" },
-          FRED: { provider: "ollama", model: "qwen" },
-        },
-      }));
-      const app = dependencies({
-        args: ["--input", "hello", "--provider", "ollama", "--model", "qwen"],
-        aliasPath,
-      });
+    await Bun.write(aliasPath, conflictingAliasDocument);
+    const app = dependencies({
+      args: ["--input", "hello", "--provider", "ollama", "--model", "qwen"],
+      aliasPath,
+    });
 
-      expect(await runApplication(app.value)).toBe(0);
-      expect(app.stdout.text()).toBe("response");
-      expect(app.stderr.text()).toBe("");
-      expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("response");
+    expect(app.stderr.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
   });
 
   test("piped input works with a positional alias", async () => {

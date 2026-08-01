@@ -119,9 +119,9 @@ function canonicalizeDocument(document: AliasDocument, path: string): AliasDocum
       if (left.canonicalName !== right.canonicalName) {
         return left.canonicalName < right.canonicalName ? -1 : 1;
       }
-      return left.originalName < right.originalName
-        ? -1
-        : left.originalName > right.originalName ? 1 : 0;
+      if (left.originalName < right.originalName) return -1;
+      if (left.originalName > right.originalName) return 1;
+      return 0;
     });
 
   for (const { originalName, canonicalName, record } of entries) {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   AliasCollisionError,
   AliasStoreError,
+  type AliasRecord,
   loadAliases,
   resolveAlias,
   resolveAliasPath,
@@ -21,6 +22,26 @@ async function temporaryDirectory(): Promise<string> {
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
 });
+
+type AliasEntry = readonly [string, AliasRecord];
+
+async function loadConflictMessages(
+  path: string,
+  variants: ReadonlyArray<ReadonlyArray<AliasEntry>>,
+): Promise<string[]> {
+  const messages: string[] = [];
+  for (const entries of variants) {
+    await writeFile(path, JSON.stringify({ version: 1, aliases: Object.fromEntries(entries) }));
+    try {
+      await loadAliases(path);
+      throw new Error("expected conflicting aliases to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AliasStoreError);
+      messages.push((error as Error).message);
+    }
+  }
+  return messages;
+}
 
 describe("global aliases", () => {
   test("resolves Unix XDG and Windows roaming paths without using cwd", () => {
@@ -101,18 +122,7 @@ describe("global aliases", () => {
         ["Fred", { provider: "ollama", model: "llama3.1" }],
       ],
     ] as const;
-    const messages: string[] = [];
-
-    for (const entries of variants) {
-      await writeFile(path, JSON.stringify({ version: 1, aliases: Object.fromEntries(entries) }));
-      try {
-        await loadAliases(path);
-        throw new Error("expected conflicting aliases to fail");
-      } catch (error) {
-        expect(error).toBeInstanceOf(AliasStoreError);
-        messages.push((error as Error).message);
-      }
-    }
+    const messages = await loadConflictMessages(path, variants);
 
     expect(messages[0]).toBe(messages[1]);
     expect(messages[0]).toContain('case-insensitive alias "fred"');
@@ -137,18 +147,7 @@ describe("global aliases", () => {
         ["FRED", { provider: "ollama", model: "llama3.1" }],
       ],
     ] as const;
-    const messages: string[] = [];
-
-    for (const entries of variants) {
-      await writeFile(path, JSON.stringify({ version: 1, aliases: Object.fromEntries(entries) }));
-      try {
-        await loadAliases(path);
-        throw new Error("expected conflicting aliases to fail");
-      } catch (error) {
-        expect(error).toBeInstanceOf(AliasStoreError);
-        messages.push((error as Error).message);
-      }
-    }
+    const messages = await loadConflictMessages(path, variants);
 
     expect(messages[0]).toBe(messages[1]);
     expect(messages[0]).toContain('"FRED" -> ollama/llama3.1');
