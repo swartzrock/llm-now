@@ -1,0 +1,1049 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>llm-now shortcut creation launcher — before &amp; after</title>
+  <style>
+    :root {
+      --paper: #eee9dc;
+      --paper-deep: #e0d9ca;
+      --ink: #141715;
+      --muted: #696d67;
+      --rule: #b9b4a8;
+      --old: #ff6d58;
+      --old-soft: #ffe0da;
+      --new: #b8f23d;
+      --new-soft: #e4f7b9;
+      --terminal: #101614;
+      --terminal-rule: #303a36;
+      --terminal-text: #edf2ec;
+      --terminal-muted: #9da7a1;
+      --terminal-faint: #64706a;
+      --cyan: #65d7d0;
+      --shadow: 0 18px 50px rgba(20, 23, 21, .14);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+    }
+
+    button { font: inherit; }
+
+    .deck-header {
+      position: fixed;
+      inset: 0 0 auto;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 1rem;
+      height: 3.6rem;
+      padding: 0 2rem;
+      border-bottom: 1px solid var(--rule);
+      background: rgba(238, 233, 220, .96);
+    }
+
+    .brand {
+      font: 800 .72rem/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .deck-topic {
+      overflow: hidden;
+      color: var(--muted);
+      font: 700 .72rem/1 var(--mono);
+      letter-spacing: .08em;
+      text-align: center;
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .counter {
+      justify-self: end;
+      font: 800 .78rem/1 var(--mono);
+    }
+
+    .progress {
+      position: fixed;
+      top: 3.55rem;
+      left: 0;
+      z-index: 21;
+      width: 100%;
+      height: 4px;
+      background: var(--paper-deep);
+    }
+
+    .progress span {
+      display: block;
+      width: 10%;
+      height: 100%;
+      background: var(--ink);
+      transition: width 260ms ease;
+    }
+
+    .deck {
+      height: 100vh;
+      padding: 5.6rem 4.5vw 5rem;
+    }
+
+    .slide {
+      display: none;
+      width: min(1400px, 100%);
+      height: 100%;
+      margin: 0 auto;
+      animation: arrive 260ms ease both;
+    }
+
+    .slide.is-active {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: clamp(1rem, 2.2vh, 1.8rem);
+    }
+
+    @keyframes arrive {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .slide-heading {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(16rem, 31rem);
+      align-items: end;
+      gap: 2rem;
+    }
+
+    .kicker {
+      margin: 0 0 .5rem;
+      color: var(--muted);
+      font: 800 .72rem/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    h1, h2 {
+      max-width: 17ch;
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 4.8rem);
+      line-height: .96;
+      letter-spacing: -.06em;
+    }
+
+    h1 { max-width: 15ch; }
+
+    .thesis {
+      margin: 0;
+      color: #4e534f;
+      font-size: clamp(.95rem, 1.4vw, 1.14rem);
+      line-height: 1.55;
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      min-height: 0;
+      gap: clamp(1rem, 2.2vw, 2rem);
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      border: 1px solid var(--rule);
+      border-radius: 1.25rem;
+      background: #f8f4ea;
+      box-shadow: var(--shadow);
+    }
+
+    .comparison.old { border-top: 8px solid var(--old); }
+    .comparison.new { border-top: 8px solid var(--new); }
+
+    .comparison-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.2rem .85rem;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .comparison-label {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+      font: 850 .78rem/1 var(--mono);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+
+    .comparison-label::before {
+      width: .7rem;
+      height: .7rem;
+      border-radius: 50%;
+      background: var(--old);
+      content: "";
+    }
+
+    .new .comparison-label::before { background: var(--new); }
+
+    .comparison-summary {
+      color: var(--muted);
+      font: 700 .72rem/1 var(--mono);
+      text-align: right;
+    }
+
+    .comparison-body {
+      min-height: 0;
+      padding: clamp(.85rem, 1.6vw, 1.3rem);
+      overflow: auto;
+    }
+
+    .comparison-note {
+      margin: 0;
+      padding: .9rem 1.2rem 1.05rem;
+      border-top: 1px solid var(--rule);
+      color: #464b47;
+      font-size: .88rem;
+      line-height: 1.45;
+    }
+
+    .comparison-note strong { color: var(--ink); }
+
+    .terminal {
+      overflow: hidden;
+      border: 1px solid #303a36;
+      border-radius: .85rem;
+      background: var(--terminal);
+      color: var(--terminal-text);
+      box-shadow: 0 15px 34px rgba(16, 22, 20, .2);
+      font: clamp(.7rem, 1vw, .88rem)/1.55 var(--mono);
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: .38rem;
+      min-height: 2rem;
+      padding: 0 .8rem;
+      border-bottom: 1px solid var(--terminal-rule);
+      color: var(--terminal-muted);
+      font-size: .68rem;
+    }
+
+    .terminal-bar .dot {
+      width: .52rem;
+      height: .52rem;
+      border: 1px solid #59645f;
+      border-radius: 50%;
+    }
+
+    .terminal-bar span:last-child { margin-left: .35rem; }
+
+    .terminal-screen {
+      min-height: 11rem;
+      padding: 1rem 1.05rem 1.15rem;
+    }
+
+    .terminal-line {
+      display: block;
+      min-height: 1.45em;
+      white-space: pre-wrap;
+    }
+
+    .prompt-mark, .accent { color: var(--cyan); }
+    .active { color: var(--new); font-weight: 800; }
+    .faint { color: var(--terminal-faint); }
+    .muted { color: var(--terminal-muted); }
+    .danger { color: #ff8c7d; }
+    .success { color: #c9ff71; }
+    .secret {
+      padding: 0 .18rem;
+      background: #ff6d58;
+      color: #111;
+      font-weight: 850;
+    }
+
+    .flow {
+      display: grid;
+      gap: .6rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .flow li {
+      position: relative;
+      display: grid;
+      grid-template-columns: 2.05rem minmax(0, 1fr);
+      align-items: center;
+      gap: .65rem;
+      min-height: 3.15rem;
+      padding: .65rem .8rem;
+      border: 1px solid var(--rule);
+      border-radius: .75rem;
+      background: white;
+      color: #333834;
+      font-size: clamp(.78rem, 1vw, .94rem);
+      line-height: 1.35;
+    }
+
+    .flow li:not(:last-child)::after {
+      position: absolute;
+      bottom: -.66rem;
+      left: 1.75rem;
+      z-index: 2;
+      color: var(--muted);
+      content: "↓";
+      font: 800 .85rem/1 var(--mono);
+    }
+
+    .flow .step {
+      display: grid;
+      place-items: center;
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      background: var(--old-soft);
+      font: 850 .72rem/1 var(--mono);
+    }
+
+    .new .flow .step { background: var(--new-soft); }
+    .flow b { display: block; color: var(--ink); }
+    .flow small { display: block; margin-top: .1rem; color: var(--muted); }
+    .flow .optional { border-style: dashed; }
+    .flow .durable { border-color: #87a947; background: #f6ffe3; }
+
+    .split-stack {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: .75rem;
+    }
+
+    .mini-card {
+      padding: .85rem;
+      border: 1px solid var(--rule);
+      border-radius: .75rem;
+      background: white;
+    }
+
+    .mini-card b {
+      display: block;
+      margin-bottom: .35rem;
+      font: 800 .7rem/1.2 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .mini-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: .82rem;
+      line-height: 1.4;
+    }
+
+    .ownership {
+      display: grid;
+      gap: .7rem;
+    }
+
+    .ownership-row {
+      display: grid;
+      grid-template-columns: minmax(8rem, .8fr) minmax(0, 1.2fr);
+      gap: .75rem;
+      padding: .8rem;
+      border: 1px solid var(--rule);
+      border-radius: .75rem;
+      background: white;
+      font-size: .84rem;
+    }
+
+    .ownership-row strong { font: 800 .75rem/1.35 var(--mono); }
+    .ownership-row span { color: var(--muted); }
+
+    .slide-foot {
+      display: flex;
+      justify-content: space-between;
+      gap: 1.2rem;
+      color: var(--muted);
+      font: 700 .67rem/1.35 var(--mono);
+      letter-spacing: .04em;
+    }
+
+    .slide-foot span:last-child { text-align: right; }
+
+    .deck-controls {
+      position: fixed;
+      inset: auto 0 0;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 1rem;
+      min-height: 4rem;
+      padding: .55rem 2rem;
+      border-top: 1px solid var(--rule);
+      background: rgba(238, 233, 220, .96);
+    }
+
+    .nav-button {
+      min-width: 6rem;
+      padding: .62rem .8rem;
+      border: 1px solid var(--ink);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+      font: 800 .72rem/1 var(--mono);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .nav-button:hover:not(:disabled),
+    .nav-button:focus-visible {
+      background: var(--ink);
+      color: var(--paper);
+    }
+
+    .nav-button:disabled { cursor: not-allowed; opacity: .32; }
+
+    .dots {
+      display: flex;
+      justify-content: center;
+      gap: .45rem;
+    }
+
+    .dot-button {
+      width: .68rem;
+      height: .68rem;
+      padding: 0;
+      border: 1px solid var(--ink);
+      border-radius: 50%;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .dot-button.is-active { background: var(--ink); }
+    .dot-button:focus-visible { outline: 3px solid var(--new); outline-offset: 2px; }
+
+    .keys {
+      position: fixed;
+      right: 2rem;
+      bottom: 4.6rem;
+      z-index: 19;
+      color: var(--muted);
+      font: 700 .64rem/1 var(--mono);
+    }
+
+    kbd {
+      display: inline-grid;
+      place-items: center;
+      min-width: 1.4rem;
+      height: 1.4rem;
+      margin: 0 .1rem;
+      border: 1px solid var(--rule);
+      border-bottom-width: 2px;
+      border-radius: .28rem;
+      background: #f8f4ea;
+      color: var(--ink);
+      font: 800 .65rem/1 var(--mono);
+    }
+
+    @media (max-width: 900px) {
+      body { overflow: auto; }
+      .deck-header { padding: 0 1rem; }
+      .deck { height: auto; min-height: 100vh; padding: 5.4rem 1rem 5rem; }
+      .slide { min-height: calc(100vh - 10rem); }
+      .slide.is-active { grid-template-rows: auto auto auto; }
+      .slide-heading { grid-template-columns: 1fr; gap: .8rem; }
+      .compare-grid { grid-template-columns: 1fr; }
+      .comparison-body { overflow: visible; }
+      .deck-controls { padding-inline: 1rem; }
+      .keys { display: none; }
+      h1, h2 { font-size: clamp(2.2rem, 10vw, 4rem); }
+    }
+
+    @media (max-width: 560px) {
+      .deck-header { grid-template-columns: 1fr auto; }
+      .deck-topic { display: none; }
+      .split-stack { grid-template-columns: 1fr; }
+      .nav-button { min-width: 4.6rem; font-size: .65rem; }
+      .dots { gap: .32rem; }
+      .dot-button { width: .55rem; height: .55rem; }
+      .slide-foot { flex-direction: column; }
+      .slide-foot span:last-child { text-align: left; }
+      .ownership-row { grid-template-columns: 1fr; gap: .25rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 1ms !important;
+        transition-duration: 1ms !important;
+      }
+    }
+
+    @media print {
+      body { overflow: visible; background: white; }
+      .deck-header, .deck-controls, .progress, .keys { display: none; }
+      .deck { height: auto; padding: 0; }
+      .slide, .slide.is-active {
+        display: grid !important;
+        min-height: 100vh;
+        break-after: page;
+        padding: .5in;
+      }
+      .comparison { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="deck-header">
+    <div class="brand">llm-now / branch review</div>
+    <div class="deck-topic" id="deck-topic">Intent before mechanics</div>
+    <div class="counter"><span id="current-slide">01</span> / <span id="total-slides">09</span></div>
+  </header>
+  <div class="progress" aria-hidden="true"><span id="progress-bar"></span></div>
+
+  <main class="deck" aria-live="polite">
+    <section class="slide is-active" data-topic="Intent before mechanics" aria-labelledby="slide-1-title">
+      <div class="slide-heading">
+        <div>
+          <p class="kicker">01 / Launcher with saved shortcuts</p>
+          <h1 id="slide-1-title">The menu now starts with what the user intends to do.</h1>
+        </div>
+        <p class="thesis">The old launcher mixed a reusable task with a provider/model selection step. The new launcher makes “create,” “run once,” and “manage” separate promises.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="comparison old">
+          <header class="comparison-head">
+            <div class="comparison-label">Old behavior</div>
+            <div class="comparison-summary">3 mixed choices</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="Old configured launcher menu">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>llm-now</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line"><b class="prompt-mark">◆</b>  What would you like to do?</span>
+                <span class="terminal-line faint">│</span>
+                <span class="terminal-line muted">│  Search: Type to search…</span>
+                <span class="terminal-line active">│  ● Run with a saved shortcut…</span>
+                <span class="terminal-line">│  ○ Choose another model…</span>
+                <span class="terminal-line">│  ○ Manage connections…</span>
+                <span class="terminal-line faint">│  ↑/↓ select  •  Enter confirm</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Ambiguity:</strong> “Choose another model” says what happens next, but not whether the result becomes reusable.</p>
+        </article>
+        <article class="comparison new">
+          <header class="comparison-head">
+            <div class="comparison-label">New behavior</div>
+            <div class="comparison-summary">4 explicit intents</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="New configured launcher menu">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>llm-now</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line"><b class="prompt-mark">◆</b>  What would you like to do?</span>
+                <span class="terminal-line faint">│</span>
+                <span class="terminal-line muted">│  Search: Type to search…</span>
+                <span class="terminal-line active">│  ● Run with a saved shortcut…</span>
+                <span class="terminal-line">│  ○ Create a new shortcut…</span>
+                <span class="terminal-line">│  ○ Run once with another provider and model…</span>
+                <span class="terminal-line">│  ○ Manage connections…</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Improvement:</strong> reusable setup is first-class, while one-off work is clearly labeled as disposable.</p>
+        </article>
+      </div>
+      <footer class="slide-foot"><span>BASE: codex/adaptive-launcher</span><span>NEW: state-aware shortcut creation launcher</span></footer>
+    </section>
+
+    <section class="slide" data-topic="A useful empty state" aria-labelledby="slide-2-title">
+      <div class="slide-heading">
+        <div>
+          <p class="kicker">02 / Launcher without shortcuts</p>
+          <h2 id="slide-2-title">An empty account gets a setup path, not an incomplete picker.</h2>
+        </div>
+        <p class="thesis">The empty root remains honest about state: it omits “run saved,” but it no longer forces creation to emerge as a side effect of choosing a model.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="comparison old">
+          <header class="comparison-head">
+            <div class="comparison-label">Old behavior</div>
+            <div class="comparison-summary">mechanics first</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="Old empty launcher menu">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>empty store</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line"><b class="prompt-mark">◆</b>  What would you like to do?</span>
+                <span class="terminal-line faint">│</span>
+                <span class="terminal-line muted">│  Search: Type to search…</span>
+                <span class="terminal-line active">│  ● Choose a model to use…</span>
+                <span class="terminal-line">│  ○ Manage connections…</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Missing concept:</strong> there is no visible path whose goal is “make this reusable.”</p>
+        </article>
+        <article class="comparison new">
+          <header class="comparison-head">
+            <div class="comparison-label">New behavior</div>
+            <div class="comparison-summary">goal first</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="New empty launcher menu">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>empty store</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line"><b class="prompt-mark">◆</b>  What would you like to do?</span>
+                <span class="terminal-line faint">│</span>
+                <span class="terminal-line muted">│  Search: Type to search…</span>
+                <span class="terminal-line active">│  ● Create a new shortcut…</span>
+                <span class="terminal-line">│  ○ Run once with a provider and model…</span>
+                <span class="terminal-line">│  ○ Manage connections…</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Improvement:</strong> the three available outcomes are mutually understandable even before the user knows provider terminology.</p>
+        </article>
+      </div>
+      <footer class="slide-foot"><span>SC-01: empty root</span><span>The fourth row appears only after a shortcut exists.</span></footer>
+    </section>
+
+    <section class="slide" data-topic="Create before running" aria-labelledby="slide-3-title">
+      <div class="slide-heading">
+        <div>
+          <p class="kicker">03 / Reusable workflow</p>
+          <h2 id="slide-3-title">Shortcut creation moves before the first model call.</h2>
+        </div>
+        <p class="thesis">The new sequence commits the user’s reusable target before work begins. The first prompt then proves the shortcut instead of deciding whether to save it afterward.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="comparison old">
+          <header class="comparison-head">
+            <div class="comparison-label">Old behavior</div>
+            <div class="comparison-summary">run → maybe save</div>
+          </header>
+          <div class="comparison-body">
+            <ol class="flow">
+              <li><span class="step">1</span><span><b>Choose provider and model</b><small>The launcher starts with selection mechanics.</small></span></li>
+              <li><span class="step">2</span><span><b>Enter prompt</b><small>The user must have work ready now.</small></span></li>
+              <li><span class="step">3</span><span><b>Generate response</b><small>The model call completes first.</small></span></li>
+              <li class="optional"><span class="step">4</span><span><b>Optionally name an alias</b><small>Reusable setup appears as a postscript.</small></span></li>
+            </ol>
+          </div>
+          <p class="comparison-note"><strong>Cost:</strong> a failed or abandoned run never reaches the reusable setup decision.</p>
+        </article>
+        <article class="comparison new">
+          <header class="comparison-head">
+            <div class="comparison-label">New behavior</div>
+            <div class="comparison-summary">save → prove it</div>
+          </header>
+          <div class="comparison-body">
+            <ol class="flow">
+              <li><span class="step">1</span><span><b>Create a new shortcut</b><small>The intent is selected at the root.</small></span></li>
+              <li><span class="step">2</span><span><b>Choose provider and model</b><small>The target is selected in context.</small></span></li>
+              <li class="durable"><span class="step">3</span><span><b>Name and save shortcut</b><small>The durable receipt appears before any model call.</small></span></li>
+              <li><span class="step">4</span><span><b>Enter its first prompt</b><small>One generation immediately verifies the saved target.</small></span></li>
+            </ol>
+          </div>
+          <p class="comparison-note"><strong>Improvement:</strong> the shortcut survives cancellation of its first prompt and is ready for the next invocation.</p>
+        </article>
+      </div>
+      <footer class="slide-foot"><span>SC-02: save before first prompt</span><span>Storage remains provider + model only.</span></footer>
+    </section>
+
+    <section class="slide" data-topic="Connection source is explicit" aria-labelledby="slide-4-title">
+      <div class="slide-heading">
+        <div>
+          <p class="kicker">04 / Connection source</p>
+          <h2 id="slide-4-title">The setup flow asks how to connect at the moment it matters.</h2>
+        </div>
+        <p class="thesis">Available providers and new API-key providers now converge into one shortcut journey without pretending that a key and a model are the same thing.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="comparison old">
+          <header class="comparison-head">
+            <div class="comparison-label">Old behavior</div>
+            <div class="comparison-summary">two distant routes</div>
+          </header>
+          <div class="comparison-body">
+            <div class="split-stack">
+              <div class="mini-card"><b>Choose a model</b><p>Discovers something already available, then runs it.</p></div>
+              <div class="mini-card"><b>Manage connections</b><p>Adds an API key, then may offer an optional model shortcut.</p></div>
+            </div>
+            <div class="terminal" style="margin-top:.8rem" role="img" aria-label="Old separate launcher routes">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>separate menus</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line">Choose another model…</span>
+                <span class="terminal-line faint">        or</span>
+                <span class="terminal-line">Manage connections…</span>
+                <span class="terminal-line faint">          ↓</span>
+                <span class="terminal-line muted">Create a model shortcut now?</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Fragmentation:</strong> the route depends on connection state before the user can express the goal.</p>
+        </article>
+        <article class="comparison new">
+          <header class="comparison-head">
+            <div class="comparison-label">New behavior</div>
+            <div class="comparison-summary">one convergent route</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="New shortcut connection source menu">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>shortcut setup</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line"><b class="prompt-mark">◆</b>  How should this shortcut connect?</span>
+                <span class="terminal-line faint">│</span>
+                <span class="terminal-line muted">│  Search: Type to search…</span>
+                <span class="terminal-line active">│  ● Use an available provider…</span>
+                <span class="terminal-line">│  ○ Add a provider with an API key…</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Improvement:</strong> connection state becomes a child decision inside the user’s chosen creation task.</p>
+        </article>
+      </div>
+      <footer class="slide-foot"><span>Discovery remains lazy until a source is chosen.</span><span>No API-key read occurs just to render the root.</span></footer>
+    </section>
+
+    <section class="slide" data-topic="API key without model coupling" aria-labelledby="slide-5-title">
+      <div class="slide-heading">
+        <div>
+          <p class="kicker">05 / API-key onboarding</p>
+          <h2 id="slide-5-title">A credential enables a provider; the shortcut selects a model afterward.</h2>
+        </div>
+        <p class="thesis">The new flow makes the data model visible: one provider credential can support many models and many shortcuts. The key is never stored in the shortcut.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="comparison old">
+          <header class="comparison-head">
+            <div class="comparison-label">Old behavior</div>
+            <div class="comparison-summary">management detour</div>
+          </header>
+          <div class="comparison-body">
+            <ol class="flow">
+              <li><span class="step">1</span><span><b>Manage connections</b><small>Leave the shortcut goal behind.</small></span></li>
+              <li><span class="step">2</span><span><b>Add or manage API keys</b><small>Select provider and save key.</small></span></li>
+              <li class="optional"><span class="step">3</span><span><b>“Create a model shortcut now?”</b><small>Optional setup is attached to credential management.</small></span></li>
+              <li class="optional"><span class="step">4</span><span><b>Name model shortcut or skip</b><small>No first run completes the journey.</small></span></li>
+            </ol>
+          </div>
+          <p class="comparison-note"><strong>Mental model risk:</strong> placing shortcut creation after key setup can make the credential feel model-bound.</p>
+        </article>
+        <article class="comparison new">
+          <header class="comparison-head">
+            <div class="comparison-label">New behavior</div>
+            <div class="comparison-summary">provider → model → shortcut</div>
+          </header>
+          <div class="comparison-body">
+            <ol class="flow">
+              <li><span class="step">1</span><span><b>Add a provider with an API key</b><small>Only providers missing a credential are offered.</small></span></li>
+              <li class="durable"><span class="step">2</span><span><b>Validate and save provider key</b><small>Stored once in the native vault.</small></span></li>
+              <li><span class="step">3</span><span><b>Choose one provider model</b><small>Uses the validated model list without relisting.</small></span></li>
+              <li class="durable"><span class="step">4</span><span><b>Save shortcut, then run it</b><small>The shortcut stores only provider/model identity.</small></span></li>
+            </ol>
+          </div>
+          <p class="comparison-note"><strong>Improvement:</strong> the durable sequence mirrors reality: provider access first, reusable target second.</p>
+        </article>
+      </div>
+      <footer class="slide-foot"><span>Credential: native vault, provider-scoped</span><span>Shortcut: aliases.json, provider + model only</span></footer>
+    </section>
+
+    <section class="slide" data-topic="One-off means one-off" aria-labelledby="slide-6-title">
+      <div class="slide-heading">
+        <div>
+          <p class="kicker">06 / Run once</p>
+          <h2 id="slide-6-title">The one-off path no longer changes its mind after generation.</h2>
+        </div>
+        <p class="thesis">A user who chooses “run once” gets exactly one prompt and one response. Existing shortcuts can be acknowledged, but no naming or save prompt appears.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="comparison old">
+          <header class="comparison-head">
+            <div class="comparison-label">Old behavior</div>
+            <div class="comparison-summary">scope drift</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="Old fresh run followed by alias prompt">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>after generation</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line">Choose another model…</span>
+                <span class="terminal-line faint">  ↓</span>
+                <span class="terminal-line">Prompt for OpenAI · gpt-5</span>
+                <span class="terminal-line success">response</span>
+                <span class="terminal-line faint">  ↓</span>
+                <span class="terminal-line muted">Enter an alias name for OpenAI · gpt-5</span>
+                <span class="terminal-line muted">(Enter to exit)</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Surprise:</strong> a fresh run turns into reusable setup only after the work is done.</p>
+        </article>
+        <article class="comparison new">
+          <header class="comparison-head">
+            <div class="comparison-label">New behavior</div>
+            <div class="comparison-summary">closed contract</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="New true run-once flow">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>one-off work</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line active">Run once with a provider and model…</span>
+                <span class="terminal-line faint">  ↓</span>
+                <span class="terminal-line">Choose a provider</span>
+                <span class="terminal-line">Choose a model</span>
+                <span class="terminal-line">Prompt for OpenAI · gpt-5</span>
+                <span class="terminal-line success">response</span>
+                <span class="terminal-line faint">exit 0 · no save prompt</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Improvement:</strong> the root choice predicts the entire journey, including what will not happen.</p>
+        </article>
+      </div>
+      <footer class="slide-foot"><span>Configured copy: “Run once with another…”</span><span>Alias file remains byte-for-byte unchanged.</span></footer>
+    </section>
+
+    <section class="slide" data-topic="Durable progress survives" aria-labelledby="slide-7-title">
+      <div class="slide-heading">
+        <div>
+          <p class="kicker">07 / Cancellation and partial success</p>
+          <h2 id="slide-7-title">Cancellation now respects what has already been saved.</h2>
+        </div>
+        <p class="thesis">The flow distinguishes aborting an untouched form from stopping after a durable write. Users are told exactly what completed and what did not.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="comparison old">
+          <header class="comparison-head">
+            <div class="comparison-label">Old behavior</div>
+            <div class="comparison-summary">one generic abort idea</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="Old unclear cancellation boundary">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>cancellation</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line muted">Escape / Ctrl-C</span>
+                <span class="terminal-line faint">        ↓</span>
+                <span class="terminal-line">Was anything saved?</span>
+                <span class="terminal-line">Should this be retried?</span>
+                <span class="terminal-line">Did generation run?</span>
+                <span class="terminal-line danger">The route does not teach the boundary.</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Uncertainty:</strong> optional post-actions make it harder to infer which state survives an interruption.</p>
+        </article>
+        <article class="comparison new">
+          <header class="comparison-head">
+            <div class="comparison-label">New behavior</div>
+            <div class="comparison-summary">explicit durability boundary</div>
+          </header>
+          <div class="comparison-body">
+            <div class="split-stack">
+              <div class="mini-card"><b>Before any write</b><p>Exit 130. No credential, no shortcut, no generation.</p></div>
+              <div class="mini-card"><b>After key save</b><p>Keep the key. Report key-only completion. No generation.</p></div>
+              <div class="mini-card"><b>After shortcut save</b><p>Keep the shortcut. Exit 0 when its first prompt is cancelled.</p></div>
+              <div class="mini-card"><b>After prompt submit</b><p>Generate exactly once through the shared output path.</p></div>
+            </div>
+            <div class="terminal" style="margin-top:.8rem" role="img" aria-label="New post-save cancellation receipt">
+              <div class="terminal-screen" style="min-height:auto">
+                <span class="terminal-line success">◆ Saved shortcut daily → Codex CLI · fake-model</span>
+                <span class="terminal-line muted">The shortcut was saved, but its first prompt was cancelled;</span>
+                <span class="terminal-line muted">no generation ran.</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Improvement:</strong> receipts mark the commit points, and later cancellation never rolls them back.</p>
+        </article>
+      </div>
+      <footer class="slide-foot"><span>Pre-write cancellation: 130</span><span>Post-write cancellation: preserve work, explain outcome</span></footer>
+    </section>
+
+    <section class="slide" data-topic="Clear ownership boundaries" aria-labelledby="slide-8-title">
+      <div class="slide-heading">
+        <div>
+          <p class="kicker">08 / Information architecture</p>
+          <h2 id="slide-8-title">Creation, execution, and connection management each own one job.</h2>
+        </div>
+        <p class="thesis">The new architecture removes shortcut side effects from connection management and save side effects from one-off execution.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="comparison old">
+          <header class="comparison-head">
+            <div class="comparison-label">Old behavior</div>
+            <div class="comparison-summary">overlapping ownership</div>
+          </header>
+          <div class="comparison-body">
+            <div class="ownership">
+              <div class="ownership-row"><strong>Choose model</strong><span>Run work, then maybe create an alias.</span></div>
+              <div class="ownership-row"><strong>Manage API key</strong><span>Add/replace/delete a key, then maybe create a shortcut.</span></div>
+              <div class="ownership-row"><strong>Saved shortcut</strong><span>Run an existing target.</span></div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Overlap:</strong> two unrelated routes can create reusable configuration.</p>
+        </article>
+        <article class="comparison new">
+          <header class="comparison-head">
+            <div class="comparison-label">New behavior</div>
+            <div class="comparison-summary">one owner per outcome</div>
+          </header>
+          <div class="comparison-body">
+            <div class="ownership">
+              <div class="ownership-row"><strong>Run saved</strong><span>Select a known shortcut, collect one prompt, run.</span></div>
+              <div class="ownership-row"><strong>Create shortcut</strong><span>Connect if necessary, choose target, name, save, first run.</span></div>
+              <div class="ownership-row"><strong>Run once</strong><span>Select target, collect one prompt, run, exit without saving.</span></div>
+              <div class="ownership-row"><strong>Manage connections</strong><span>Discover providers or add/replace/delete API keys.</span></div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Improvement:</strong> every top-level label describes both its main action and its persistence behavior.</p>
+        </article>
+      </div>
+      <footer class="slide-foot"><span>Terminology remains scoped: shortcut in UI, alias in CLI/storage.</span><span>Direct invocation remains unchanged.</span></footer>
+    </section>
+
+    <section class="slide" data-topic="Safer under pressure" aria-labelledby="slide-9-title">
+      <div class="slide-heading">
+        <div>
+          <p class="kicker">09 / Safety and concurrency</p>
+          <h2 id="slide-9-title">The happy path is clearer—and the failure path is safer.</h2>
+        </div>
+        <p class="thesis">The branch also hardens the invisible boundaries: generated secrets never reach stdout, and provider credentials cannot be mutated concurrently through separate config roots.</p>
+      </div>
+      <div class="compare-grid">
+        <article class="comparison old">
+          <header class="comparison-head">
+            <div class="comparison-label">Old behavior</div>
+            <div class="comparison-summary">best-effort boundaries</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="Old response leak and concurrent write risks">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>failure cases</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line muted">model response:</span>
+                <span class="terminal-line">prefix <span class="secret">API-KEY</span> suffix</span>
+                <span class="terminal-line danger">→ response reaches stdout</span>
+                <span class="terminal-line faint"> </span>
+                <span class="terminal-line muted">two config roots:</span>
+                <span class="terminal-line">write A  ─┐</span>
+                <span class="terminal-line">write B  ─┴─ same native vault record</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Risk:</strong> terminal control sequences can hide a secret from raw matching, and config-scoped writes do not serialize a user-global vault.</p>
+        </article>
+        <article class="comparison new">
+          <header class="comparison-head">
+            <div class="comparison-label">New behavior</div>
+            <div class="comparison-summary">fail closed</div>
+          </header>
+          <div class="comparison-body">
+            <div class="terminal" role="img" aria-label="New secret withholding and credential serialization">
+              <div class="terminal-bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span>failure cases</span></div>
+              <div class="terminal-screen">
+                <span class="terminal-line muted">model response contains a registered credential</span>
+                <span class="terminal-line success">generation: response withheld</span>
+                <span class="terminal-line faint">stdout: 0 bytes</span>
+                <span class="terminal-line faint"> </span>
+                <span class="terminal-line muted">user-wide provider lock:</span>
+                <span class="terminal-line">write A  ── active owner ── release</span>
+                <span class="terminal-line">write B  ── waits ───────── acquire</span>
+              </div>
+            </div>
+          </div>
+          <p class="comparison-note"><strong>Improvement:</strong> raw and terminal-rendered responses are checked, while owner-aware locks serialize add, replace, and delete.</p>
+        </article>
+      </div>
+      <footer class="slide-foot"><span>179 focused tests passing</span><span>User-owned visual gate: render the VHS GIF separately</span></footer>
+    </section>
+  </main>
+
+  <div class="keys" aria-hidden="true"><kbd>←</kbd><kbd>→</kbd> navigate</div>
+  <nav class="deck-controls" aria-label="Slideshow navigation">
+    <button class="nav-button" id="previous" type="button">← Previous</button>
+    <div class="dots" id="dots"></div>
+    <button class="nav-button" id="next" type="button">Next →</button>
+  </nav>
+
+  <script>
+    const slides = [...document.querySelectorAll('.slide')];
+    const currentLabel = document.querySelector('#current-slide');
+    const totalLabel = document.querySelector('#total-slides');
+    const topic = document.querySelector('#deck-topic');
+    const progress = document.querySelector('#progress-bar');
+    const previous = document.querySelector('#previous');
+    const next = document.querySelector('#next');
+    const dots = document.querySelector('#dots');
+    let current = Math.max(0, Math.min(slides.length - 1, Number(location.hash.slice(1)) - 1 || 0));
+
+    totalLabel.textContent = String(slides.length).padStart(2, '0');
+
+    slides.forEach((slide, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'dot-button';
+      button.setAttribute('aria-label', `Go to slide ${index + 1}: ${slide.dataset.topic}`);
+      button.addEventListener('click', () => show(index));
+      dots.append(button);
+    });
+
+    function show(index, updateHash = true) {
+      current = Math.max(0, Math.min(slides.length - 1, index));
+      slides.forEach((slide, slideIndex) => {
+        const active = slideIndex === current;
+        slide.classList.toggle('is-active', active);
+        slide.setAttribute('aria-hidden', String(!active));
+      });
+      [...dots.children].forEach((dot, dotIndex) => {
+        dot.classList.toggle('is-active', dotIndex === current);
+        dot.setAttribute('aria-current', dotIndex === current ? 'step' : 'false');
+      });
+      previous.disabled = current === 0;
+      next.disabled = current === slides.length - 1;
+      currentLabel.textContent = String(current + 1).padStart(2, '0');
+      topic.textContent = slides[current].dataset.topic;
+      progress.style.width = `${((current + 1) / slides.length) * 100}%`;
+      document.title = `${current + 1}/${slides.length} — ${slides[current].dataset.topic} — llm-now`;
+      if (updateHash) history.replaceState(null, '', `#${current + 1}`);
+    }
+
+    previous.addEventListener('click', () => show(current - 1));
+    next.addEventListener('click', () => show(current + 1));
+
+    addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowLeft' || event.key === 'PageUp') show(current - 1);
+      if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+        event.preventDefault();
+        show(current + 1);
+      }
+      if (event.key === 'Home') show(0);
+      if (event.key === 'End') show(slides.length - 1);
+    });
+
+    addEventListener('hashchange', () => {
+      const target = Number(location.hash.slice(1)) - 1;
+      if (Number.isInteger(target)) show(target, false);
+    });
+
+    show(current, false);
+  </script>
+</body>
+</html>
