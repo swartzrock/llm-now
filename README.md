@@ -64,8 +64,9 @@ llm-now daily --input "Summarize this idea"
 printf 'Explain this diff' | llm-now daily
 ```
 
-Alias names are exact and case-sensitive. Options may appear before or after the alias,
-though the alias-first form above is recommended. The explicit
+Alias names are ASCII case-insensitive but spelling-exact: `daily`, `Daily`, and
+`DAILY` select the same alias, while `dailly` does not. Aliases are stored and
+displayed in lowercase. Options may appear before or after the alias, though the alias-first form above is recommended. The explicit
 `--alias daily` form remains available for scripts and for resolving any future command-name
 ambiguity.
 
@@ -85,7 +86,14 @@ After a successful unnamed interactive call, `llm-now` shows a green contextual 
 - macOS/Linux: `~/.config/llm-now/aliases.json`
 - Windows: `%APPDATA%\\llm-now\\aliases.json`, otherwise `%USERPROFILE%\\AppData\\Roaming\\llm-now\\aliases.json`
 
-Saving the same name and target reports that it is already saved. Reusing a name for a different target requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.
+Saving the same name and target, in any capitalization, reports that it is already saved. Reusing a name for a different target requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.
+
+Existing version 1 alias files need no eager migration. Case-only legacy entries
+that point to the same provider and model collapse to one lowercase alias in
+memory without rewriting the file; the next successful alias save persists all
+keys in lowercase. If case-only entries point to different targets, `llm-now`
+fails closed with a diagnostic naming the entries and alias-file path so you can
+keep the intended target. It never chooses between conflicting targets.
 
 ## Secure API-key storage
 
