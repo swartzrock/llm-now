@@ -219,15 +219,36 @@ async function smoke(archivePath: string): Promise<void> {
     await Bun.write(join(temporary, "tsconfig.json"), "this is intentionally invalid");
     await Bun.write(join(temporary, "package.json"), "this is intentionally invalid");
 
+    const configHome = join(temporary, "config");
+    await mkdir(join(configHome, "llm-now"), { recursive: true });
+    await Bun.write(join(configHome, "llm-now", "aliases.json"), `${JSON.stringify({
+      version: 1,
+      aliases: {
+        zeta: { provider: "openai", model: "gpt-5" },
+        aliases: { provider: "codex-cli", model: null },
+      },
+    }, null, 2)}\n`);
+    const aliasEnvironment = process.platform === "win32"
+      ? { APPDATA: configHome }
+      : { XDG_CONFIG_HOME: configHome };
+
     const env = {
       ...process.env,
       PATH: [temporary, process.env.PATH].filter(Boolean).join(delimiter),
+      ...aliasEnvironment,
     };
     const cases = [
-      { args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --input <text>", stderrIncludes: "" },
+      { args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>", stderrIncludes: "" },
       { args: ["--version"], code: 0, stdout: `${packageMetadata.version}\n`, stderrIncludes: "" },
       { args: ["--input", "smoke"], code: 2, stdout: "", stderrIncludes: "usage: non-interactive calls require" },
+      {
+        args: ["--aliases"],
+        code: 0,
+        stdout: "aliases → Codex CLI · provider default\nzeta → OpenAI · gpt-5\n",
+        stderr: "",
+      },
       { args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:smoke", stderrIncludes: "" },
+      { args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:smoke", stderr: "" },
     ] as const;
 
     for (const testCase of cases) {
@@ -237,7 +258,10 @@ async function smoke(archivePath: string): Promise<void> {
       const stdoutMatches = "stdout" in testCase
         ? stdout === testCase.stdout
         : stdout.includes(testCase.stdoutIncludes);
-      if (result.exitCode !== testCase.code || !stdoutMatches || !stderr.includes(testCase.stderrIncludes)) {
+      const stderrMatches = "stderr" in testCase
+        ? stderr === testCase.stderr
+        : stderr.includes(testCase.stderrIncludes);
+      if (result.exitCode !== testCase.code || !stdoutMatches || !stderrMatches) {
         throw new Error(`native smoke failed: args=${testCase.args.join(" ")} exit=${result.exitCode} stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`);
       }
     }
