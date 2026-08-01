@@ -12,11 +12,11 @@ execution: code
 
 ## Goal Capsule
 
-- **Objective:** Make every `llm-now` alias producer and consumer use one ASCII case-insensitive namespace while preserving deterministic routing and existing overwrite protections.
-- **Authority:** The Product Contract owns observable alias behavior. The Planning Contract owns canonicalization and compatibility mechanics. Repository instructions and tests remain binding where this plan is silent.
-- **Execution profile:** One implementation phase covering the alias store, application surfaces, compiled runtime proof, documentation, and release intent.
-- **Stop conditions:** Stop if compatibility requires silently choosing between different provider/model targets, if explicit provider/model calls begin depending on alias-store health, or if implementation would require fuzzy alias matching.
-- **Tail ownership:** The implementing workflow verifies, reviews, and ships the focused change through the repository's branch and pull-request process.
+- **Objective:** Make every `llm-now` alias producer and consumer use one ASCII case-insensitive namespace, then ship that behavior in a focused pull request based directly on `main`.
+- **Authority:** The Product Contract owns observable alias behavior. The Planning Contract owns canonicalization, compatibility, and clean-branch isolation. Repository instructions and tests remain binding where this plan is silent.
+- **Execution profile:** One implementation phase covering the alias store, application surfaces, compiled-runtime proof, main-facing documentation, release intent, and main-relative scope verification.
+- **Stop conditions:** Stop if compatibility requires silently choosing between different provider/model targets, if explicit provider/model calls begin depending on alias-store health, if implementation requires fuzzy matching, or if the replacement branch would include voice-guide, cookbook, or slideshow ancestry.
+- **Tail ownership:** LFG opens the replacement pull request against `main`, verifies its base and file list, cross-links and closes superseded PR #40 only after the replacement exists, and leaves the voice-dictation branch and PR #39 untouched.
 
 ---
 
@@ -24,14 +24,15 @@ execution: code
 
 ### Summary
 
-`llm-now` will treat ASCII case as insignificant for saved aliases across terminal use, scripts, agents, and macOS Shortcuts.
-The namespace remains exact in every other respect: `fred` and `Fred` are one alias, while `fred` and `fredd` are different aliases.
+`llm-now` treats ASCII case as insignificant for saved aliases across terminal use, scripts, agents, compiled binaries, and external callers such as macOS Shortcuts. The namespace remains exact in every other respect: `fred` and `Fred` are one alias, while `fred` and `fredd` are different aliases.
+
+This behavior ships independently of the in-progress macOS voice guide. The replacement change is built directly from `main` so unrelated voice, cookbook, and slideshow work does not enter the alias pull request.
 
 ### Problem Frame
 
-The current alias store accepts uppercase letters and resolves object keys exactly, so callers must reproduce saved capitalization byte-for-byte.
-Speech recognition commonly capitalizes names, which forced the macOS Shortcut user to save duplicate aliases such as `fred` and `Fred` for one target.
-A Shortcut-only lowercase conversion would leave terminal calls, scripts, agents, interactive setup, and future integrations with different behavior.
+The alias store accepts uppercase letters but historically resolved object keys exactly, forcing callers to reproduce saved capitalization byte-for-byte. A caller-only lowercase conversion would leave terminal calls, scripts, agents, interactive setup, and future integrations with different behavior.
+
+The completed alias work currently sits on top of an in-progress voice branch, which itself has older documentation ancestry. Retargeting that stacked pull request to `main` would expose unrelated files. The implementation must preserve the alias behavior while reconstructing its nine-file change set from `main`.
 
 ### Requirements
 
@@ -40,36 +41,63 @@ A Shortcut-only lowercase conversion would leave terminal calls, scripts, agents
 - R1. Every valid alias producer and consumer must compare aliases using ASCII case-insensitive semantics without adding phonetic, proximity, or typo matching.
 - R2. New and updated aliases must persist and display under their lowercase canonical name.
 - R3. Loading a legacy document with case-only variants for the same provider/model target must expose one lowercase alias without rewriting the file during the read.
-- R4. Loading a legacy document with case-only variants for different targets must fail before discovery or generation. The diagnostic must identify the canonical alias, both original spellings and provider/model targets, the alias-store path, and the manual edit needed to retain one target.
+- R4. Loading a legacy document with case-only variants for different targets must fail before discovery or generation. The diagnostic must identify the canonical alias, the deterministic conflicting pair's original spellings and provider/model targets, the alias-store path, and the manual edit needed to leave only one target across all variants of that canonical alias.
 - R5. Saving a case variant of an existing alias must use the existing already-saved, collision, confirmation, and concurrency behavior for that one canonical alias.
 
 **Caller parity and compatibility**
 
 - R6. Positional aliases, `--alias`, interactive alias selection, provider setup, post-generation saves, and compiled binaries must share the same canonical namespace.
 - R7. Explicit provider/model calls that do not consult aliases must remain independent of alias-store validity.
-- R8. The macOS voice adapter must pass the transcribed alias unchanged and rely on `llm-now` for case normalization.
-- R9. User-facing documentation, manual verification, the prior voice-guide plan, and release intent must describe the new contract without suggesting case-only duplicate aliases.
+- R8. Alias-dependent failures must remain machine-observable: exit code `1`, empty stdout, actionable stderr, and no provider discovery, listing, or generation activity.
+- R9. Main-facing documentation and release intent must describe lowercase persistence, case-insensitive lookup, spelling-exact behavior, and legacy-conflict repair.
+
+**Clean delivery**
+
+- R10. The replacement branch must start from `origin/main` and contain only the nine approved alias files listed in Scope Boundaries.
+- R11. Voice-guide, cookbook, slideshow, and user-owned `dictate.sh` work must not enter the replacement branch.
+- R12. The replacement pull request must exist against `main` before PR #40 is closed as superseded; the voice branch and PR #39 must remain unchanged for later integration.
 
 ### Key Decisions
 
-- **Core-owned case normalization.** (session-settled: user-approved — chosen over lowercasing only in the macOS Shortcut: every caller should receive the same routing behavior.) Governs R1, R6, and R8.
-- **One canonical alias per spelling.** (session-settled: user-approved — chosen over preserving `fred` and `Fred` as distinct aliases: Dictation capitalization must not change the selected target.) Governs R2 and R5.
-- **Fail closed on conflicting legacy targets.** (session-settled: user-approved — chosen over selecting an exact-case or first-seen target: ambiguous configuration must never route a request silently.) Governs R3 and R4.
+- **Core-owned case normalization.** (session-settled: user-approved — chosen over lowercasing only in macOS Shortcuts because every caller should receive the same routing behavior.) Governs R1, R6, and R9.
+- **One canonical alias per spelling.** (session-settled: user-approved — chosen over preserving `fred` and `Fred` as distinct aliases because caller capitalization must not change the selected target.) Governs R2 and R5.
+- **Fail closed on conflicting legacy targets.** (session-settled: user-approved — chosen over selecting an exact-case or first-seen target because ambiguous configuration must never route a request silently.) Governs R3, R4, and R8.
+- **Replace the stacked PR with a clean main-based PR.** (session-settled: user-approved — chosen over retargeting PR #40 because its ancestry would import unrelated voice, cookbook, and slideshow files.) Governs R10-R12.
+- **Preserve the in-progress voice branch.** (session-settled: user-approved — chosen over rebasing or rewriting it during extraction because voice dictation work is still active.) Governs R11 and R12.
 
 ### Acceptance Examples
 
-- AE1. **Covers R1, R2, and R6.** Given one saved alias `fred`, when callers use `fred`, `Fred`, or `FRED` through either positional or `--alias` syntax, every call reaches the same target and the store contains only the lowercase key.
-- AE2. **Covers R3 and R6.** Given a legacy document containing `fred` and `Fred` with identical records, when aliases are loaded for resolution or an interactive picker, one lowercase alias is available and the read does not rewrite the file.
-- AE3. **Covers R4 and R7.** Given a legacy document containing `fred` and `Fred` with different records, when an alias-dependent call runs, it exits with a configuration diagnostic and makes no discovery or generation call, while an explicit provider/model call remains usable.
-- AE4. **Covers R5.** Given canonical alias `fred`, when setup attempts to save `Fred` for the same target it reports already saved, and when it attempts a different target it follows the normal overwrite confirmation without creating a second key.
-- AE5. **Covers R8 and R9.** Given Dictation returns `Fred`, when the macOS Shortcut invokes `llm-now`, the unmodified name resolves to `fred` and no case-only duplicate is required.
+- AE1. **Covers R1, R2, and R6.** Given one saved alias `fred`, callers using `fred`, `Fred`, or `FRED` through positional or `--alias` syntax reach the same target, and the store contains only the lowercase key.
+- AE2. **Covers R3 and R6.** Given a legacy document containing `fred` and `Fred` with identical records, loading aliases exposes one lowercase alias and does not rewrite the source file.
+- AE3. **Covers R4, R7, and R8.** Given two or more case variants for `fred` with different records, an alias-dependent call exits with a deterministic conflicting-pair diagnostic that instructs the user to keep one target across all variants and makes no provider call, while an explicit provider/model call remains usable.
+- AE4. **Covers R5.** Given canonical alias `fred`, saving `Fred` for the same target reports already saved; saving it for a different target follows normal overwrite confirmation without creating a second key.
+- AE5. **Covers R9.** A user can learn from active main-facing documentation that capitalization is normalized but misspellings are not, and can repair a conflicting legacy file without guessing which target was selected.
+- AE6. **Covers R10-R12.** The replacement PR targets `main`, its changed-file list matches the approved nine-file allowlist, PR #40 links to the replacement before closing, and the voice branch and PR #39 retain their original heads.
 
 ### Scope Boundaries
 
-- Alias grammar remains 1-64 ASCII letters, numbers, hyphens, or underscores.
-- Misspellings remain errors; `fred` does not match `fredd` or a nearby alias.
-- New alias-enumeration interfaces, alias-management commands, pronunciation dictionaries, and fuzzy matching are outside this change. The existing interactive picker remains in scope and displays the canonicalized alias map.
-- Provider/model discovery, credential storage, generation output, and prompt-input contracts do not change.
+**In scope — exact replacement-PR allowlist**
+
+- `.changeset/calm-aliases-match.md`
+- `README.md`
+- `docs/manual-testing.md`
+- `docs/plans/2026-07-31-001-feat-case-insensitive-aliases-plan.md`
+- `src/aliases.ts`
+- `src/app.ts`
+- `tests/aliases.test.ts`
+- `tests/app.test.ts`
+- `tests/runtime-compile-smoke.ts`
+
+**Deferred follow-up**
+
+- Rebase or otherwise integrate `codex/macos-voice-shortcut-guide` after the alias change lands.
+- Retain voice-specific instructions that pass Dictation output unchanged and rely on core alias normalization.
+
+**Out of scope**
+
+- `dictate.sh`, `examples/**`, the macOS voice plan, and cookbook/slideshow artifacts.
+- Fuzzy matching, phonetic matching, alias proximity, pronunciation dictionaries, alias enumeration, and new agent-only APIs.
+- Alias grammar changes, provider/model discovery changes, credential storage changes, generation-output changes, and prompt-input changes.
 
 ---
 
@@ -77,41 +105,42 @@ A Shortcut-only lowercase conversion would leave terminal calls, scripts, agents
 
 ### Key Technical Decisions
 
-- KTD1. **Canonicalize at the alias-store boundary.** (session-settled: user-approved — chosen over adapter-specific normalization: persistence, lookup, and every loaded alias map need one shared contract.) Validate the existing ASCII grammar, then use the lowercase canonical name for store keys, resolution, and save collision checks. Governs R1-R6.
-- KTD2. **Canonicalize the complete loaded map.** `loadAliases` must return a deterministic lowercase map so pickers, duplicate-target detection, setup, and direct resolution cannot diverge. Equal records may collapse; unequal records produce a dedicated store error. Governs R3, R4, and R6.
-- KTD3. **Preserve argument parsing as transport.** Positional and long-form syntax continue passing the caller's alias to the resolver; canonicalization occurs when the alias store validates and resolves it. This keeps argument parsing independent of persistence policy. Governs R6.
-- KTD4. **Reuse locked save semantics.** A successful save rewrites the already-loaded canonical document while holding the existing lock, so concurrent writers cannot restore mixed-case keys. Existing expected-current and overwrite-confirmation behavior applies to the canonical key. Governs R2, R3, and R5.
-- KTD5. **Keep alias document version 1.** The stored provider/model record shape is unchanged, and the loader remains backward compatible with mixed-case version-1 keys. The next successful save performs canonical persistence. Governs R2-R5.
+- KTD1. **Canonicalize at the alias-store boundary.** Validate the existing ASCII grammar, then use the lowercase name for loaded keys, resolution, and save collision checks. This single boundary serves humans, scripts, agents, interactive flows, and compiled binaries. Governs R1-R6.
+- KTD2. **Canonicalize the complete loaded map.** `loadAliases` returns a deterministic lowercase map. Equal case-only records collapse; unequal records produce a dedicated store error before runtime activity. Governs R3, R4, R6, and R8.
+- KTD3. **Preserve argument parsing as transport.** Positional and `--alias` syntax continue passing the caller's value to the resolver; canonicalization occurs when the store validates and resolves it. Governs R6.
+- KTD4. **Reuse locked save semantics.** Successful saves rewrite the loaded canonical document while holding the existing lock, preserving expected-current checks, overwrite confirmation, atomic rename, permissions, concurrency behavior, and prototype-key protection. Governs R2, R3, and R5.
+- KTD5. **Keep alias document version 1.** The provider/model record shape is unchanged, and the version marker continues representing that schema rather than the lookup semantics of a particular binary. Mixed-case version-1 keys remain readable when unambiguous, and the next successful save persists the canonical map. A downgraded pre-change binary reverts to exact-case behavior and may recreate case variants; a later upgrade handles those variants through the same collapse-or-fail-closed rules. Governs R2-R5.
+- KTD6. **Reconstruct selectively from `origin/main`.** Apply the established alias code and test changes in dependency order, then transplant only the alias documentation hunks and revised plan. Do not restore complete stacked-branch files or cherry-pick the mixed voice/documentation commit wholesale. Governs R9-R11.
 
 ### High-Level Technical Design
 
 ```mermaid
-flowchart TB
-  A["Receive alias document or alias input"] --> B["Validate existing ASCII grammar"]
-  B --> C["Map alias to lowercase canonical name"]
-  C --> D{"Canonical key already present?"}
-  D -->|"No"| E["Add canonical alias"]
-  D -->|"Yes, same target"| F["Reuse one canonical alias"]
-  D -->|"Yes, different target in loaded document"| G["Fail with actionable configuration conflict"]
-  D -->|"Yes, different target during save"| J["Use existing overwrite confirmation"]
-  E --> H["Resolve, display, or save canonical map"]
-  F --> H
-  G --> I["Stop before discovery or generation"]
-  J -->|"Approved"| H
-  J -->|"Declined"| K["Leave canonical alias unchanged"]
+flowchart LR
+  M["origin/main"] --> C["Apply alias store, CLI, and runtime changes"]
+  C --> D["Apply only main-facing alias docs and release intent"]
+  D --> V["Verify behavior and exact nine-file diff"]
+  V --> P["Open replacement PR against main"]
+  P --> X["Cross-link and close PR #40"]
+  W["Voice branch and PR #39"] -. "preserved for later integration" .-> P
 ```
 
 ### Assumptions
 
+- `origin/main` is refreshed when implementation begins; its resolved commit becomes the replacement branch's merge base.
+- Exact transplant/cherry-pick grouping is an implementation judgment. The final main-relative content, behavior, and allowlisted file set are authoritative.
 - Read operations normalize legacy aliases in memory but do not write user configuration; the next successful locked save persists the canonical map.
-- A user-visible changeset will classify the documented case-sensitive-to-case-insensitive transition according to the repository's release policy.
-- Existing test injection seams may observe the original argument casing before the real store resolver runs; behavioral parity is proven with store-backed and compiled-runtime tests.
+- Existing test injection seams may observe original argument casing before the real store resolver runs; store-backed application and compiled-runtime tests prove observable behavior.
+- Replacement PR creation must succeed before the superseded PR is closed. If creation fails, PR #40 remains open.
 
 ### Sequencing
 
-Implement and prove canonical store behavior first.
-Then align application messaging and compiled runtime behavior.
-Update documentation and release intent only after the executable contract is verified.
+Use one implementation phase and one replacement pull request:
+
+1. Branch from refreshed `origin/main` and apply alias-store behavior.
+2. Apply CLI and compiled-runtime parity changes.
+3. Apply only main-facing alias documentation, the changeset, and this revised plan.
+4. Run behavior, release, diff, and ancestry verification.
+5. Let the LFG shipping tail create the replacement PR, verify it, and only then close PR #40 with a superseding link.
 
 ---
 
@@ -128,78 +157,73 @@ Update documentation and release intent only after the executable contract is ve
   2. Build the loaded alias map by canonical key and compare records before collapsing case-only variants.
   3. Route resolution and locked save collision checks through the canonical key.
   4. Preserve prototype-key protections, file permissions, atomic rename, and concurrent-save behavior.
-- **Execution note:** Add failing alias-store tests for case variants and conflicting legacy documents before changing the implementation.
-- **Patterns to follow:** Existing schema validation, `Object.hasOwn` checks, `sameAliasRecord`, lock acquisition, expected-current reconfirmation, and atomic temporary-file rename in `src/aliases.ts`.
 - **Test scenarios:**
-  - Covers AE1. Save `Fred`, verify the persisted key is `fred`, and resolve the record through `fred`, `Fred`, and `FRED`.
-  - Covers AE2. Load legacy `fred` and `Fred` entries with identical records, verify one lowercase in-memory key, and verify the source file bytes are unchanged after the read.
-  - Covers AE3. Load case-only variants with different records in both JSON orders and verify a deterministic conflict diagnostic identifies the canonical alias, both original spellings and targets, the store path, and a manual repair instruction without choosing either target.
-  - Covers AE4. Save a same-target case variant and verify `already-saved`; save a different-target variant and verify collision, decline, and approved-overwrite paths operate on one lowercase key.
-  - Run concurrent same-target saves using different casing and verify the final document has one canonical key.
-  - Save and resolve prototype-like aliases such as `toString` and `constructor` through case variants without inherited-property access.
-  - Reject invalid alias grammar before canonicalization and preserve the existing error category.
-- **Verification:** Alias-store tests prove canonical persistence, deterministic collapse, fail-closed conflicts, overwrite behavior, concurrency, permissions, and prototype safety.
+  - Save `Fred`, verify persistence as `fred`, and resolve through `fred`, `Fred`, and `FRED`.
+  - Load identical legacy variants, verify one in-memory key, and verify no read-time rewrite.
+  - Load two and three conflicting variants in different JSON orders and verify deterministic, actionable failure without choosing a target; the diagnostic may name one conflicting pair but must instruct the user to keep one target across all variants.
+  - Exercise same-target, collision, decline, approved-overwrite, and concurrent-save paths across casing variants.
+  - Save and resolve prototype-like aliases such as `toString` and `constructor` without inherited-property access.
+- **Verification:** Focused alias-store tests prove canonical persistence, deterministic collapse, fail-closed conflicts, overwrite behavior, concurrency, permissions, and prototype safety.
 
 ### U2. Application and compiled-runtime parity
 
-- **Goal:** Make every CLI-facing alias workflow present and exercise the canonical namespace without changing unrelated selection paths.
-- **Requirements:** R4-R7; AE1, AE3, and AE4; KTD2-KTD4.
+- **Goal:** Make every CLI alias workflow present and exercise the canonical namespace without changing unrelated selection paths.
+- **Requirements:** R4-R8; AE1, AE3, and AE4; KTD2-KTD4.
 - **Dependencies:** U1.
 - **Files:** `src/app.ts`, `tests/app.test.ts`, `tests/runtime-compile-smoke.ts`
 - **Approach:**
   1. Use canonical names for interactive preflight lookups, overwrite prompts, save diagnostics, and suggested commands.
-  2. Keep positional and `--alias` application plumbing identical while the real resolver owns normalization.
-  3. Extend compiled smoke coverage so save casing and invocation casing differ.
+  2. Keep positional and `--alias` plumbing identical while the store owns normalization.
+  3. Prove save/invocation case variance in the compiled smoke path.
   4. Preserve the no-alias-store path for explicit provider/model selection.
-- **Execution note:** Characterize current positional and long-form parity, then add integration failures that prove a legacy conflict stops before runtime calls.
-- **Patterns to follow:** `resolveSelection`, `prepareCredentialAlias`, `offerAliasSave`, dependency-injected runtime call counters, and the compiled test harness in `tests/runtime-compile-smoke.ts`.
 - **Test scenarios:**
-  - Covers AE1. Resolve one store-backed alias through positional and `--alias` calls using multiple case variants with identical stdout and runtime calls.
-  - Covers AE3. Surface the complete conflicting legacy-store repair diagnostic with exit code `1`, empty stdout, and zero discovery, listing, or generation calls.
-  - Covers AE3. Run an explicit provider/model selection while an unrelated alias document is conflicting and verify generation remains available.
-  - Covers AE4. Enter an uppercase alias in post-generation and credential-setup flows and verify prompts, saved-name diagnostics, and next-command suggestions use lowercase.
-  - Compile the CLI after saving mixed-case input, invoke a different case variant, and verify the fake provider generates successfully.
-  - Preserve cancellation, stale-alias, existing-target suggestion, and prompt sanitization behavior.
-- **Verification:** Application tests and the compiled-runtime smoke prove parity across human, script, and binary entry points without adding alias-store dependencies to explicit selection.
+  - Resolve one store-backed alias through positional and `--alias` calls using multiple case variants.
+  - Verify conflicting legacy aliases return exit `1`, empty stdout, actionable stderr, and zero discovery, listing, or generation calls.
+  - Run explicit provider/model selection while an unrelated alias document conflicts and verify generation remains available.
+  - Enter uppercase aliases in post-generation and credential-setup flows and verify lowercase prompts, diagnostics, and command suggestions.
+  - Compile the CLI after saving mixed-case input, invoke another case variant, and verify fake-provider generation succeeds.
+- **Verification:** Application tests and compiled-runtime smoke prove parity across human, script, agent, and binary entry points.
 
-### U3. Contract documentation and release intent
+### U3. Main-facing contract and clean extraction
 
-- **Goal:** Replace the case-sensitive contract everywhere users and implementers rely on it.
-- **Requirements:** R8 and R9; AE5.
+- **Goal:** Document the behavior, record release intent, and prove the replacement branch contains no stacked ancestry.
+- **Requirements:** R9-R12; AE5 and AE6; KTD6.
 - **Dependencies:** U1 and U2.
-- **Files:** `README.md`, `docs/manual-testing.md`, `examples/macos-voice-shortcut.md`, `docs/plans/2026-07-30-001-feat-macos-voice-shortcut-plan.md`, `.changeset/*.md`
+- **Files:** `.changeset/calm-aliases-match.md`, `README.md`, `docs/manual-testing.md`, `docs/plans/2026-07-31-001-feat-case-insensitive-aliases-plan.md`
 - **Approach:**
-  1. Document ASCII case-insensitive matching, lowercase persistence, spelling-exact behavior, and legacy conflict handling.
-  2. Revise manual checks so case variants succeed and misspellings still fail.
-  3. Keep the Shortcut parser's extracted alias unchanged and update its deterministic test matrix and troubleshooting guidance.
-  4. Correct the prior voice-guide plan's case-sensitive requirements and acceptance expectations so the active documentation has no contradictory contract.
-  5. Record release intent for the user-visible CLI behavior change.
-- **Patterns to follow:** Existing concise CLI contract prose in `README.md`, outcome-led scenarios in `docs/manual-testing.md`, and the guide's fake-command verification table.
+  1. Document case-insensitive lookup, lowercase persistence, spelling-exact behavior, and legacy-conflict repair in active main-facing docs.
+  2. Record the user-visible contract change through the existing changeset workflow.
+  3. Compare the branch to `origin/main` and require the exact nine-file allowlist.
+  4. Scan for stale case-sensitive claims and references to excluded voice, cookbook, or slideshow artifacts.
 - **Test scenarios:**
-  - Covers AE5. Follow the documented Shortcut test using a Dictation-capitalized alias and verify it routes without a duplicate saved alias.
-  - Search active documentation for claims that aliases are case-sensitive, preserve alias capitalization for matching, or treat wrong case as a failure.
-  - Verify examples still distinguish case normalization from prohibited fuzzy matching.
-- **Verification:** Documentation, manual checks, the voice guide, its prior plan, and the changeset describe one consistent contract that matches U1 and U2.
+  - Follow documented terminal cases for lowercase, mixed-case, and uppercase lookup plus a true misspelling.
+  - Validate changeset status and run a documentation contradiction scan.
+  - Verify the merge base is the refreshed `origin/main` commit and the main-relative changed-file list exactly matches the allowlist.
+- **Verification:** Active docs and release intent match U1/U2, and repository evidence proves the replacement diff is isolated from the voice branch.
 
 ---
 
 ## System-Wide Impact
 
-- **Humans:** Alias capitalization no longer changes model selection; prompts and saved commands show the lowercase canonical name.
-- **Scripts and agents:** Existing positional and `--alias` syntax remains stable, while case variants resolve consistently through the shared store.
-- **Persistence:** Version-1 files remain readable unless they encode two different targets that become the same canonical alias; those files fail closed until the conflict is resolved.
+- **Humans:** Alias capitalization no longer changes model selection; prompts and saved commands show lowercase canonical names.
+- **Scripts and agents:** Existing positional and `--alias` syntax remains stable, failures remain non-interactive and machine-observable, and no new agent-specific surface is required.
+- **Persistence:** Version-1 files remain readable unless case-only keys point to different targets; those files fail closed until repaired.
 - **Concurrency:** Canonicalization occurs inside the existing locked save transaction so concurrent writes retain one namespace.
-- **macOS Shortcuts:** Dictation output flows unchanged into the CLI, removing the need for case-only duplicate aliases or adapter-specific lowercasing.
+- **External callers:** Dictation and other integrations can pass exact spellings unchanged and rely on core case normalization, but their guides and implementation remain outside this pull request.
+- **Git delivery:** The alias change lands independently on `main`; the voice branch remains available for later rebase or integration.
 
 ---
 
 ## Risks and Dependencies
 
-- Existing users may intentionally have case-only aliases pointing to different targets. The new contract cannot preserve both, so the error must name the conflict clearly and never invoke a provider.
-- Canonicalizing only resolution would leave duplicate picker entries and save races. The loaded map and locked save path must share the same canonicalization.
+- Existing users may intentionally have case-only aliases pointing to different targets. The contract cannot preserve both, so the error must name the conflict and never invoke a provider.
+- A diagnostic names the first deterministic conflicting pair rather than enumerating an unbounded set. Its repair instruction must cover every case variant so the user can resolve the canonical alias in one edit.
+- Canonicalizing only resolution would leave duplicate picker entries and save races. Loaded maps and locked saves must share canonicalization.
 - Rewriting during load would introduce surprising mutation and bypass the save lock. Legacy normalization remains in memory until a successful save.
-- User-facing messages can drift if application code prints raw prompt input after the store canonicalizes it. Application tests must pin lowercase display.
-- The change depends only on existing Bun, TypeScript, and alias-store infrastructure; no new runtime dependency is needed.
+- Downgrading to a pre-change binary restores exact-case lookup and can recreate case-only variants because document version 1 is intentionally retained for the unchanged schema. Re-upgrading collapses equal targets or fails closed on unequal targets; cross-version behavioral parity is not promised.
+- Restoring whole files from the stacked branch could import an inherited cookbook link or voice-guide dependencies. Apply only the approved alias deltas and verify the final file list against `main`.
+- Closing PR #40 before the replacement exists would remove the active review vehicle. The close is explicitly ordered after replacement PR creation.
+- No new runtime dependency is required.
 
 ---
 
@@ -207,20 +231,24 @@ Update documentation and release intent only after the executable contract is ve
 
 | Gate | Applies to | Required outcome |
 |---|---|---|
-| Targeted alias and application tests | U1, U2 | All canonicalization, collision, concurrency, and call-parity scenarios pass. |
-| `bun run check` | U1-U3 | Bun tests, TypeScript checking, and compiled-runtime smoke all pass. |
+| `bun test tests/aliases.test.ts tests/app.test.ts` | U1, U2 | Focused canonicalization, collision, concurrency, and caller-parity scenarios pass. |
+| `bun run check` | U1-U3 | Full Bun tests, TypeScript checking, and compiled-runtime smoke pass. |
 | `bun run changeset:status` | U3 | Release intent is valid and reports the intended package impact. |
-| Documentation contradiction scan | U3 | No active user documentation describes alias case as significant or recommends case-only duplicates. |
-| Manual Shortcut handoff | U3 | Final instructions let the user verify that a Dictation-capitalized alias routes through one lowercase saved alias and produces the expected spoken response. This user-run GUI check is not an automated shipping gate. |
+| `git diff --check` | U1-U3 | No whitespace or patch-integrity errors. |
+| Main-relative ancestry and allowlist check | U3 | Merge base is the refreshed `origin/main` commit and exactly the nine approved files differ. |
+| Documentation contradiction scan | U3 | Active replacement-PR docs contain no case-sensitive contract or excluded voice/cookbook/slideshow dependency. |
+| Browser gate | U1-U3 | Not applicable: the change affects CLI TypeScript, tests, and Markdown only. |
 
 ---
 
 ## Definition of Done
 
-- R1-R9 and AE1-AE5 are satisfied by the owning implementation units.
-- The persisted namespace, loaded namespace, interactive displays, direct resolution, and compiled binary all agree on lowercase canonical aliases.
-- Same-target legacy variants collapse deterministically without read-time mutation; different-target variants fail before provider activity.
+- R1-R12 and AE1-AE6 are satisfied by their owning implementation units or the LFG shipping tail.
+- Persisted aliases, loaded aliases, interactive displays, direct resolution, and compiled binaries agree on lowercase canonical names.
+- Same-target legacy variants collapse without read-time mutation; different-target variants fail before provider activity.
 - Explicit provider/model generation remains usable without loading aliases.
-- README, manual testing, the macOS voice guide, the prior guide plan, and release intent state the same contract.
-- All Verification Contract gates that can run locally pass, and the manual Shortcut check is documented for the final handoff.
-- The diff contains no abandoned experiments, adapter-specific case workaround, fuzzy matching, or unrelated cleanup.
+- README, manual testing, the alias plan, and release intent state one contract without depending on voice-guide files.
+- All local verification gates pass, and the replacement PR's GitHub base and file list match the plan.
+- PR #40 is cross-linked and closed only after the replacement PR exists.
+- PR #39, `codex/macos-voice-shortcut-guide`, and user-owned `dictate.sh` remain unchanged.
+- The diff contains no fuzzy matching, alias enumeration, adapter-specific workaround, abandoned experiment, or unrelated cleanup.

@@ -122,6 +122,40 @@ describe("global aliases", () => {
     expect(messages[0]).toContain("Edit the alias store manually");
   });
 
+  test("reports a deterministic conflicting pair across three legacy variants", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    const variants = [
+      [
+        ["FRED", { provider: "ollama", model: "llama3.1" }],
+        ["Fred", { provider: "ollama", model: "llama3.1" }],
+        ["fRED", { provider: "codex-cli", model: null }],
+      ],
+      [
+        ["fRED", { provider: "codex-cli", model: null }],
+        ["Fred", { provider: "ollama", model: "llama3.1" }],
+        ["FRED", { provider: "ollama", model: "llama3.1" }],
+      ],
+    ] as const;
+    const messages: string[] = [];
+
+    for (const entries of variants) {
+      await writeFile(path, JSON.stringify({ version: 1, aliases: Object.fromEntries(entries) }));
+      try {
+        await loadAliases(path);
+        throw new Error("expected conflicting aliases to fail");
+      } catch (error) {
+        expect(error).toBeInstanceOf(AliasStoreError);
+        messages.push((error as Error).message);
+      }
+    }
+
+    expect(messages[0]).toBe(messages[1]);
+    expect(messages[0]).toContain('"FRED" -> ollama/llama3.1');
+    expect(messages[0]).toContain('"fRED" -> codex-cli/(default)');
+    expect(messages[0]).toContain('keep only one target for "fred"');
+  });
+
   test("fails closed for corrupt JSON and invalid schema values", async () => {
     await expect(loadAliases(join(import.meta.dir, "fixtures/aliases/corrupt.json"))).rejects.toBeInstanceOf(
       AliasStoreError,
