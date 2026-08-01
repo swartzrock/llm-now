@@ -299,6 +299,232 @@ describe("help output", () => {
   });
 });
 
+describe("alias inventory", () => {
+  test("prints one sorted capture-safe roster after one load and performs no other work", async () => {
+    const operations: string[] = [];
+    let stdinReads = 0;
+    const app = dependencies({
+      args: ["--aliases"],
+      stdin: {
+        isTTY: false,
+        async *[Symbol.asyncIterator]() {
+          stdinReads += 1;
+          yield new TextEncoder().encode("ignored piped prompt");
+        },
+      },
+      stdoutTty: true,
+      runtime: runtime({
+        discover: async () => {
+          operations.push("discover");
+          return [];
+        },
+        listModels: async () => {
+          operations.push("list-models");
+          return [];
+        },
+        validateCredential: async () => {
+          operations.push("validate-credential");
+          return [];
+        },
+        generate: async () => {
+          operations.push("generate");
+          return "unexpected";
+        },
+      }),
+      prompter: {
+        select: async () => {
+          operations.push("select");
+          return null;
+        },
+        input: async () => {
+          operations.push("input");
+          return null;
+        },
+        password: async () => {
+          operations.push("password");
+          return null;
+        },
+        confirm: async () => {
+          operations.push("confirm");
+          return null;
+        },
+      },
+      loadAliases: async (path) => {
+        operations.push(`load:${path}`);
+        return {
+          version: 1,
+          aliases: {
+            zeta: { provider: "openai", model: "gpt-\u001b[31m5" },
+            alpha: { provider: "google", model: "gemini-2.5-pro" },
+            middle: { provider: "claude-cli", model: null },
+          },
+        };
+      },
+      resolveAlias: async () => {
+        operations.push("resolve-alias");
+        return { provider: "ollama", model: "qwen" };
+      },
+      saveAlias: async () => {
+        operations.push("save-alias");
+        return "saved";
+      },
+      credentialVault: {
+        get: async () => {
+          operations.push("vault-get");
+          return null;
+        },
+        set: async () => {
+          operations.push("vault-set");
+        },
+        delete: async () => {
+          operations.push("vault-delete");
+          return false;
+        },
+      },
+      credentialResolver: {
+        resolve: async () => {
+          operations.push("credential-resolve");
+          return { source: "missing" };
+        },
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe(
+      "alpha → Gemini · gemini-2.5-pro\n"
+      + "middle → Claude CLI · provider default\n"
+      + "zeta → OpenAI · gpt-5\n",
+    );
+    expect(app.stdout.text()).not.toContain("\u001b");
+    expect(app.stderr.text()).toBe("");
+    expect(stdinReads).toBe(0);
+    expect(operations).toEqual(["load:/config/aliases.json"]);
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("a missing store is an empty zero-byte inventory and closed stdin is ignored", async () => {
+    const directory = await temporaryDirectory();
+    const aliasPath = join(directory, "missing.json");
+    const app = dependencies({
+      args: ["--aliases"],
+      aliasPath,
+      stdin: {
+        isTTY: false,
+        async *[Symbol.asyncIterator]() {
+          throw new Error("inventory must not read closed stdin");
+        },
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("rejects every aliases combination before loading or runtime work", async () => {
+    let loads = 0;
+    for (const args of [
+      ["--aliases", "--input", "hello"],
+      ["--aliases", "daily"],
+      ["--aliases", "--alias", "daily"],
+      ["--aliases", "--provider", "ollama"],
+      ["--aliases", "--model", "qwen"],
+      ["--aliases", "--help"],
+      ["--aliases", "-h"],
+      ["--aliases", "--version"],
+    ]) {
+      const app = dependencies({
+        args,
+        loadAliases: async () => {
+          loads += 1;
+          return { version: 1, aliases: {} };
+        },
+      });
+
+      expect(await runApplication(app.value), args.join(" ")).toBe(2);
+      expect(app.stdout.text(), args.join(" ")).toBe("");
+      expect(app.stderr.text(), args.join(" ")).toStartWith("usage:");
+      expect(app.runtime.calls, args.join(" ")).toEqual({ discover: 0, list: 0, generate: 0 });
+    }
+    expect(loads).toBe(0);
+  });
+
+  test("fails closed for corrupt, conflicting, and unreadable stores", async () => {
+    const directory = await temporaryDirectory();
+    const corruptPath = join(directory, "corrupt.json");
+    const conflictPath = join(directory, "conflict.json");
+    await Bun.write(corruptPath, "{");
+    await Bun.write(conflictPath, conflictingAliasDocument);
+
+    for (const scenario of [
+      { aliasPath: corruptPath, diagnostic: "failed to load alias store" },
+      { aliasPath: conflictPath, diagnostic: 'conflicting case-insensitive alias "fred"' },
+    ]) {
+      const app = dependencies({ args: ["--aliases"], aliasPath: scenario.aliasPath });
+      expect(await runApplication(app.value)).toBe(1);
+      expect(app.stdout.text()).toBe("");
+      expect(app.stderr.text()).toStartWith("config:");
+      expect(app.stderr.text()).toContain(scenario.diagnostic);
+      expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+    }
+
+    const unreadable = dependencies({
+      args: ["--aliases"],
+      loadAliases: async () => {
+        throw new AliasStoreError("failed to load alias store: permission denied");
+      },
+    });
+    expect(await runApplication(unreadable.value)).toBe(1);
+    expect(unreadable.stdout.text()).toBe("");
+    expect(unreadable.stderr.text()).toBe(
+      "config: failed to load alias store: permission denied\n",
+    );
+    expect(unreadable.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("collapses same-target legacy variants into one canonical roster row", async () => {
+    const directory = await temporaryDirectory();
+    const aliasPath = join(directory, "aliases.json");
+    await Bun.write(aliasPath, JSON.stringify({
+      version: 1,
+      aliases: {
+        ZED: { provider: "ollama", model: "qwen" },
+        Fred: { provider: "claude-cli", model: null },
+        FRED: { provider: "claude-cli", model: null },
+      },
+    }));
+    const app = dependencies({ args: ["--aliases"], aliasPath });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe(
+      "fred → Claude CLI · provider default\n"
+      + "zed → Ollama · qwen\n",
+    );
+    expect(app.stderr.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("keeps the positional alias named aliases on the generation path", async () => {
+    const app = dependencies({
+      args: ["aliases", "--input", "hello"],
+      runtime: runtime({ response: "generated" }),
+      loadAliases: async () => {
+        throw new Error("positional alias must not list the roster");
+      },
+      resolveAlias: async (_path, name) => {
+        expect(name).toBe("aliases");
+        return { provider: "ollama", model: "qwen" };
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("generated");
+    expect(app.stderr.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
+  });
+});
+
 describe("one-shot application", () => {
   test("routes a bare TTY invocation into setup before reading generation input", async () => {
     const seen: Array<{ message: string; options: PromptOption[] }> = [];

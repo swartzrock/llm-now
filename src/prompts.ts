@@ -153,6 +153,15 @@ export function formatSelection(selection: AliasRecord): string {
   return `${provider} · ${model}`;
 }
 
+export function formatAliasInventory(
+  aliases: Readonly<Record<string, AliasRecord>>,
+): string {
+  return Object.entries(aliases)
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+    .map(([alias, selection]) => `${sanitizePromptText(alias)} → ${formatSelection(selection)}`)
+    .join("\n");
+}
+
 export async function selectAliasOrFresh(
   aliases: Readonly<Record<string, AliasRecord>>,
   prompter: SearchablePrompter,

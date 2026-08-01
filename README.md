@@ -64,6 +64,28 @@ llm-now daily --input "Summarize this idea"
 printf 'Explain this diff' | llm-now daily
 ```
 
+List the saved alias inventory without prompting or contacting a provider:
+
+```console
+$ llm-now --aliases
+aliases → Codex CLI · provider default
+daily → OpenAI · gpt-5
+```
+
+Inventory output has one uncolored, unpadded `alias → Provider Label · model`
+row per canonical lowercase alias, sorted by canonical alias, with no header. A
+null model is shown as `provider default`. A missing or empty alias store exits
+`0` with zero stdout bytes. Successful inventory writes only to stdout and
+leaves stderr empty.
+
+`--aliases` is standalone and ignores stdin. Combining it with any other option
+or positional value exits `2`, leaves stdout empty, and writes a `usage:`
+diagnostic to stderr. An invalid, unreadable, or case-conflicting alias store
+exits `1`, leaves stdout empty, and writes the existing `config:` diagnostic to
+stderr. Inventory returns before prompt handling, provider discovery or runtime
+calls, credential access, and alias mutation. The bare word `aliases` remains a
+positional alias and generates normally when that alias is configured.
+
 Alias names are ASCII case-insensitive but spelling-exact: `daily`, `Daily`, and
 `DAILY` select the same alias, while `dailly` does not. Aliases are stored and
 displayed in lowercase. Options may appear before or after the alias, though the alias-first form above is recommended. The explicit
@@ -138,7 +160,7 @@ If no provider is found, stderr lists every checked provider class and manual se
 
 Exit codes:
 
-- `0`: successful generation, help, version, or completed/declined setup action (including declined/cancelled post-success alias saving)
-- `1`: discovery, model-list, generation, configuration, credential-store, or post-credential alias failure
-- `2`: invalid usage
+- `0`: successful generation or alias inventory, help, version, or completed/declined setup action (including declined/cancelled post-success alias saving)
+- `1`: discovery, model-list, generation, configuration (including an invalid, unreadable, or case-conflicting alias store), credential-store, or post-credential alias failure
+- `2`: invalid usage, including combining `--aliases` with another option or positional value
 - `130`: interactive setup or alias/provider/model selection cancelled before a durable action

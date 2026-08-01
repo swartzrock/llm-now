@@ -36,6 +36,7 @@ import {
   cloudCredentialProviderOptions,
   createSearchablePrompter,
   createTerminalColors,
+  formatAliasInventory,
   formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
   providerLabel,
@@ -671,6 +672,14 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     }
     if (parsed.kind === "version") {
       deps.stdout.write(`${deps.version}\n`);
+      return 0;
+    }
+    if (parsed.kind === "aliases") {
+      const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
+        applicationAliasPath(deps),
+      )).aliases;
+      const roster = formatAliasInventory(aliases);
+      if (roster.length > 0) deps.stdout.write(`${roster}\n`);
       return 0;
     }
 
