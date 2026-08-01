@@ -30,6 +30,7 @@ export function renderHelpText(
 
 ${heading("Usage:")}
   ${literal("llm-now")}
+  ${literal("llm-now")} ${literal("--aliases")}
   ${literal("llm-now")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${metadata("<alias>")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${literal("--provider")} ${metadata("<id>")} ${literal("--model")} ${metadata("<id|default>")} ${literal("--input")} ${metadata("<text>")}
@@ -41,6 +42,7 @@ ${heading("Rules:")}
   Model "default" is available only for codex-cli and claude-cli.
 
 ${heading("Options:")}
+  ${literal("--aliases")}            List saved aliases
   ${literal("--input")} ${metadata("<text>")}       Prompt text
   ${literal("--alias")} ${metadata("<name>")}       Saved provider/model selection
   ${literal("--provider")} ${metadata("<id>")}      Explicit provider
@@ -79,6 +81,7 @@ export type Selection =
 export type ParsedArguments =
   | { kind: "help" }
   | { kind: "version" }
+  | { kind: "aliases" }
   | { kind: "run"; input?: string; selection: Selection };
 
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
@@ -95,6 +98,7 @@ export function parseArguments(args: string[]): ParsedArguments {
     alias?: string;
     provider?: string;
     model?: string;
+    aliases?: boolean;
     help?: boolean;
     version?: boolean;
   };
@@ -109,6 +113,7 @@ export function parseArguments(args: string[]): ParsedArguments {
         alias: { type: "string" },
         provider: { type: "string" },
         model: { type: "string" },
+        aliases: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean" },
       },
@@ -120,6 +125,12 @@ export function parseArguments(args: string[]): ParsedArguments {
   }
 
   const supplied = Object.entries(values).filter(([, value]) => value !== undefined && value !== false);
+  if (values.aliases) {
+    if (supplied.length !== 1 || positionals.length > 0) {
+      throw new UsageError("--aliases must be used without other options.");
+    }
+    return { kind: "aliases" };
+  }
   if (values.help || values.version) {
     if (supplied.length !== 1 || positionals.length > 0) {
       throw new UsageError("--help and --version must be used without other options.");
