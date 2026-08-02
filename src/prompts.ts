@@ -173,7 +173,13 @@ export function formatAliasInventory(
 ): string {
   return Object.entries(aliases)
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-    .map(([alias, selection]) => `${sanitizePromptText(alias)} → ${formatSelection(selection)}`)
+    .map(([alias, selection]) => {
+      const provider = providerLabel(selection.provider);
+      const model = selection.model === null
+        ? "provider default"
+        : sanitizePromptText(selection.model);
+      return `${sanitizePromptText(alias)} → ${provider} · ${model}`;
+    })
     .join("\n");
 }
 

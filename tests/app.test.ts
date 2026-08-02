@@ -2236,7 +2236,7 @@ describe("API-key management", () => {
     const savedNames: string[] = [];
     const app = management({
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "qwen"],
+        choices: ["setup:manage-api-keys", "openai", true, "qwen"],
         passwords: ["prototype-alias-sentinel"],
         names: ["constructor"],
         confirms: [true],
@@ -2252,7 +2252,7 @@ describe("API-key management", () => {
 
     expect(await runApplication(app.value)).toBe(0);
     expect(confirmMessages).toHaveLength(1);
-    expect(confirmMessages[0]).toContain("Save this verified OpenAI API key and alias constructor?");
+    expect(confirmMessages[0]).toBe("Save this verified OpenAI API key?");
     expect(savedNames).toEqual(["constructor"]);
   });
 
