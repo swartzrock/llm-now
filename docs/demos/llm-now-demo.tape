@@ -89,7 +89,7 @@ Wait+Screen@10 s /Saved shortcut explain → Codex CLI · fake-model/
 Sleep 1500 ms
 Type "Explain ECONNREFUSED in one sentence."
 Enter
-Wait+Line@30 s /^\$$/
+Wait+Screen@30 s /fake:Explain ECONNREFUSED in one sentence\./
 Sleep 3 s
 
 # Reuse the configured shortcut through the exact configured root action.
@@ -108,7 +108,7 @@ Enter
 Sleep 1500 ms
 Type "Explain a 404 in one sentence."
 Enter
-Wait+Line@30 s /^\$$/
+Wait+Screen@30 s /fake:Explain a 404 in one sentence\./
 Sleep 3 s
 
 # Finish on a low-friction call to action. Do not execute the install command.
