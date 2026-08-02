@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Provider-aware terminal branding — ideation</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1014;
+      --surface: #111921;
+      --surface-2: #18232d;
+      --surface-3: #202e38;
+      --text: #edf5f1;
+      --muted: #a8b9b2;
+      --faint: #748981;
+      --accent: #9ee6c2;
+      --accent-soft: #18382d;
+      --accent-text: #bdf2d5;
+      --amber: #f4c56a;
+      --amber-soft: #3a2d16;
+      --amber-text: #ffe0a0;
+      --blue: #91c7ff;
+      --blue-soft: #172f48;
+      --blue-text: #c4e2ff;
+      --red-soft: #412225;
+      --red-text: #ffc2c7;
+      --border: #2b3b45;
+      --shadow: 0 20px 70px rgba(0, 0, 0, .32);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 8% 0%, rgba(74, 160, 124, .12), transparent 28rem),
+        linear-gradient(180deg, #0c1216 0, var(--bg) 28rem);
+      color: var(--text);
+      font: 15px/1.65 var(--sans);
+    }
+
+    a { color: var(--blue); text-underline-offset: .18em; }
+    a:hover { color: #cde7ff; }
+    code, .mono { font-family: var(--mono); }
+    code {
+      padding: .12rem .32rem;
+      border: 1px solid var(--border);
+      border-radius: .35rem;
+      background: #0b1217;
+      color: #d7e8e0;
+      font-size: .92em;
+    }
+
+    .page {
+      width: min(94vw, 960px);
+      margin: 0 auto;
+      padding: 4.5rem 0 5rem;
+    }
+
+    header.hero {
+      padding: 2.4rem;
+      border: 1px solid var(--border);
+      border-radius: 1.4rem;
+      background: linear-gradient(145deg, rgba(24, 35, 45, .97), rgba(14, 22, 28, .97));
+      box-shadow: var(--shadow);
+    }
+
+    .eyebrow {
+      margin: 0 0 .55rem;
+      color: var(--accent);
+      font: 700 .74rem/1.2 var(--mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 {
+      margin-top: 0;
+      line-height: 1.18;
+      letter-spacing: -.025em;
+    }
+    h1 { max-width: 18ch; margin-bottom: 1rem; font-size: clamp(2.25rem, 6vw, 4.4rem); }
+    h2 { margin-bottom: 1rem; font-size: clamp(1.55rem, 3vw, 2.2rem); }
+    h3 { margin-bottom: .7rem; font-size: 1.35rem; }
+    p { max-width: 72ch; }
+    .lede { max-width: 66ch; color: #cad9d3; font-size: 1.08rem; }
+
+    .metadata, .stats, .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .65rem;
+    }
+    .metadata { margin-top: 1.5rem; }
+    .metadata span, .stat, .chip {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-2);
+    }
+    .metadata span { padding: .42rem .72rem; color: var(--muted); font-size: .82rem; }
+    .metadata b { color: var(--text); font-weight: 650; }
+
+    .stats { margin: 1rem 0 2.8rem; }
+    .stat { min-width: 9rem; padding: .8rem 1rem; }
+    .stat strong { display: block; font: 750 1.4rem/1 var(--mono); }
+    .stat span { display: block; margin-top: .4rem; color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .08em; }
+
+    nav.toc, .jump-list {
+      margin: 1.2rem 0 0;
+      padding: 1rem 1.2rem;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: rgba(17, 25, 33, .78);
+    }
+    nav.toc ul, .jump-list ol { display: flex; flex-wrap: wrap; gap: .5rem 1.1rem; margin: .4rem 0 0; padding-left: 1.2rem; }
+    nav.toc a, .jump-list a { color: var(--muted); text-decoration: none; }
+    nav.toc a:hover, .jump-list a:hover { color: var(--text); }
+
+    section { margin-top: 4rem; scroll-margin-top: 1.5rem; }
+    .section-intro { color: var(--muted); }
+    .callout {
+      padding: 1rem 1.1rem;
+      border: 1px solid #3b594d;
+      border-radius: .9rem;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+    }
+    .callout strong { color: inherit; }
+
+    .grounding-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 1.2rem;
+    }
+    .grounding-card {
+      padding: 1.1rem 1.2rem;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: var(--surface);
+    }
+    .grounding-card h3 { font-size: 1rem; letter-spacing: 0; }
+    .grounding-card p { margin-bottom: 0; color: var(--muted); }
+
+    .axis-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: .8rem;
+      padding: 0;
+      list-style: none;
+    }
+    .axis-list li {
+      min-height: 5rem;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: .9rem;
+      background: var(--surface);
+    }
+    .axis-list b { display: block; margin-bottom: .2rem; color: var(--accent); font: 700 .75rem/1.2 var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+
+    .idea {
+      margin-top: 1.3rem;
+      padding: 1.35rem;
+      border: 1px solid var(--border);
+      border-radius: 1.1rem;
+      background: linear-gradient(155deg, rgba(24, 35, 45, .96), rgba(15, 23, 29, .96));
+      box-shadow: 0 10px 35px rgba(0, 0, 0, .18);
+      scroll-margin-top: 1.5rem;
+    }
+    .idea-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .rank {
+      margin: 0 0 .45rem;
+      color: var(--accent);
+      font: 700 .76rem/1 var(--mono);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .chip-row { justify-content: flex-end; }
+    .chip {
+      padding: .35rem .62rem;
+      color: var(--muted);
+      font: 650 .73rem/1 var(--mono);
+      white-space: nowrap;
+    }
+    .chip.high { background: var(--accent-soft); color: var(--accent-text); border-color: #3b594d; }
+    .chip.med { background: var(--amber-soft); color: var(--amber-text); border-color: #6c5428; }
+    .idea dl {
+      display: grid;
+      grid-template-columns: 7.5rem 1fr;
+      gap: .75rem 1rem;
+      margin: 1.1rem 0 0;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    .idea dt {
+      color: var(--faint);
+      font: 700 .73rem/1.45 var(--mono);
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .idea dd { margin: 0; color: #d3dfda; }
+
+    .diagram {
+      margin: 1.2rem 0 .4rem;
+      padding: 1rem;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      background: #0d151a;
+    }
+    .diagram svg { display: block; min-width: 680px; width: 100%; height: auto; }
+    .caption { margin: .6rem 0 0; color: var(--faint); font-size: .82rem; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .88rem;
+    }
+    th, td { padding: .72rem .75rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; background: var(--surface-2); color: var(--text); font: 700 .72rem/1.2 var(--mono); letter-spacing: .07em; text-transform: uppercase; }
+    td:first-child { width: 3.5rem; color: var(--faint); font-family: var(--mono); }
+    td:nth-child(2) { width: 34%; color: #e2ece8; font-weight: 620; }
+    td:nth-child(3) { color: var(--muted); }
+    .table-wrap { max-height: 36rem; overflow: auto; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface); }
+
+    .refs { padding-left: 1.2rem; }
+    .refs li { margin: .5rem 0; color: var(--muted); }
+
+    footer {
+      margin-top: 4rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      color: var(--faint);
+      font-size: .78rem;
+    }
+
+    @media (max-width: 720px) {
+      .page { width: min(92vw, 960px); padding-top: 2rem; }
+      header.hero { padding: 1.4rem; }
+      .grounding-grid, .axis-list { grid-template-columns: 1fr; }
+      .idea-head { display: block; }
+      .chip-row { justify-content: flex-start; margin-bottom: .8rem; }
+      .idea dl { grid-template-columns: 1fr; gap: .25rem; }
+      .idea dd { margin-bottom: .65rem; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Ideation · terminal experience</p>
+      <h1>Provider-aware terminal branding</h1>
+      <p class="lede">How should llm-now make Anthropic, Claude CLI, and other provider identities visible during selection and API-key setup—and can an SVG logo library such as SVGL participate without compromising terminal portability?</p>
+      <div class="metadata" aria-label="Document metadata">
+        <span><b>Date</b> <time datetime="2026-07-26">2026-07-26</time></span>
+        <span><b>Topic</b> provider-aware-terminal-branding</span>
+        <span><b>Focus</b> provider logos after key setup or selection, including SVGL feasibility</span>
+        <span><b>Mode</b> repo-grounded</span>
+      </div>
+      <nav class="toc" aria-label="Document sections">
+        <p class="eyebrow">Navigate</p>
+        <ul>
+          <li><a href="#grounding-context">Grounding Context</a></li>
+          <li><a href="#topic-axes">Topic Axes</a></li>
+          <li><a href="#ranked-ideas">Ranked Ideas</a></li>
+          <li><a href="#rejection-summary">Rejection Summary</a></li>
+          <li><a href="#grounding-references">Grounding References</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <div class="stats" aria-label="Ideation counts">
+      <div class="stat"><strong>48</strong><span>raw candidates</span></div>
+      <div class="stat"><strong>6</strong><span>ranked survivors</span></div>
+      <div class="stat"><strong>4</strong><span>topic axes</span></div>
+      <div class="stat"><strong>0</strong><span>literal logos recommended now</span></div>
+    </div>
+
+    <section id="grounding-context">
+      <p class="eyebrow">What reality permits</p>
+      <h2>Grounding Context</h2>
+      <div class="callout"><strong>Feasibility answer:</strong> SVGs from SVGL cannot render directly in this application’s current terminal surface. True images are possible only through emulator-specific bitmap protocols such as Kitty Graphics, iTerm2 Inline Images, or Sixel, each with detection, placement, and fallback costs.</div>
+      <div class="grounding-grid">
+        <article class="grounding-card">
+          <h3>Character-cell UI</h3>
+          <p>The CLI uses <code>@clack/prompts</code> and ANSI styling on stderr. Its local option contract is only <code>value</code>, <code>label</code>, and optional <code>hint</code>; there is no per-row image or right-side renderer.</p>
+        </article>
+        <article class="grounding-card">
+          <h3>Identity is already centralized</h3>
+          <p><code>PROVIDER_LABELS</code> distinguishes <code>anthropic → Anthropic</code> from <code>claude-cli → Claude CLI</code>. The former is a cloud API-key provider; the latter is an authenticated local CLI route.</p>
+        </article>
+        <article class="grounding-card">
+          <h3>State transitions are more valuable than decoration</h3>
+          <p>Keys are validated before saving, but later menus mostly return to bare provider labels. Model-list failures remove the selected provider and continue, which can erase useful recovery context.</p>
+        </article>
+        <article class="grounding-card">
+          <h3>Vendor marks create an asset policy</h3>
+          <p>SVGL’s repository license is not blanket permission for every indexed trademark. The current native release is a lean executable without a logo corpus, renderer, or provenance lifecycle.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="topic-axes">
+      <p class="eyebrow">Surface map</p>
+      <h2>Topic Axes</h2>
+      <ul class="axis-list">
+        <li><b>Axis 1</b>Provider identity and selection state</li>
+        <li><b>Axis 2</b>Prompt layout and right-side placement</li>
+        <li><b>Axis 3</b>Terminal rendering capability and portability</li>
+        <li><b>Axis 4</b>Asset packaging, brand provenance, and fallback behavior</li>
+      </ul>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">The directions worth discussing</p>
+      <h2>Ranked Ideas</h2>
+      <p class="section-intro">The ranking favors useful provider context that works with the existing prompt stack. Exact vendor-logo rendering appears only as a rejected direction because its portability and maintenance costs overwhelm the value of this small surface.</p>
+      <nav class="jump-list" aria-label="Ranked idea index">
+        <p class="eyebrow">Idea index</p>
+        <ol>
+          <li><a href="#idea-1">Provider Identity Card + State-Aware Hints</a></li>
+          <li><a href="#idea-2">Verified Connection Passport</a></li>
+          <li><a href="#idea-3">Text-First Provider Stamp on the Next Prompt</a></li>
+          <li><a href="#idea-4">Failure Annunciator</a></li>
+          <li><a href="#idea-5">First-Party llm-now Connection Mark</a></li>
+          <li><a href="#idea-6">Vendor-Asset Gate: Ship None Now</a></li>
+        </ol>
+      </nav>
+
+      <article class="idea" id="idea-1">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 1 · Top pick</p>
+            <h3>Provider Identity Card + State-Aware Hints</h3>
+          </div>
+          <div class="chip-row">
+            <span class="chip high">Confidence 95%</span>
+            <span class="chip">Complexity Low–Medium</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Enrich the existing provider identity map with a canonical connection class and compact terminal-safe copy, while keeping runtime readiness separate. Stock Clack labels and focused-row hints can then distinguish <code>Anthropic · API key</code>, <code>Claude CLI · authenticated CLI</code>, and <code>Ollama · local</code>; a separate status line handles durable selected or validated state.</p>
+        <dl>
+          <dt>Axis</dt><dd>Provider identity and selection state</dd>
+          <dt>Basis</dt><dd><code>direct:</code> <code>src/prompts.ts:23–53</code> already centralizes labels and defines the only supported row fields as <code>value</code>, <code>label</code>, and <code>hint</code>. Provider rows at <code>src/prompts.ts:211–214</code> currently carry only the label.</dd>
+          <dt>Rationale</dt><dd>This solves the user’s recognition problem without implying that Anthropic API access and Claude CLI authentication are the same thing. It also creates one reusable identity seam for provider selection, key setup, model selection, and later additions.</dd>
+          <dt>Downsides</dt><dd>A registry can become overbuilt. Immutable identity metadata must remain separate from discovered, validated, saved, and environment-preferred runtime states.</dd>
+        </dl>
+        <div class="diagram">
+          <svg viewBox="0 0 800 270" role="img" aria-labelledby="diagram-one-title diagram-one-desc">
+            <title id="diagram-one-title">One provider identity source feeding three terminal surfaces</title>
+            <desc id="diagram-one-desc">A central provider identity card supplies consistent text to provider rows, post-selection state, and credential receipts.</desc>
+            <defs>
+              <marker id="arrow-one" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#739c8b"/>
+              </marker>
+            </defs>
+            <rect x="270" y="20" width="260" height="76" rx="14" fill="#18382d" stroke="#5b8c76"/>
+            <text x="400" y="50" text-anchor="middle" fill="#bdf2d5" font-family="ui-monospace, monospace" font-size="15" font-weight="700">PROVIDER IDENTITY CARD</text>
+            <text x="400" y="75" text-anchor="middle" fill="#a8cbbb" font-family="ui-monospace, monospace" font-size="13">label · connection class · safe code</text>
+            <path d="M400 96 V132 H135 V166" fill="none" stroke="#739c8b" stroke-width="2" marker-end="url(#arrow-one)"/>
+            <path d="M400 132 V166" fill="none" stroke="#739c8b" stroke-width="2" marker-end="url(#arrow-one)"/>
+            <path d="M400 132 H665 V166" fill="none" stroke="#739c8b" stroke-width="2" marker-end="url(#arrow-one)"/>
+            <rect x="25" y="170" width="220" height="72" rx="12" fill="#172f48" stroke="#547ca2"/>
+            <rect x="290" y="170" width="220" height="72" rx="12" fill="#172f48" stroke="#547ca2"/>
+            <rect x="555" y="170" width="220" height="72" rx="12" fill="#172f48" stroke="#547ca2"/>
+            <text x="135" y="199" text-anchor="middle" fill="#c4e2ff" font-family="ui-monospace, monospace" font-size="14" font-weight="700">PROVIDER ROW</text>
+            <text x="135" y="222" text-anchor="middle" fill="#9fb9d0" font-family="ui-monospace, monospace" font-size="12">label + focused hint</text>
+            <text x="400" y="199" text-anchor="middle" fill="#c4e2ff" font-family="ui-monospace, monospace" font-size="14" font-weight="700">ACTIVE STATE</text>
+            <text x="400" y="222" text-anchor="middle" fill="#9fb9d0" font-family="ui-monospace, monospace" font-size="12">selected / unavailable</text>
+            <text x="665" y="199" text-anchor="middle" fill="#c4e2ff" font-family="ui-monospace, monospace" font-size="14" font-weight="700">KEY RECEIPT</text>
+            <text x="665" y="222" text-anchor="middle" fill="#9fb9d0" font-family="ui-monospace, monospace" font-size="12">verified / saved / source</text>
+          </svg>
+          <p class="caption">Illustrative direction: identity fans out from one source; live readiness remains owned by each flow.</p>
+        </div>
+      </article>
+
+      <article class="idea" id="idea-2">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 2</p>
+            <h3>Verified Connection Passport</h3>
+          </div>
+          <div class="chip-row">
+            <span class="chip high">Confidence 92%</span>
+            <span class="chip">Complexity Low</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> After a credential is validated—and again after it is saved—render a compact plain-text receipt on stderr: provider, access method, verified state, and credential source, without any secret material. Carry the same identity into the following model or alias step.</p>
+        <dl>
+          <dt>Axis</dt><dd>Provider identity and selection state</dd>
+          <dt>Basis</dt><dd><code>direct:</code> <code>src/app.ts:524–542</code> validates the candidate, asks to save the verified key, persists it, and currently emits only <code>Saved the … API key.</code> Environment precedence is already explained at <code>src/app.ts:485–495</code>.</dd>
+          <dt>Rationale</dt><dd>The logo earns attention when it confirms a meaningful lifecycle transition. A truthful text receipt gives the user more value than a decorative mark and remains safe during a sensitive flow.</dd>
+          <dt>Downsides</dt><dd>Copy must distinguish “validated,” “saved,” and “active through environment” precisely. Calling discovery or storage alone “ready” would be misleading.</dd>
+        </dl>
+        <div class="diagram">
+          <svg viewBox="0 0 800 170" role="img" aria-labelledby="diagram-two-title diagram-two-desc">
+            <title id="diagram-two-title">Credential handoff sequence</title>
+            <desc id="diagram-two-desc">Credential entry flows through validation and optional saving to a provider connection receipt.</desc>
+            <defs>
+              <marker id="arrow-two" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#739c8b"/>
+              </marker>
+            </defs>
+            <rect x="18" y="48" width="150" height="68" rx="12" fill="#202e38" stroke="#4c6571"/>
+            <rect x="222" y="48" width="150" height="68" rx="12" fill="#18382d" stroke="#5b8c76"/>
+            <rect x="426" y="48" width="150" height="68" rx="12" fill="#202e38" stroke="#4c6571"/>
+            <rect x="630" y="36" width="152" height="92" rx="12" fill="#172f48" stroke="#547ca2"/>
+            <path d="M168 82 H218" stroke="#739c8b" stroke-width="2" marker-end="url(#arrow-two)"/>
+            <path d="M372 82 H422" stroke="#739c8b" stroke-width="2" marker-end="url(#arrow-two)"/>
+            <path d="M576 82 H626" stroke="#739c8b" stroke-width="2" marker-end="url(#arrow-two)"/>
+            <text x="93" y="76" text-anchor="middle" fill="#d6e2dd" font-family="ui-monospace, monospace" font-size="13" font-weight="700">ENTER KEY</text>
+            <text x="93" y="98" text-anchor="middle" fill="#9eb0aa" font-family="ui-monospace, monospace" font-size="11">secret stays hidden</text>
+            <text x="297" y="76" text-anchor="middle" fill="#bdf2d5" font-family="ui-monospace, monospace" font-size="13" font-weight="700">VALIDATE</text>
+            <text x="297" y="98" text-anchor="middle" fill="#a8cbbb" font-family="ui-monospace, monospace" font-size="11">provider confirmed</text>
+            <text x="501" y="76" text-anchor="middle" fill="#d6e2dd" font-family="ui-monospace, monospace" font-size="13" font-weight="700">OPTIONAL SAVE</text>
+            <text x="501" y="98" text-anchor="middle" fill="#9eb0aa" font-family="ui-monospace, monospace" font-size="11">vault or environment</text>
+            <text x="706" y="66" text-anchor="middle" fill="#c4e2ff" font-family="ui-monospace, monospace" font-size="13" font-weight="700">ANTHROPIC</text>
+            <text x="706" y="88" text-anchor="middle" fill="#c4e2ff" font-family="ui-monospace, monospace" font-size="11">API key verified</text>
+            <text x="706" y="108" text-anchor="middle" fill="#9fb9d0" font-family="ui-monospace, monospace" font-size="11">source: saved</text>
+          </svg>
+          <p class="caption">Illustrative sequence: the branded moment comes after verification, not around secret entry.</p>
+        </div>
+      </article>
+
+      <article class="idea" id="idea-3">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 3</p>
+            <h3>Text-First Provider Stamp on the Next Prompt</h3>
+          </div>
+          <div class="chip-row">
+            <span class="chip high">Confidence 88%</span>
+            <span class="chip">Complexity Low</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Put provider identity where it is already known: in the model prompt or a short line immediately above it. A treatment such as <code>Choose a model · Anthropic / API</code> or <code>Selected Claude CLI · local authentication</code> provides the requested orientation without right-aligning art inside provider rows.</p>
+        <dl>
+          <dt>Axis</dt><dd>Prompt layout and right-side placement</dd>
+          <dt>Basis</dt><dd><code>direct:</code> The flow selects a provider before constructing the model picker at <code>src/prompts.ts:210–268</code>. Stock prompt options have no alignment or image field, so the next prompt is the first stable surface with one unambiguous provider.</dd>
+          <dt>Rationale</dt><dd>This is the closest low-cost expression of “show the provider on the right”: move identity to the next decision, where only one provider must be shown and ordinary terminal text is sufficient.</dd>
+          <dt>Downsides</dt><dd>It does not literally show a corporate logo, and adding too much context to prompt messages can feel verbose. Copy should stay compact and survive narrow terminals.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-4">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 4</p>
+            <h3>Failure Annunciator</h3>
+          </div>
+          <div class="chip-row">
+            <span class="chip high">Confidence 84%</span>
+            <span class="chip">Complexity Low</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> When model listing fails and the chooser removes a provider, preserve a concise provider-aware recovery line before showing the remaining choices: <code>Anthropic unavailable · model listing failed · choose another provider</code>. The same visual grammar can distinguish focused, verified, saved, and temporarily unavailable states.</p>
+        <dl>
+          <dt>Axis</dt><dd>Provider identity and selection state</dd>
+          <dt>Basis</dt><dd><code>direct:</code> On model-list failure, <code>src/prompts.ts:224–243</code> emits a diagnostic, removes the provider from the list, and continues. That behavior can make a transient failure feel like the app forgot the prior selection.</dd>
+          <dt>Rationale</dt><dd>Branding becomes operationally useful: it anchors a failure to the provider the user chose and makes recovery comprehensible instead of merely decorative.</dd>
+          <dt>Downsides</dt><dd>Error text must not duplicate noisy diagnostics or imply a credential problem when the failure was network- or provider-side. Stale status must be cleared after the next selection.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-5">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 5</p>
+            <h3>First-Party llm-now Connection Mark</h3>
+          </div>
+          <div class="chip-row">
+            <span class="chip med">Confidence 70%</span>
+            <span class="chip">Complexity Medium</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> If the interface still needs a visual accent, use an llm-now-owned, terminal-cell mark followed by an explicit provider code and connection class—for example <code>◆ ANT · API</code>. The shape belongs to llm-now; canonical provider text carries the meaning; color is supplemental and disappears cleanly under <code>NO_COLOR</code>.</p>
+        <dl>
+          <dt>Axis</dt><dd>Terminal rendering capability and portability</dd>
+          <dt>Basis</dt><dd><code>reasoned:</code> Ordinary text cells are the only rendering layer shared by every supported terminal and native target. A first-party mark avoids importing third-party artwork while still creating a recognizable connection moment.</dd>
+          <dt>Rationale</dt><dd>This could give llm-now a distinctive visual language: the product remains the owner of the experience while clearly naming the selected provider and transport.</dd>
+          <dt>Downsides</dt><dd>A new mark needs design and recognition testing. Provider initials can collide, and the mark cannot be the sole identity because fonts, color, and screen-reader behavior vary.</dd>
+        </dl>
+      </article>
+
+      <article class="idea" id="idea-6">
+        <div class="idea-head">
+          <div>
+            <p class="rank">Idea 6</p>
+            <h3>Vendor-Asset Gate: Ship None Now</h3>
+          </div>
+          <div class="chip-row">
+            <span class="chip high">Confidence 91%</span>
+            <span class="chip">Complexity Low</span>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Make the immediate asset policy explicit: no SVGL or vendor logo files enter the runtime CLI. A future asset must name its source and revision, applicable license and brand review, consuming surface, monochrome/plain-text fallback, and release owner before it can be included.</p>
+        <dl>
+          <dt>Axis</dt><dd>Asset packaging, brand provenance, and fallback behavior</dd>
+          <dt>Basis</dt><dd><code>external:</code> SVGL is MIT-licensed as a repository, while its contribution guidance still asks contributors to verify rights for each logo; vendor brand rules add separate trademark constraints. <code>direct:</code> the present runtime has no logo renderer or provider-asset corpus.</dd>
+          <dt>Rationale</dt><dd>This prevents “download an SVG” from silently becoming a brand, legal, release-packaging, and update subsystem. It keeps the portable text direction unblocked.</dd>
+          <dt>Downsides</dt><dd>A gate can become ceremony if created as a large manifest before any asset is justified. Keep it as a decision rule until a real non-terminal consumer exists.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <p class="eyebrow">What did not survive</p>
+      <h2>Rejection Summary</h2>
+      <p class="section-intro">Forty-eight raw candidates were generated before critique. The table records ideas that were rejected outright or merged into a stronger survivor.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Idea</th><th>Reason rejected or merged</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>The “Anthropic” ambiguity tax</td><td>Merged into Idea 1, which resolves identity and connection class together.</td></tr>
+            <tr><td>2</td><td>A key that “disappears” after setup</td><td>Merged into Idea 2’s verified connection receipt.</td></tr>
+            <tr><td>3</td><td>Right-side logo request collides with the prompt abstraction</td><td>Retained as grounding; it identifies a constraint rather than a product direction.</td></tr>
+            <tr><td>4</td><td>Logos would be decorative—but their fallback defines the product</td><td>Merged into Ideas 3 and 6’s text-first baseline.</td></tr>
+            <tr><td>5</td><td>The portability blast radius of a tiny logo</td><td>Grounding constraint; no separate user-facing move beyond the surviving text-first ideas.</td></tr>
+            <tr><td>6</td><td>Brand attribution becomes a maintenance feature</td><td>Merged into Idea 6’s bounded asset gate.</td></tr>
+            <tr><td>7</td><td>Provider failure erases context</td><td>Promoted and sharpened as Idea 4.</td></tr>
+            <tr><td>8</td><td>Remove logos from the terminal contract</td><td>Merged into Ideas 3 and 6; too absolute as a standalone direction.</td></tr>
+            <tr><td>9</td><td>Explicit active identity line</td><td>Merged into Ideas 1 and 3.</td></tr>
+            <tr><td>10</td><td>Brand context in option hints</td><td>Merged into top-ranked Idea 1.</td></tr>
+            <tr><td>11</td><td>Brand follows authority, not presence</td><td>Kept as a correctness rule; discovery alone does not prove readiness.</td></tr>
+            <tr><td>12</td><td>Remove right-aligned placement</td><td>Merged into Idea 3’s next-prompt placement.</td></tr>
+            <tr><td>13</td><td>Safe visual-mode gate</td><td>Capability probing, response handling, timeouts, and cleanup are disproportionate.</td></tr>
+            <tr><td>14</td><td>Provider-mark build allowlist</td><td>Merged into Idea 6, with the manifest deferred until an asset is justified.</td></tr>
+            <tr><td>15</td><td>Provider signature as durable state</td><td>Merged into Idea 1; runtime state must remain separate from identity metadata.</td></tr>
+            <tr><td>16</td><td>Provider trust receipt</td><td>Merged into Idea 2.</td></tr>
+            <tr><td>17</td><td>Terminal-native brand rail</td><td>A rail adds layout work without more meaning than inline text.</td></tr>
+            <tr><td>18</td><td>Single identity-card registry</td><td>Merged into top-ranked Idea 1.</td></tr>
+            <tr><td>19</td><td>Emoji/ANSI-first richness policy</td><td>Emoji width and glyph coverage are not portable; ANSI can only supplement text.</td></tr>
+            <tr><td>20</td><td>Brand provenance ledger</td><td>Premature while no runtime visual asset exists; Idea 6 keeps only the gate.</td></tr>
+            <tr><td>21</td><td>Alias labels as branded memory</td><td>Existing alias hints already carry provider/model context; insufficient incremental value.</td></tr>
+            <tr><td>22</td><td>Provider boarding pass</td><td>Useful analogy merged into Idea 1’s compact identity + operational state.</td></tr>
+            <tr><td>23</td><td>Cockpit annunciator</td><td>Merged into Idea 4’s transition and failure emphasis.</td></tr>
+            <tr><td>24</td><td>Sports-scorebug focus preview</td><td>Requires replacing stock Clack redraw, filtering, wrapping, and keyboard behavior.</td></tr>
+            <tr><td>25</td><td>Payment-wallet provider card</td><td>Merged into Idea 2’s post-validation connection receipt.</td></tr>
+            <tr><td>26</td><td>Terminal picture element</td><td>Refuted: Kitty, iTerm2, and Sixel are incompatible bitmap protocols, not one portable renderer.</td></tr>
+            <tr><td>27</td><td>Cross-stitched logos</td><td>Refuted: Unicode mosaics do not have stable widths, fonts, recognition, or asset approval.</td></tr>
+            <tr><td>28</td><td>Minted terminal sigils</td><td>Vendor-specific sigils inherit provenance and legibility work for marginal value.</td></tr>
+            <tr><td>29</td><td>Transit-signage fallback standard</td><td>Short-code fallback merged into Ideas 1 and 5.</td></tr>
+            <tr><td>30</td><td>Provider identity rail</td><td>Merged into Idea 3 without the custom right-side layout requirement.</td></tr>
+            <tr><td>31</td><td>Brand the verified handoff</td><td>Merged into Idea 2.</td></tr>
+            <tr><td>32</td><td>Compile SVGs into cell sprites</td><td>Refuted: variable glyph geometry and unapproved marks make the premise non-portable.</td></tr>
+            <tr><td>33</td><td>Connection provenance as visual identity</td><td>Merged into Ideas 1 and 2.</td></tr>
+            <tr><td>34</td><td>Provider as temporary theme</td><td>Flow-wide theming adds continuity work and depends on optional color without improving semantics.</td></tr>
+            <tr><td>35</td><td>Single branded connection card</td><td>Merged into Idea 2’s smaller text receipt.</td></tr>
+            <tr><td>36</td><td>Build a brand manifest first</td><td>Premature metadata work while no approved asset or renderer exists.</td></tr>
+            <tr><td>37</td><td>Two-pane provider picker</td><td>Reimplementing Clack’s filtering, resize, wrap, cancel, and accessibility behavior is disproportionate.</td></tr>
+            <tr><td>38</td><td>Put the logo on the next screen</td><td>Merged into Idea 3, with text replacing the literal logo requirement.</td></tr>
+            <tr><td>39</td><td>Explicit rich-terminal image mode</td><td>Opt-in does not remove per-protocol conversion, negotiation, and cleanup costs.</td></tr>
+            <tr><td>40</td><td>Responsive three-width logo</td><td>Refuted: terminal columns cannot make Unicode art reliable across fonts or Clack wrapping.</td></tr>
+            <tr><td>41</td><td>Official wordmarks as terminal typography</td><td>Ordinary cells cannot reproduce official typography and trademark review still applies.</td></tr>
+            <tr><td>42</td><td>User-installable theme pack</td><td>Scope overrun: no discovery, integrity, provenance, or theme lifecycle exists.</td></tr>
+            <tr><td>43</td><td>Provider-colored llm-now mark</td><td>Promoted and narrowed as Idea 5; explicit text remains authoritative.</td></tr>
+            <tr><td>44</td><td>Provider identity card + active-state hints</td><td>Promoted as Idea 1.</td></tr>
+            <tr><td>45</td><td>Verified connection passport</td><td>Promoted as Idea 2.</td></tr>
+            <tr><td>46</td><td>Responsive terminal sigil ladder</td><td>Refuted: repeats the unreliable SVG-to-Unicode premise.</td></tr>
+            <tr><td>47</td><td>Two-pane rich provider picker</td><td>Below the cost/value bar and adds terminal-image protocol complexity.</td></tr>
+            <tr><td>48</td><td>First-party connection mark</td><td>Promoted as Idea 5.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="grounding-references">
+      <p class="eyebrow">Evidence index</p>
+      <h2>Grounding References</h2>
+      <ul class="refs">
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/prompts.ts">Provider labels, prompt option contract, and provider/model selection</a></li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/app.ts">Credential validation, saving, setup, and stderr boundaries</a></li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/io.ts">Interactive TTY detection and input behavior</a></li>
+        <li><a href="https://sw.kovidgoyal.net/kitty/graphics-protocol/">Kitty terminal graphics protocol</a> — bitmap formats, capability query, and placement semantics.</li>
+        <li><a href="https://iterm2.com/documentation-images.html">iTerm2 inline images</a> and <a href="https://iterm2.com/feature-reporting/">feature reporting</a>.</li>
+        <li><a href="https://invisible-island.net/xterm/ctlseqs/ctlseqs.html">xterm control sequences</a> — Sixel semantics and capabilities.</li>
+        <li><a href="https://github.com/BourgeoisBear/rasterm">rasterm</a> — practical multi-protocol terminal-image compatibility.</li>
+        <li><a href="https://github.com/pheralb/svgl">pheralb/svgl</a> — SVG catalog and contribution/licensing context.</li>
+        <li><a href="https://openai.com/brand/">OpenAI brand guidelines</a> — example of provider-specific mark-use constraints.</li>
+      </ul>
+    </section>
+
+    <footer class="composition-signal">Composed 2026-07-26T16:54:49-07:00 by ce-ideate from the user’s provider-aware terminal-logo prompt.</footer>
+  </main>
+</body>
+</html>

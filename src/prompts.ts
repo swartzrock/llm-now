@@ -20,24 +20,28 @@ Local servers: checked Ollama on 127.0.0.1:11434 and LM Studio on 127.0.0.1:1234
 Authenticated AI CLIs: checked codex and claude on PATH. Install and authenticate a supported CLI separately, then retry.
 Environment-backed cloud providers: checked recognized Anthropic, OpenAI, Google, xAI, OpenRouter, Groq, Mistral, DeepSeek, and DeepInfra key variables without printing values. Export a supported provider key in the shell, then retry.`;
 
-const PROVIDER_LABELS = {
-  ollama: "Ollama",
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  google: "Gemini",
-  xai: "xAI",
-  openrouter: "OpenRouter",
-  groq: "Groq",
-  mistral: "Mistral",
-  deepseek: "DeepSeek",
-  deepinfra: "DeepInfra",
-  "lm-studio": "LM Studio",
-  "codex-cli": "Codex CLI",
-  "claude-cli": "Claude CLI",
-} satisfies Record<ByokProviderId, string>;
+const PROVIDER_IDENTITIES = {
+  ollama: { label: "Ollama", connectionClass: "local server" },
+  anthropic: { label: "Anthropic", connectionClass: "API key" },
+  openai: { label: "OpenAI", connectionClass: "API key" },
+  google: { label: "Gemini", connectionClass: "API key" },
+  xai: { label: "xAI", connectionClass: "API key" },
+  openrouter: { label: "OpenRouter", connectionClass: "API key" },
+  groq: { label: "Groq", connectionClass: "API key" },
+  mistral: { label: "Mistral", connectionClass: "API key" },
+  deepseek: { label: "DeepSeek", connectionClass: "API key" },
+  deepinfra: { label: "DeepInfra", connectionClass: "API key" },
+  "lm-studio": { label: "LM Studio", connectionClass: "local server" },
+  "codex-cli": { label: "Codex CLI", connectionClass: "authenticated CLI" },
+  "claude-cli": { label: "Claude CLI", connectionClass: "authenticated CLI" },
+} satisfies Record<ByokProviderId, { label: string; connectionClass: string }>;
 
 export function providerLabel(provider: ByokProviderId): string {
-  return PROVIDER_LABELS[provider];
+  return PROVIDER_IDENTITIES[provider].label;
+}
+
+export function providerConnectionHint(provider: ByokProviderId): string {
+  return PROVIDER_IDENTITIES[provider].connectionClass;
 }
 
 export const CLOUD_CREDENTIAL_PROVIDERS = Object.freeze(
@@ -87,6 +91,17 @@ export function cloudCredentialProviderOptions(): PromptOption[] {
   return sortPromptOptions(CLOUD_CREDENTIAL_PROVIDERS.map((provider) => ({
     value: provider,
     label: providerLabel(provider),
+    hint: providerConnectionHint(provider),
+  })));
+}
+
+export function discoveredProviderOptions(
+  providers: readonly ByokProviderId[],
+): PromptOption[] {
+  return sortPromptOptions(providers.map((provider) => ({
+    value: provider,
+    label: providerLabel(provider),
+    hint: `${providerConnectionHint(provider)} · available`,
   })));
 }
 
@@ -158,7 +173,13 @@ export function formatAliasInventory(
 ): string {
   return Object.entries(aliases)
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-    .map(([alias, selection]) => `${sanitizePromptText(alias)} → ${formatSelection(selection)}`)
+    .map(([alias, selection]) => {
+      const provider = providerLabel(selection.provider);
+      const model = selection.model === null
+        ? "provider default"
+        : sanitizePromptText(selection.model);
+      return `${sanitizePromptText(alias)} → ${provider} · ${model}`;
+    })
     .join("\n");
 }
 
@@ -217,10 +238,7 @@ export async function selectProviderAndModel(
   }
 
   while (providers.length > 0) {
-    const providerOptions = sortPromptOptions(providers.map((provider) => ({
-      value: provider,
-      label: providerLabel(provider),
-    })));
+    const providerOptions = discoveredProviderOptions(providers);
     const providerValue = selectedString(
       await deps.prompter.select("Choose a provider", providerOptions),
       providerOptions,

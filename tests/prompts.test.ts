@@ -8,6 +8,7 @@ import {
   formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
   selectProviderAndModel,
+  stripTerminalSequences,
   validateCredentialCandidate,
   type PromptOption,
   type PromptValue,
@@ -78,9 +79,12 @@ describe("terminal provider and model selection", () => {
       model: "sonnet",
     });
     expect(runtime.listed).toEqual(["claude-cli"]);
-    expect(prompter.seen.map((options) => options.map((option) => option.label))).toEqual([
-      ["Claude CLI", "Ollama"],
-      ["Claude Sonnet"],
+    expect(prompter.seen).toEqual([
+      [
+        { value: "claude-cli", label: "Claude CLI", hint: "authenticated CLI · available" },
+        { value: "ollama", label: "Ollama", hint: "local server · available" },
+      ],
+      [{ value: "sonnet", label: "Claude Sonnet", hint: "sonnet" }],
     ]);
     expect(diagnostics).toEqual([]);
   });
@@ -164,14 +168,22 @@ describe("terminal provider and model selection", () => {
     });
     const diagnostics: string[] = [];
 
+    const prompter = choices("ollama", "openai", "gpt-5");
     const result = await selectProviderAndModel({
       runtime: runtime.value,
-      prompter: choices("ollama", "openai", "gpt-5"),
+      prompter,
       diagnostic: (text) => diagnostics.push(text),
     });
 
     expect(result).toEqual({ kind: "selected", provider: "openai", model: "gpt-5" });
     expect(runtime.listed).toEqual(["ollama", "openai"]);
+    expect(prompter.seen[0]).toEqual([
+      { value: "ollama", label: "Ollama", hint: "local server · available" },
+      { value: "openai", label: "OpenAI", hint: "API key · available" },
+    ]);
+    expect(prompter.seen[1]).toEqual([
+      { value: "openai", label: "OpenAI", hint: "API key · available" },
+    ]);
     expect(diagnostics.join("\n")).toContain("model-list (ollama)");
   });
 
@@ -213,7 +225,10 @@ describe("terminal provider and model selection", () => {
       }),
     ).toEqual({ kind: "selected", provider: "openai", model: "z-model" });
 
-    expect(prompter.seen[0]?.map((option) => option.label)).toEqual(["Anthropic", "OpenAI"]);
+    expect(prompter.seen[0]).toEqual([
+      { value: "anthropic", label: "Anthropic", hint: "API key · available" },
+      { value: "openai", label: "OpenAI", hint: "API key · available" },
+    ]);
     expect(prompter.seen[1]?.map((option) => option.value)).toEqual(["a-model", "z-model"]);
   });
 
@@ -253,21 +268,23 @@ describe("terminal provider and model selection", () => {
     expect(prompter.seen[1]?.[0]?.label).toBe("GPT");
   });
 
-  test("real Clack adapter filters by typing and renders only to its output stream", async () => {
+  test("real Clack adapter filters provider hints and renders only to its output stream", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
     let rendered = "";
     output.on("data", (chunk) => rendered += chunk.toString());
 
-    const selected = createSearchablePrompter(input, output).select("Pick a model", [
+    const selected = createSearchablePrompter(input, output).select("Pick a provider", [
       { value: "alpha", label: "Alpha" },
-      { value: "beta", label: "Beta", hint: "b-model" },
+      { value: "openai", label: "OpenAI", hint: "API key · available" },
     ]);
-    setTimeout(() => input.write("b\r"), 1);
+    setTimeout(() => input.write("o\r"), 1);
 
-    expect(await selected).toBe("beta");
-    expect(rendered).toContain("Pick a model");
-    expect(rendered).toContain("Beta");
+    expect(await selected).toBe("openai");
+    const plain = stripTerminalSequences(rendered);
+    expect(plain).toContain("Pick a provider");
+    expect(plain).toContain("OpenAI");
+    expect(plain).toContain("API key · available");
   });
 
   test("real Clack adapter normalizes cancellation", async () => {
