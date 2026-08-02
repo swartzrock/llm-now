@@ -85,7 +85,8 @@ Enter
 Wait+Screen@10 s /Name this shortcut/
 Type "explain"
 Enter
-Wait+Line@10 s /Prompt for explain · Codex CLI · fake-model/
+Wait+Screen@10 s /Saved shortcut explain → Codex CLI · fake-model/
+Sleep 1500 ms
 Type "Explain ECONNREFUSED in one sentence."
 Enter
 Wait+Line@30 s /^\$$/
@@ -104,7 +105,7 @@ Enter
 Wait+Screen@10 s /Choose a saved shortcut/
 Type "explain"
 Enter
-Wait+Line@10 s /Prompt for explain · Codex CLI · fake-model/
+Sleep 1500 ms
 Type "Explain a 404 in one sentence."
 Enter
 Wait+Line@30 s /^\$$/
