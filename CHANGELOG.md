@@ -1,5 +1,11 @@
 # llm-now
 
+## 2.1.0
+
+### Minor Changes
+
+- 52fce1a: Add first-class shortcut creation from available or newly credentialed providers, save the shortcut before its same-invocation first run, and make run once generate without offering to save.
+
 ## 2.0.0
 
 ### Major Changes
