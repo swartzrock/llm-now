@@ -669,6 +669,26 @@ On Linux, repeat setup in a session without Secret Service. On other platforms, 
 
 After every session, verify that the probe identity and every `llm-now` test-provider record are absent, the temporary credentials are revoked, the isolated alias/config directory is removed, and the disposable OS session is destroyed.
 
+## macOS voice router example
+
+### MT-39: Complete the two-action voice Shortcut matrix
+
+On a Mac with Dictation enabled, follow the authoritative
+[macOS voice shortcut guide](../examples/macos-voice-shortcut.md) from its Text
+smoke test through the global keyboard shortcut. Start with `uv`, `llm-now`, the
+repository checkout, and one working alias already available; record the time
+from opening the setup section to the first spoken answer. Under ordinary network
+conditions, it must take less than three minutes.
+
+Complete the guide's routing, wake-word, rejection, local/hosted provider,
+per-alias voice, clipboard equality, provider failure, cancellation, permission,
+privacy, and recovery checks. The finished Shortcut must contain only
+`Dictate Text` followed by `Run Shell Script`; no marker parser, clipboard action,
+or separate `Speak Text` action may remain. Record the macOS version, Dictation
+mode, shortcut key, aliases/providers used, installed voices, elapsed setup time,
+clipboard sentinel result, cancellation result, and any permission prompts in the
+test report below.
+
 ## Automation-backed coverage
 
 Keep the Bun test suite as the authority for behavior that is difficult or unreliable to verify manually:
