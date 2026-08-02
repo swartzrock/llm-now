@@ -145,3 +145,8 @@ vite.config.ts.timestamp-*
 
 .DS_Store
 
+# Python example environments and caches
+.uv-cache/
+**/.venv/
+**/__pycache__/
+*.py[cod]
