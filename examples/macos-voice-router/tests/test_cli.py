@@ -493,6 +493,14 @@ class FakeProcess:
 
 
 class SubprocessRunnerTests(unittest.TestCase):
+    def test_signal_handler_can_reenter_active_process_lock(self) -> None:
+        runner = SubprocessRunner()
+
+        with runner._lock:
+            acquired = runner._lock.acquire(blocking=False)
+            self.assertTrue(acquired)
+            runner._lock.release()
+
     def test_timeout_terminates_and_reaps_the_process_group(self) -> None:
         process = FakeProcess([
             subprocess.TimeoutExpired(("slow",), 5),

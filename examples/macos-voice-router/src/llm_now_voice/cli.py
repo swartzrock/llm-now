@@ -73,7 +73,7 @@ class SubprocessRunner:
         self._popen = popen
         self._killpg = killpg
         self._cancelled = threading.Event()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._active: object | None = None
 
     def run(
