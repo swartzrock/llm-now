@@ -2799,7 +2799,13 @@ describe("API-key management", () => {
     const savedNames: string[] = [];
     const app = management({
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", true, "qwen"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          true,
+          "qwen",
+        ],
         passwords: ["prototype-alias-sentinel"],
         names: ["constructor"],
         confirms: [true],
