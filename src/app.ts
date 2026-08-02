@@ -25,7 +25,13 @@ import {
   requireDeterministicSelection,
   type Selection,
 } from "./args.ts";
-import { isInteractive, resolvePrompt, type PromptInput, type TextOutput } from "./io.ts";
+import {
+  isInteractive,
+  promptValidationMessage,
+  resolvePrompt,
+  type PromptInput,
+  type TextOutput,
+} from "./io.ts";
 import {
   CredentialVaultError,
   type CredentialResolver,
@@ -177,6 +183,34 @@ function credentialVaultError(error: unknown): CredentialVaultError | null {
 
 function safeFormatSelection(deps: ApplicationDependencies, selection: AliasRecord): string {
   return sanitizeDiagnostic(formatSelection(selection), deps.env, deps.sensitive);
+}
+
+function aliasPromptMessage(
+  deps: ApplicationDependencies,
+  alias: string,
+  selection: AliasRecord,
+): string {
+  const model = selection.model === null
+    ? "default model"
+    : sanitizePromptText(selection.model);
+  return sanitizeDiagnostic(
+    `Prompt for ${sanitizePromptText(alias)} · ${providerLabel(selection.provider)} · ${model}`,
+    deps.env,
+    deps.sensitive,
+  );
+}
+
+async function collectAliasPrompt(
+  deps: ApplicationDependencies,
+  message: string,
+): Promise<string | null> {
+  while (true) {
+    const prompt = await deps.prompter.input(message, {
+      validate: promptValidationMessage,
+    });
+    if (prompt === null) return null;
+    if (promptValidationMessage(prompt) === undefined) return prompt;
+  }
 }
 
 function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
@@ -701,9 +735,38 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     if (deps.args.length === 0 && interactive) {
       return await runSetup(deps, diagnostic);
     }
-    const prompt = await resolvePrompt(parsed.input, deps.stdin);
-    const selection = await resolveSelection(deps, parsed.selection, interactive, diagnostic);
-    if (typeof selection === "number") return selection;
+    let prompt: string;
+    let selection: ResolvedSelection;
+    if (
+      parsed.selection.kind === "alias"
+      && parsed.input === undefined
+      && interactive
+    ) {
+      const resolved = await resolveSelection(
+        deps,
+        parsed.selection,
+        interactive,
+        diagnostic,
+      );
+      if (typeof resolved === "number") return resolved;
+      selection = resolved;
+      const entered = await collectAliasPrompt(
+        deps,
+        aliasPromptMessage(deps, parsed.selection.alias, resolved.selection),
+      );
+      if (entered === null) return 130;
+      prompt = entered;
+    } else {
+      prompt = await resolvePrompt(parsed.input, deps.stdin);
+      const resolved = await resolveSelection(
+        deps,
+        parsed.selection,
+        interactive,
+        diagnostic,
+      );
+      if (typeof resolved === "number") return resolved;
+      selection = resolved;
+    }
 
     const response = await generateWithTimeout(
       deps,

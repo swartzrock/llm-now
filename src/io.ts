@@ -32,8 +32,17 @@ async function readUtf8(input: PromptInput): Promise<string> {
   }
 }
 
+export function promptValidationMessage(
+  prompt: string | undefined,
+): string | undefined {
+  return prompt === undefined || prompt.trim().length === 0
+    ? "prompt must not be blank."
+    : undefined;
+}
+
 function validatePrompt(prompt: string): string {
-  if (prompt.trim().length === 0) throw new UsageError("prompt must not be blank.");
+  const validationMessage = promptValidationMessage(prompt);
+  if (validationMessage !== undefined) throw new UsageError(validationMessage);
   return prompt;
 }
 
