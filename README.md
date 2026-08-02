@@ -51,11 +51,13 @@ llm-now
 
 ![Rendered llm-now help screen showing usage, options, API-key environment variables, and secure storage guidance](docs/demos/help-screen.jpg)
 
-The launcher separates work from connection management. With saved aliases it offers “Run with a saved shortcut…”, “Choose another model…”, and “Manage connections…”. Without aliases it offers “Choose a model to use…” and “Manage connections…”. Merely opening either root performs no provider discovery.
+The launcher separates reusable setup, one-off work, and connection management. With saved shortcuts it offers “Run with a saved shortcut…”, “Create a new shortcut…”, “Run once with another provider and model…”, and “Manage connections…” in that order. Without saved shortcuts it omits the unusable saved-shortcut action and offers “Create a new shortcut…”, “Run once with a provider and model…”, and “Manage connections…”. Merely opening either root performs no provider discovery or credential access.
 
-Shortcut work opens the focused “Choose a saved shortcut” picker, asks for one contextual prompt, generates once, and exits in the same invocation. Fresh-model work discovers providers only after you choose that route, then continues through model choice, prompt entry, generation, and optional alias saving. Alias, provider, and model lists are sorted and filter as you type.
+“Create a new shortcut…” asks “How should this shortcut connect?” and offers “Use an available provider…” followed by “Add a provider with an API key…”. The first route discovers providers only after it is selected. The second can validate and securely save a missing cloud-provider key before model selection. Both routes require a shortcut name and durably save only the provider/model target before asking `Prompt for <shortcut> · <provider> · <model>`. A nonblank prompt then runs the new shortcut exactly once in the same invocation. Cancelling after a key or shortcut is saved preserves that completed work; cancelling before any durable write leaves the store unchanged.
 
-Connection management opens its own “What would you like to manage?” menu for provider discovery or API-key management. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
+“Run once…” discovers an available provider and model, asks `Prompt for <provider> · <model>`, generates once, and exits without saving or offering a shortcut. Shortcut, provider, and model lists are sorted and filter as you type.
+
+Connection management remains a separate “What would you like to manage?” menu for passive provider discovery plus API-key addition, replacement, and deletion. API keys are entered through hidden terminal input, authenticated before saving, and never accepted through command-line arguments or generation stdin.
 
 Use a saved global alias:
 
@@ -105,11 +107,11 @@ llm-now --input "Hello" --provider ollama --model llama3
 printf 'Hello' | llm-now --provider claude-cli --model default
 ```
 
-For scripts and non-interactive calls, exactly one prompt source is required: `--input` or stdin. Non-interactive calls require a positional alias, `--alias`, or both `--provider` and `--model`. A second positional argument is never treated as prompt text. Successful generation writes the model response, byte-for-byte, to stdout. Interactive UI and diagnostics use stderr, so the response remains safe to redirect or pipe. After an interactive response, stderr resets terminal styling and adds a clean visual boundary without changing stdout.
+Arguments, `--input`, piped input, and noninteractive execution bypass the launcher. For scripts and non-interactive calls, exactly one prompt source is required: `--input` or stdin. Non-interactive calls require a positional alias, `--alias`, or both `--provider` and `--model`. A second positional argument is never treated as prompt text. Successful generation writes the model response, byte-for-byte, to stdout. Interactive UI and diagnostics use stderr, so the response remains safe to redirect or pipe. After an interactive response, stderr resets terminal styling and adds a clean visual boundary without changing stdout.
 
 ## Aliases and configuration
 
-After a successful unnamed interactive call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`, with the provider and model emphasized. Type a name to save that exact provider/model pair, or press Enter to exit. If the selected provider/model is already saved, it reports the existing alias and suggests an executable command such as `llm-now daily --input "<prompt>"` for next time instead of asking for a duplicate. A call that selected an existing alias does not ask again. Aliases contain no credentials and are available from every working directory.
+The launcher’s creation route saves a required shortcut before its first run. Existing direct interactive provider/model selection retains its established optional alias follow-up: after a successful unnamed call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`. Type a name to save that exact provider/model pair, or press Enter to exit. If the selected provider/model is already saved, it reports the existing alias and suggests an executable command such as `llm-now daily --input "<prompt>"` for next time instead of asking for a duplicate. A launcher run-once call and a call that selected an existing alias never offer this follow-up. Aliases contain no credentials and are available from every working directory.
 
 - macOS/Linux: `~/.config/llm-now/aliases.json`
 - Windows: `%APPDATA%\\llm-now\\aliases.json`, otherwise `%USERPROFILE%\\AppData\\Roaming\\llm-now\\aliases.json`
@@ -127,7 +129,7 @@ keep the intended target. It never chooses between conflicting targets.
 
 Recognized environment variables are always authoritative. They are the recommended credential source for scripts, automation, and headless systems. When no recognized environment credential is set, an enabled release target may use one provider-specific key from the operating system's native credential store.
 
-Use bare `llm-now`, choose “Manage connections…”, then “Add or manage API keys…” to add, replace, or delete a stored fallback. Replacement verifies the new key before changing the existing record, and save/delete confirmations default to No. Deleting a stored fallback does not remove an active environment credential. Aliases remain version 1 provider/model records and never contain keys or credential identifiers.
+Use bare `llm-now`, choose “Manage connections…”, then “Add or manage API keys…” to add, replace, or delete a stored fallback. Shortcut creation can add only a currently missing eligible provider; replacement and deletion remain management operations. Replacement verifies the new key before changing the existing record, and save/delete confirmations default to No. Deleting a stored fallback does not remove an active environment credential. Aliases remain version 1 provider/model records and never contain keys or credential identifiers.
 
 ### How secure storage works
 
@@ -166,7 +168,7 @@ If no provider is found, stderr lists every checked provider class and manual se
 
 Exit codes:
 
-- `0`: successful generation or alias inventory, help, version, or completed/declined setup action (including declined/cancelled post-success alias saving)
+- `0`: successful generation or alias inventory, help, version, or a completed/declined setup action; cancellation after a durable key or shortcut write preserves that completed work and exits without generation
 - `1`: discovery, model-list, generation, configuration (including an invalid, unreadable, or case-conflicting alias store), credential-store, or post-credential alias failure
 - `2`: invalid usage, including combining `--aliases` with another option or positional value
 - `130`: launcher, management, prompt, alias, provider, or model selection cancelled before a durable action

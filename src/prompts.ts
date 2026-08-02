@@ -1,6 +1,7 @@
 import {
   BYOK_PROVIDER_API_KEY_ENV_VARS,
   type ByokCloudProviderId,
+  type ByokModelOption,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
 import {
@@ -87,8 +88,10 @@ export function validateCredentialCandidate(value: string | undefined): string |
   return undefined;
 }
 
-export function cloudCredentialProviderOptions(): PromptOption[] {
-  return sortPromptOptions(CLOUD_CREDENTIAL_PROVIDERS.map((provider) => ({
+export function cloudCredentialProviderOptions(
+  providers: readonly ByokCloudProviderId[] = CLOUD_CREDENTIAL_PROVIDERS,
+): PromptOption[] {
+  return sortPromptOptions(providers.map((provider) => ({
     value: provider,
     label: providerLabel(provider),
     hint: providerConnectionHint(provider),
@@ -123,6 +126,7 @@ export interface SelectionDependencies {
   runtime: RuntimeGateway;
   prompter: SearchablePrompter;
   diagnostic(text: string): void;
+  modelEligible?: (model: ByokModelOption) => boolean;
 }
 
 function supportsDefault(provider: ByokProviderId): boolean {
@@ -319,7 +323,19 @@ export async function selectProviderAndModel(
       return { kind: "selected", provider, model: null };
     }
 
-    const modelOptions = sortPromptOptions(models.map((model) => {
+    const eligibleModels = deps.modelEligible === undefined
+      ? models
+      : models.filter(deps.modelEligible);
+    if (eligibleModels.length === 0) {
+      deps.diagnostic(`model-list (${provider}): provider returned no eligible models.`);
+      providers = providers.filter((candidate) => candidate !== provider);
+      if (providers.length === 0) {
+        return { kind: "failed", exitCode: 1, stage: "model-list" };
+      }
+      continue;
+    }
+
+    const modelOptions = sortPromptOptions(eligibleModels.map((model) => {
       const id = sanitizePromptText(model.id);
       const label = sanitizePromptText(model.label) || id;
       return {

@@ -3,6 +3,9 @@ import {
   type ByokCloudProviderId,
   type ByokEnvironment,
 } from "@swartzrock/byok-runtime";
+import { randomUUID } from "node:crypto";
+import { chmod, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
 
 export const NATIVE_VAULT_SERVICE = "llm-now";
 
@@ -48,6 +51,190 @@ export interface CredentialVault {
   get(provider: ByokCloudProviderId): Promise<string | null>;
   set(provider: ByokCloudProviderId, value: string): Promise<void>;
   delete(provider: ByokCloudProviderId): Promise<boolean>;
+}
+
+export interface CredentialMutationLockOptions {
+  lockTimeoutMs?: number;
+  retryDelayMs?: number;
+  staleLockMs?: number;
+}
+
+export type CredentialMutationLock = <T>(
+  directory: string,
+  provider: ByokCloudProviderId,
+  operation: () => Promise<T>,
+) => Promise<T>;
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+interface CredentialLockOwner {
+  pid: number;
+  token: string;
+}
+
+function isCredentialLockOwner(value: unknown): value is CredentialLockOwner {
+  if (typeof value !== "object" || value === null) return false;
+  const owner = value as Record<string, unknown>;
+  return typeof owner.pid === "number"
+    && Number.isSafeInteger(owner.pid)
+    && owner.pid > 0
+    && typeof owner.token === "string"
+    && owner.token.length > 0;
+}
+
+async function readCredentialLockOwner(
+  lockPath: string,
+): Promise<CredentialLockOwner | null> {
+  try {
+    const value: unknown = JSON.parse(await readFile(lockPath, "utf8"));
+    return isCredentialLockOwner(value) ? value : null;
+  } catch (error) {
+    if (hasErrorCode(error, "ENOENT")) return null;
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !hasErrorCode(error, "ESRCH");
+  }
+}
+
+async function withCredentialLockRecoveryGuard<T>(
+  guardPath: string,
+  operation: () => Promise<T>,
+  lockTimeoutMs: number,
+  retryDelayMs: number,
+): Promise<T> {
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      const handle = await open(guardPath, "wx", 0o600);
+      await handle.close();
+      break;
+    } catch (error) {
+      if (!hasErrorCode(error, "EEXIST")) throw error;
+      if (Date.now() - startedAt >= lockTimeoutMs) {
+        throw new Error(`timed out waiting for credential mutation lock recovery: ${guardPath}`);
+      }
+      await delay(retryDelayMs);
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    await unlink(guardPath).catch(() => undefined);
+  }
+}
+
+export function resolveCredentialLockDirectory(home: string): string {
+  return join(home, ".llm-now", "credential-locks");
+}
+
+export async function withCredentialMutationLock<T>(
+  directory: string,
+  provider: ByokCloudProviderId,
+  operation: () => Promise<T>,
+  options: CredentialMutationLockOptions = {},
+): Promise<T> {
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") await chmod(directory, 0o700);
+
+  const lockPath = join(directory, `credential-${provider}.lock`);
+  const recoveryGuardPath = `${lockPath}.recovery`;
+  const lockTimeoutMs = options.lockTimeoutMs ?? 2_000;
+  const retryDelayMs = options.retryDelayMs ?? 20;
+  const staleLockMs = options.staleLockMs ?? 30_000;
+  const startedAt = Date.now();
+  const owner: CredentialLockOwner = {
+    pid: process.pid,
+    token: randomUUID(),
+  };
+
+  while (true) {
+    try {
+      const handle = await open(lockPath, "wx", 0o600);
+      try {
+        await handle.writeFile(JSON.stringify(owner));
+      } catch (error) {
+        await unlink(lockPath).catch(() => undefined);
+        throw error;
+      } finally {
+        await handle.close();
+      }
+      break;
+    } catch (error) {
+      if (!hasErrorCode(error, "EEXIST")) throw error;
+      let lock;
+      try {
+        lock = await lstat(lockPath);
+      } catch (statError) {
+        if (hasErrorCode(statError, "ENOENT")) continue;
+        throw statError;
+      }
+      if (!lock.isFile()) {
+        throw new Error(`invalid credential mutation lock: ${lockPath}`);
+      }
+      if (Date.now() - lock.mtimeMs > staleLockMs) {
+        let reclaimed = false;
+        await withCredentialLockRecoveryGuard(
+          recoveryGuardPath,
+          async () => {
+            let currentLock;
+            try {
+              currentLock = await lstat(lockPath);
+            } catch (statError) {
+              if (hasErrorCode(statError, "ENOENT")) return;
+              throw statError;
+            }
+            if (!currentLock.isFile()) {
+              throw new Error(`invalid credential mutation lock: ${lockPath}`);
+            }
+            if (Date.now() - currentLock.mtimeMs <= staleLockMs) return;
+            const currentOwner = await readCredentialLockOwner(lockPath);
+            if (currentOwner !== null && isProcessAlive(currentOwner.pid)) return;
+            await unlink(lockPath).catch((unlinkError: unknown) => {
+              if (!hasErrorCode(unlinkError, "ENOENT")) throw unlinkError;
+            });
+            reclaimed = true;
+          },
+          lockTimeoutMs,
+          retryDelayMs,
+        );
+        if (reclaimed) continue;
+      }
+      if (Date.now() - startedAt >= lockTimeoutMs) {
+        throw new Error(`timed out waiting for credential mutation lock: ${lockPath}`);
+      }
+      await delay(retryDelayMs);
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    await withCredentialLockRecoveryGuard(
+      recoveryGuardPath,
+      async () => {
+        const currentOwner = await readCredentialLockOwner(lockPath);
+        if (currentOwner?.token !== owner.token) return;
+        await unlink(lockPath).catch(() => undefined);
+      },
+      lockTimeoutMs,
+      retryDelayMs,
+    );
+  }
 }
 
 export function nativeVaultName(provider: ByokCloudProviderId): string {

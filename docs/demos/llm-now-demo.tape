@@ -1,20 +1,22 @@
-# A short, conversion-focused demo:
-# hook → provider discovery → local utility → cloud switch → install CTA.
+# A short, credential-free shortcut-creation demo:
+# hook → create from available provider → first run → saved reuse → install CTA.
 #
 # Render from the repository root with:
 #   mkdir -p .tmp-llm-now-demo
 #   bun build ./index.ts --compile --outfile .tmp-llm-now-demo/llm-now
-#   LLM_NOW_DEMO_BIN="$PWD/.tmp-llm-now-demo/llm-now" vhs docs/demos/llm-now-demo.tape
+#   bun build ./tests/fixtures/fake-cli.ts --compile --outfile .tmp-llm-now-demo/codex
+#   LLM_NOW_DEMO_BIN="$PWD/.tmp-llm-now-demo/llm-now" \
+#     LLM_NOW_DEMO_FAKE_CODEX="$PWD/.tmp-llm-now-demo/codex" \
+#     vhs docs/demos/llm-now-demo.tape
 #   rm -rf .tmp-llm-now-demo
 #
-# Prerequisites:
-# - Save a fast, warmed-up local model as the alias `local`.
-# - Save an Anthropic Haiku model as the alias `haiku`.
+# The explicit executable and fake Codex provider are both built from the
+# current branch. The isolated demo never reads a real alias store or credential.
 
 Output docs/demos/demo.gif
 
-Require cat
 Require clear
+Require dirname
 Require mktemp
 Require rm
 Require bash
@@ -38,19 +40,21 @@ Set BorderRadius 14
 Set WindowBar Colorful
 Set WindowBarSize 40
 
-# Prepare a deterministic prompt without showing setup commands.
+# Prepare the isolated credential-free fixture without showing setup commands.
 Hide
 Type `unset PROMPT_COMMAND; PS1='$ '; clear`
 Enter
-Type `test -x "$LLM_NOW_DEMO_BIN" || exit 1; llm-now() { "$LLM_NOW_DEMO_BIN" "$@"; }`
+Type `test -x "$LLM_NOW_DEMO_BIN" || exit 1; test -x "$LLM_NOW_DEMO_FAKE_CODEX" || exit 1`
 Enter
 Type `DEMO_ORIG_DIR="$PWD"; DEMO_DIR="$(mktemp -d)"; cd "$DEMO_DIR"`
 Enter
-Type `printf '%s\n' 'Explain this error in one sentence and give the most likely fix:' 'ECONNREFUSED 127.0.0.1:5432' > postgres-error.txt`
+Type `export XDG_CONFIG_HOME="$DEMO_DIR/config"; export PATH="$(dirname "$LLM_NOW_DEMO_FAKE_CODEX"):$PATH"; export SHELL="$DEMO_DIR/missing-login-shell"`
+Enter
+Type `llm-now() { "$LLM_NOW_DEMO_BIN" "$@"; }`
 Enter
 
-# Hook and discovery: keep the promise visible while the command is typed.
-Type `clear; printf '\033[1;35m%s\033[0m\n' "One command for every LLM already on your machine."`
+# Create a shortcut from a maintained, credential-free available provider.
+Type `clear; printf '\033[1;35m%s\033[0m\n' "Create a reusable LLM shortcut—and run it immediately."`
 Enter
 Show
 Sleep 1500 ms
@@ -58,49 +62,58 @@ Sleep 1500 ms
 Type `llm-now`
 Enter
 Wait+Screen@10 s /What would you like to do\?/
-Type "Manage"
+Wait+Screen@10 s /Create a new shortcut…/
+Wait+Screen@10 s /Run once with a provider and model…/
+Wait+Screen@10 s /Manage connections…/
+Type "Create"
 Sleep 500 ms
 Enter
-Wait+Screen@10 s /What would you like to manage\?/
-Type "Discover"
+Wait+Screen@10 s /How should this shortcut connect\?/
+Wait+Screen@10 s /Use an available provider…/
+Wait+Screen@10 s /Add a provider with an API key…/
+Type "Use"
 Sleep 500 ms
 Enter
-Wait+Screen@30 s /Choose an available provider/
-Sleep 2 s
-Escape
-Wait+Line@10 s /^\$$/
-Sleep 800 ms
+Wait+Screen@30 s /Choose a provider/
+Type "Codex"
+Sleep 500 ms
+Enter
+Wait+Screen@10 s /Choose a model/
+Type "fake-model"
+Sleep 500 ms
+Enter
+Wait+Screen@10 s /Name this shortcut/
+Type "explain"
+Enter
+Wait+Screen@10 s /Saved shortcut explain → Codex CLI · fake-model/
+Sleep 1500 ms
+Type "Explain ECONNREFUSED in one sentence."
+Enter
+Wait+Screen@30 s /fake:Explain ECONNREFUSED in one sentence\./
+Sleep 3 s
 
-# Solve a recognizable problem using a local model.
-Hide
-Type `clear; printf '\033[1;35m%s\033[0m\n' "Postgres won't connect? Get unstuck without leaving your terminal."`
+# Reuse the configured shortcut through the exact configured root action.
+Type `llm-now`
 Enter
-Show
-Sleep 1 s
-
-Type `cat postgres-error.txt`
+Wait+Screen@10 s /Run with a saved shortcut…/
+Wait+Screen@10 s /Create a new shortcut…/
+Wait+Screen@10 s /Run once with another provider and model…/
+Wait+Screen@10 s /Manage connections…/
+Type "Run with"
+Sleep 500 ms
 Enter
-Sleep 1 s
-Type `llm-now local < postgres-error.txt`
+Wait+Screen@10 s /Choose a saved shortcut/
+Type "explain"
 Enter
-Wait+Line@30 s /^\$$/
-Sleep 4 s
-
-# Switch providers without changing the surrounding workflow.
-Hide
-Type `clear; printf '\033[1;35m%s\033[0m\n' "Local or cloud? It's the same command."`
+Sleep 1500 ms
+Type "Explain a 404 in one sentence."
 Enter
-Show
-Sleep 1 s
-
-Type `llm-now haiku < postgres-error.txt`
-Enter
-Wait+Line@30 s /^\$$/
-Sleep 4 s
+Wait+Screen@30 s /fake:Explain a 404 in one sentence\./
+Sleep 3 s
 
 # Finish on a low-friction call to action. Do not execute the install command.
 Hide
-Type `clear; printf '\033[1;35m%s\033[0m\n' "Try it with the models already on your machine."`
+Type `clear; printf '\033[1;35m%s\033[0m\n' "One shortcut. Any working directory."`
 Enter
 Show
 Sleep 1 s
