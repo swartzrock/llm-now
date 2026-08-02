@@ -259,7 +259,7 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
         raise VoiceRouterError(f"invalid voice router configuration: {error}") from error
 
     wake_value = document.pop("wake_words", ["hey"])
-    wake_words = _string_list(wake_value, "wake_words", allow_empty_list=True)
+    wake_words = _string_list(wake_value, "wake_words")
     _validate_phrases(wake_words, "wake_words")
 
     profiles: dict[str, AliasProfile] = {}
@@ -279,7 +279,6 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
         phrases = _string_list(
             raw_profile.get("match_phrases", []),
             f'{alias}.match_phrases',
-            allow_empty_list=True,
         )
         _validate_phrases(phrases, f'{alias}.match_phrases')
 
@@ -380,11 +379,9 @@ def _validated_aliases(aliases: Iterable[str]) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _string_list(value: object, field_name: str, *, allow_empty_list: bool) -> tuple[str, ...]:
+def _string_list(value: object, field_name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise VoiceRouterError(f"{field_name} must be a list of strings")
-    if not allow_empty_list and not value:
-        raise VoiceRouterError(f"{field_name} must not be empty")
     return tuple(value)
 
 
@@ -463,21 +460,7 @@ def _transcript_views(tokens: tuple[_Token, ...], wake_words: tuple[str, ...]) -
         if phrase_keys and token_keys[: len(phrase_keys)] == phrase_keys:
             wake_lengths.append(len(phrase_keys))
 
-    views: list[int] = []
-    if wake_lengths:
-        views.append(max(wake_lengths))
-    views.append(0)
-    return tuple(dict.fromkeys(views))
-
-
-def _question_after(transcript: str, end: int) -> str | None:
-    question_start = end
-    while question_start < len(transcript) and not _is_word_character(
-        transcript[question_start]
-    ):
-        question_start += 1
-    question = transcript[question_start:]
-    return question if _tokenize(question) else None
+    return (max(wake_lengths), 0) if wake_lengths else (0,)
 
 
 def _longest_stage_match(
@@ -489,8 +472,11 @@ def _longest_stage_match(
 ) -> RouteResult | None:
     winner: tuple[int, str] | None = None
     key = ""
+    maximum_key_length = max((len(candidate) for candidate in aliases_by_key), default=0)
     for end in range(start + 1, len(tokens) + 1):
         key += tokens[end - 1].key
+        if len(key) > maximum_key_length:
+            break
         alias = aliases_by_key.get(key)
         if alias is not None:
             winner = (end, alias)
@@ -498,9 +484,9 @@ def _longest_stage_match(
     if winner is None:
         return None
     end, alias = winner
-    question = _question_after(transcript, tokens[end - 1].end)
-    if question is None:
+    if end >= len(tokens):
         return RouteResult(None, None, "missing_question")
+    question = transcript[tokens[end].start :]
     return RouteResult(alias, question, reason)
 
 
@@ -516,22 +502,34 @@ def _fuzzy_match(
 ) -> RouteResult:
     per_alias: dict[str, tuple[float, int, str]] = {}
     candidate_key = ""
+    alias_metadata = tuple(
+        (
+            alias_key,
+            alias,
+            max(1, math.ceil(len(alias_key) * 0.2)),
+            _digit_sequences(alias_key),
+        )
+        for alias_key, alias in canonical_by_key.items()
+        if len(alias_key) >= MIN_FUZZY_LENGTH
+    )
+    maximum_candidate_length = max(
+        (len(alias_key) + max_difference for alias_key, _alias, max_difference, _digits in alias_metadata),
+        default=0,
+    )
 
     for end in range(start + 1, len(tokens) + 1):
         candidate_key += tokens[end - 1].key
-        question = _question_after(transcript, tokens[end - 1].end)
-        if question is None or len(candidate_key) < MIN_FUZZY_LENGTH:
+        if len(candidate_key) > maximum_candidate_length:
+            break
+        if end >= len(tokens) or len(candidate_key) < MIN_FUZZY_LENGTH:
             continue
+        question = transcript[tokens[end].start :]
+        candidate_digits = _digit_sequences(candidate_key)
 
-        for alias_key, alias in canonical_by_key.items():
-            if len(alias_key) < MIN_FUZZY_LENGTH:
-                continue
-            max_difference = max(1, math.ceil(len(alias_key) * 0.2))
+        for alias_key, alias, max_difference, alias_digits in alias_metadata:
             if abs(len(candidate_key) - len(alias_key)) > max_difference:
                 continue
-            if (_digit_sequences(candidate_key) or _digit_sequences(alias_key)) and (
-                _digit_sequences(candidate_key) != _digit_sequences(alias_key)
-            ):
+            if (candidate_digits or alias_digits) and candidate_digits != alias_digits:
                 continue
 
             score = float(fuzz.ratio(candidate_key, alias_key, processor=None))
@@ -546,10 +544,10 @@ def _fuzzy_match(
         return RouteResult(None, None, "no_match")
 
     ranked = sorted(
-        ((score, alias, span_length, question) for alias, (score, span_length, question) in per_alias.items()),
+        ((score, alias, question) for alias, (score, _span_length, question) in per_alias.items()),
         key=lambda item: (-item[0], item[1]),
     )
-    best_score, best_alias, _span_length, best_question = ranked[0]
+    best_score, best_alias, best_question = ranked[0]
     runner_up = ranked[1][0] if len(ranked) > 1 else None
     if best_score < MIN_FUZZY_SIMILARITY:
         return RouteResult(None, None, "no_match", best_score, runner_up)
@@ -734,8 +732,7 @@ def _unsafe_for_speech(value: str) -> bool:
     if "[[" in value or "\x1b" in value:
         return True
     return any(
-        (ord(character) < 32 and character not in "\t\n\r")
-        or 127 <= ord(character) <= 159
+        unicodedata.category(character) == "Cc" and character not in "\t\n\r"
         for character in value
     )
 
@@ -769,7 +766,7 @@ def _write_diagnostic(stderr: TextIO, message: str) -> None:
     safe = "".join(
         character
         for character in safe
-        if character in "\t\n\r" or not (ord(character) < 32 or 127 <= ord(character) <= 159)
+        if character in "\t\n\r" or unicodedata.category(character) != "Cc"
     )
     if len(safe) > 2048:
         safe = f"{safe[:2047]}…"
@@ -777,8 +774,6 @@ def _write_diagnostic(stderr: TextIO, message: str) -> None:
 
 
 def _command_available(command: str) -> bool:
-    if os.sep in command:
-        return os.path.isfile(command) and os.access(command, os.X_OK)
     return shutil.which(command) is not None
 
 
