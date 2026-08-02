@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: Alias inventory for LLM-Now</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f3ee;
+      --surface: #fffdf9;
+      --surface-2: #ece9e2;
+      --text: #22231f;
+      --muted: #64655e;
+      --line: #d9d5cb;
+      --accent: #145f58;
+      --accent-soft: #dcece8;
+      --accent-text: #0b4a44;
+      --info-soft: #e6eef7;
+      --info-text: #234d78;
+      --warn-soft: #f5ead2;
+      --warn-text: #72501c;
+      --danger-soft: #f5dfdc;
+      --danger-text: #7c2f29;
+      --code-bg: #ebe8e0;
+      --shadow: 0 12px 34px rgba(34, 35, 31, .08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171916;
+        --surface: #20231f;
+        --surface-2: #2a2e29;
+        --text: #eceee8;
+        --muted: #b8bcb2;
+        --line: #3c413a;
+        --accent: #76c7bd;
+        --accent-soft: #163d39;
+        --accent-text: #9fe0d7;
+        --info-soft: #203449;
+        --info-text: #a8caed;
+        --warn-soft: #43361f;
+        --warn-text: #eed097;
+        --danger-soft: #482724;
+        --danger-text: #efaaa3;
+        --code-bg: #2a2e29;
+        --shadow: 0 12px 34px rgba(0, 0, 0, .24);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.62 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    code {
+      padding: .12em .36em;
+      border-radius: 5px;
+      background: var(--code-bg);
+      font-size: .9em;
+    }
+    .page {
+      width: min(940px, calc(100% - 32px));
+      margin: 28px auto 56px;
+    }
+    header, section, footer {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+    header { padding: clamp(24px, 5vw, 52px); }
+    section { margin-top: 20px; padding: clamp(22px, 4vw, 38px); }
+    footer { margin-top: 20px; padding: 18px 22px; color: var(--muted); font-size: 13px; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.18; letter-spacing: -.025em; }
+    h1 { max-width: 17ch; margin: 0; font-size: clamp(34px, 6vw, 58px); }
+    h2 { margin: 0 0 18px; font-size: clamp(24px, 3.5vw, 32px); }
+    h3 { margin: 0; font-size: 22px; }
+    p { max-width: 72ch; }
+    .lede { margin: 18px 0 0; max-width: 66ch; color: var(--muted); font-size: 18px; }
+    .metadata, .stats, .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+    }
+    .metadata { margin-top: 24px; }
+    .pill {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 13px;
+    }
+    .pill b { font-weight: 750; }
+    .stats { margin-top: 18px; }
+    .stat {
+      min-width: 125px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+    }
+    .stat strong { display: block; font-size: 24px; line-height: 1.1; }
+    .stat span { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    .context-grid, .axis-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .context-card, .axis-card {
+      padding: 16px;
+      border-radius: 13px;
+      background: var(--surface-2);
+    }
+    .context-card h3, .axis-card h3 { margin-bottom: 8px; font-size: 16px; }
+    .context-card p, .axis-card p { margin: 0; color: var(--muted); }
+    .axis-no {
+      display: inline-grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      margin-bottom: 10px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      font-weight: 800;
+    }
+    .jump-list {
+      display: grid;
+      gap: 7px;
+      margin: 0 0 24px;
+      padding: 15px 18px 15px 34px;
+      border-radius: 13px;
+      background: var(--surface-2);
+    }
+    .idea {
+      margin-top: 16px;
+      padding: clamp(20px, 4vw, 30px);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+    }
+    .idea:first-of-type { margin-top: 0; }
+    .idea-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .rank {
+      flex: 0 0 auto;
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--surface);
+      font-weight: 850;
+    }
+    .idea-title { flex: 1; }
+    .idea-title .eyebrow { margin-bottom: 5px; }
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .field {
+      padding: 14px;
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+    .field dt {
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .field dd { margin: 0; }
+    .basis, .downside {
+      margin-top: 12px;
+      padding: 15px 16px;
+      border-radius: 12px;
+    }
+    .basis { background: var(--info-soft); color: var(--info-text); }
+    .downside { background: var(--warn-soft); color: var(--warn-text); }
+    .basis strong, .downside strong { color: inherit; }
+    .concept {
+      margin: 20px 0 4px;
+      padding: 16px;
+      overflow-x: auto;
+      border-radius: 14px;
+      background: var(--surface-2);
+    }
+    .concept svg { display: block; width: 100%; min-width: 610px; height: auto; }
+    .manifest {
+      margin: 18px 0 0;
+      padding: 18px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--code-bg);
+      color: var(--text);
+      font-size: 13px;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td {
+      padding: 11px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-size: 11px; letter-spacing: .07em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .sources { margin: 20px 0 0; padding-left: 20px; }
+    .sources li { margin: 6px 0; }
+    .composition-signal { overflow-wrap: anywhere; }
+    @media (max-width: 680px) {
+      .page { width: min(100% - 20px, 940px); margin-top: 10px; }
+      .context-grid, .axis-grid, .field-grid { grid-template-columns: 1fr; }
+      .idea-head { flex-direction: column; }
+      .rank { width: 34px; height: 34px; }
+      th:nth-child(1), td:nth-child(1) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <p class="eyebrow">Repo-grounded ideation</p>
+      <h1>Alias inventory for LLM-Now</h1>
+      <p class="lede">Ranked directions centered on a <code>--aliases</code> option that prints every configured alias with its provider name and model—without taking over a word that might already be an alias.</p>
+      <div class="metadata" aria-label="Document metadata">
+        <span class="pill"><b>Date</b> <time datetime="2026-07-31">2026-07-31</time></span>
+        <span class="pill"><b>Topic</b> alias-inventory</span>
+        <span class="pill"><b>Mode</b> repo-grounded</span>
+        <span class="pill"><b>Focus</b> use <code>--aliases</code> to print alias, provider name, and model</span>
+      </div>
+      <div class="stats" aria-label="Idea counts">
+        <div class="stat"><strong>44</strong><span>raw ideas</span></div>
+        <div class="stat"><strong>25</strong><span>consolidated</span></div>
+        <div class="stat"><strong>5</strong><span>ranked survivors</span></div>
+        <div class="stat"><strong>4</strong><span>topic axes</span></div>
+      </div>
+    </header>
+
+    <section id="grounding-context">
+      <p class="eyebrow">Codebase Context</p>
+      <h2>Grounding Context</h2>
+      <div class="context-grid">
+        <article class="context-card">
+          <h3>The command namespace belongs to users</h3>
+          <p>Bare positional words—including <code>help</code>, <code>version</code>, and <code>run</code>—are intentionally valid aliases. A new positional <code>aliases</code> command would create a compatibility collision.</p>
+        </article>
+        <article class="context-card">
+          <h3>A canonical read model already exists</h3>
+          <p><code>loadAliases()</code> lowercases names, collapses equivalent case variants, preserves provider/default semantics, and fails closed when variants point to different targets.</p>
+        </article>
+        <article class="context-card">
+          <h3>The streams already have a contract</h3>
+          <p>Successful data belongs on stdout; interactive UI and diagnostics belong on stderr. Invalid configuration already returns a nonzero exit with a <code>config:</code> diagnostic.</p>
+        </article>
+        <article class="context-card">
+          <h3>Inspection can be an early operation</h3>
+          <p>Help and version return before prompting, discovery, model listing, or generation. Alias inventory can use the same conceptual boundary and remain useful while providers are unavailable.</p>
+        </article>
+      </div>
+      <p>External CLI precedent is consistent: human-friendly lists and explicit machine output are separate concerns, while a public JSON interface should be versioned independently from internal persistence. The important local exception is LLM-Now’s intentionally open positional alias namespace.</p>
+      <h3>Evidence and sources</h3>
+      <ul class="sources">
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/args.ts"><code>src/args.ts</code></a> and <a href="https://github.com/swartzrock/llm-now/blob/main/tests/args.test.ts"><code>tests/args.test.ts</code></a> — parser modes and positional-alias compatibility.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/aliases.ts"><code>src/aliases.ts</code></a> — storage schema, canonicalization, and fail-closed loading.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/app.ts"><code>src/app.ts</code></a> and <a href="https://github.com/swartzrock/llm-now/blob/main/src/prompts.ts"><code>src/prompts.ts</code></a> — early modes, stream handling, and friendly target rendering.</li>
+        <li><a href="https://cli.github.com/manual/gh_help_formatting">GitHub CLI formatting</a> and <a href="https://kubernetes.io/docs/reference/kubectl/conventions/">kubectl conventions</a> — explicit human and machine output paths.</li>
+        <li><a href="https://developer.hashicorp.com/terraform/internals/json-format">Terraform JSON format</a> — an independently versioned public machine contract.</li>
+        <li><a href="https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/utilities/command.html">POSIX utility conventions</a> — stdout data, stderr diagnostics, and exit status.</li>
+      </ul>
+    </section>
+
+    <section id="topic-axes">
+      <p class="eyebrow">Surface map</p>
+      <h2>Topic Axes</h2>
+      <div class="axis-grid">
+        <article class="axis-card"><span class="axis-no">1</span><h3>Invocation syntax and discoverability</h3><p>How inspection is requested without reserving a callable alias.</p></article>
+        <article class="axis-card"><span class="axis-no">2</span><h3>Human versus machine output modes</h3><p>How a terminal roster and script contract serve different readers.</p></article>
+        <article class="axis-card"><span class="axis-no">3</span><h3>JSON data contract and evolution</h3><p>Which semantic shape is public, stable, and independent of storage.</p></article>
+        <article class="axis-card"><span class="axis-no">4</span><h3>Safety, determinism, and automation behavior</h3><p>What empty, invalid, offline, and repeated reads guarantee.</p></article>
+      </div>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">Qualified directions</p>
+      <h2>Ranked Ideas</h2>
+      <ol class="jump-list">
+        <li><a href="#idea-1"><code>--aliases</code> alias inventory</a></li>
+        <li><a href="#idea-2">Two honest views of one inventory</a></li>
+        <li><a href="#idea-3">Public canonical alias manifest</a></li>
+        <li><a href="#idea-4">Offline atomic configuration snapshot</a></li>
+        <li><a href="#idea-5">Byte-stable JSON snapshots</a></li>
+      </ol>
+
+      <article class="idea" id="idea-1">
+        <div class="idea-head">
+          <span class="rank">1</span>
+          <div class="idea-title">
+            <p class="eyebrow">Invocation syntax and discoverability</p>
+            <h3>1. <code>--aliases</code> alias inventory</h3>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Use the standalone <code>--aliases</code> option to print every configured alias with three values: alias name, provider name, and model. It becomes a peer of help and version: explicit, discoverable, non-generating, and unable to seize a positional word a user may already invoke as an alias.</p>
+        <div class="concept" role="img" aria-label="Conceptual comparison showing a positional aliases word colliding with a user alias while an explicit double-dash aliases option preserves both paths">
+          <svg viewBox="0 0 760 180" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="currentColor"/></marker>
+            </defs>
+            <rect x="20" y="24" width="326" height="132" rx="14" fill="var(--danger-soft)" stroke="var(--danger-text)"/>
+            <text x="42" y="51" fill="var(--danger-text)" font-size="13" font-weight="700">POSITIONAL WORD</text>
+            <rect x="42" y="70" width="110" height="45" rx="9" fill="var(--surface)" stroke="var(--danger-text)"/>
+            <text x="97" y="98" fill="var(--text)" text-anchor="middle" font-family="monospace" font-size="14">aliases</text>
+            <line x1="162" y1="92" x2="236" y2="92" stroke="var(--danger-text)" stroke-width="2" marker-end="url(#arrow)"/>
+            <text x="258" y="86" fill="var(--danger-text)" font-size="13">inventory?</text>
+            <text x="258" y="106" fill="var(--danger-text)" font-size="13">saved alias?</text>
+            <rect x="414" y="24" width="326" height="132" rx="14" fill="var(--accent-soft)" stroke="var(--accent-text)"/>
+            <text x="436" y="51" fill="var(--accent-text)" font-size="13" font-weight="700">EXPLICIT OPTION</text>
+            <rect x="436" y="68" width="124" height="39" rx="9" fill="var(--surface)" stroke="var(--accent-text)"/>
+            <text x="498" y="93" fill="var(--text)" text-anchor="middle" font-family="monospace" font-size="14">--aliases</text>
+            <text x="581" y="92" fill="var(--accent-text)" font-size="13">inventory</text>
+            <rect x="436" y="115" width="124" height="29" rx="9" fill="var(--surface)" stroke="var(--accent-text)"/>
+            <text x="498" y="135" fill="var(--text)" text-anchor="middle" font-family="monospace" font-size="13">aliases</text>
+            <text x="581" y="134" fill="var(--accent-text)" font-size="13">user alias</text>
+          </svg>
+        </div>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>The exact invocation is settled and the default result answers the complete inspection question without spending the positional namespace or forcing anyone to rename an existing alias.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>98%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Low</dd></div>
+          <div class="field"><dt>Meeting test</dt><dd><code>llm-now --aliases</code> prints alias, provider name, and model while an existing positional alias named <code>aliases</code> remains invocable.</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct:</strong> <code>tests/args.test.ts:100-107</code> intentionally preserves bare <code>help</code>, <code>version</code>, and <code>run</code> as alias names; <code>README.md:67-71</code> already describes explicit options as the safe answer to future name ambiguity.</p>
+        <p class="downside"><strong>Downsides:</strong> A flag is less conventionally extensible than an <code>aliases list/show</code> command family. Any future filtering or alternate formats should remain subordinate to this simple default behavior.</p>
+      </article>
+
+      <article class="idea" id="idea-2">
+        <div class="idea-head">
+          <span class="rank">2</span>
+          <div class="idea-title">
+            <p class="eyebrow">Human versus machine output modes</p>
+            <h3>2. Two honest views of one inventory</h3>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Give people a compact roster of alias, provider, and model, while offering an explicitly requested JSON view for programs. The roster can use friendly provider labels and “provider default”; JSON keeps canonical provider IDs and literal <code>null</code>. Format follows explicit intent, never whether stdout happens to be a TTY.</p>
+        <div class="context-grid" aria-label="Conceptual comparison of the human roster and machine JSON views">
+          <div class="context-card">
+            <h3>Human roster</h3>
+            <p><code>fred</code> → Ollama · llama3.1<br><code>codex</code> → Codex CLI · provider default</p>
+          </div>
+          <div class="context-card">
+            <h3>Machine view</h3>
+            <p>Canonical IDs, explicit fields, literal nulls, no headings or display phrases mixed into the data.</p>
+          </div>
+        </div>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>Humans scan labels and relationships; scripts need semantic fields immune to alignment, color, and copy changes.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>93%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Medium</dd></div>
+          <div class="field"><dt>Meeting test</dt><dd>The same explicit machine invocation produces the same parseable shape in a terminal, redirected, and under CI.</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct + external:</strong> <code>src/prompts.ts:148-154</code> already distinguishes friendly provider/model rendering from stored values, and <code>README.md:80</code> establishes stdout as the data stream. GitHub CLI and kubectl make machine formats explicit rather than asking scripts to scrape default presentation.</p>
+        <p class="downside"><strong>Downsides:</strong> Two views create a parity obligation and slightly more documentation and testing. A JSON-only design is simpler, though less pleasant for routine terminal inspection.</p>
+      </article>
+
+      <article class="idea" id="idea-3">
+        <div class="idea-head">
+          <span class="rank">3</span>
+          <div class="idea-title">
+            <p class="eyebrow">JSON data contract and evolution</p>
+            <h3>3. Public canonical alias manifest</h3>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Publish a small inspection contract independent of the on-disk v1 document: a format version plus an ordered array of canonical <code>{alias, provider, model}</code> records. The output reflects the namespace LLM-Now actually resolves after lowercasing and benign legacy-variant collapse, while preserving <code>model: null</code> as provider-default selection.</p>
+        <pre class="manifest" aria-label="Illustrative alias manifest shape">{
+  "formatVersion": "1.0",
+  "aliases": [
+    { "alias": "codex", "provider": "codex-cli", "model": null },
+    { "alias": "fred", "provider": "ollama", "model": "llama3.1" }
+  ]
+}</pre>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>Automation should depend on a consumption-oriented interface, not internal file layout, insertion order, or legacy spelling artifacts.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>91%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Medium</dd></div>
+          <div class="field"><dt>Meeting test</dt><dd>Internal storage can evolve without silently changing what current inventory consumers interpret.</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct + external:</strong> <code>src/aliases.ts:80-103</code> makes persistence a strict closed schema, while <code>src/aliases.ts:110-146</code> creates the canonical resolver view. Terraform’s public JSON format demonstrates independent versioning and explicit compatibility semantics.</p>
+        <p class="downside"><strong>Downsides:</strong> A separate versioned contract costs more than dumping the file, and an array requires scanning for exact lookup. It also creates a promise that future output changes must honor.</p>
+      </article>
+
+      <article class="idea" id="idea-4">
+        <div class="idea-head">
+          <span class="rank">4</span>
+          <div class="idea-title">
+            <p class="eyebrow">Safety, determinism, and automation behavior</p>
+            <h3>4. Offline atomic configuration snapshot</h3>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Define inventory as an offline read of configured routing—not a provider health check. It consumes no prompt, performs no provider discovery, model listing, credential validation, or generation, and produces either one complete canonical snapshot or no payload. A missing store is a successful empty inventory; corrupt or conflicting state leaves stdout empty, writes the configuration diagnostic to stderr, and exits nonzero.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>Voice routers, completion systems, and audits need trustworthy configured targets precisely when runtimes or networks may be unavailable.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>97%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Low–Medium</dd></div>
+          <div class="field"><dt>Meeting test</dt><dd>With closed stdin and broken providers, valid configuration still lists; ambiguous configuration never leaks partial records.</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct:</strong> <code>src/app.ts:659-691</code> and <code>tests/app.test.ts:199-238</code> show early modes can avoid runtime operations. <code>src/aliases.ts:106-169</code> distinguishes missing storage from invalid/conflicting storage, and <code>src/app.ts:709-716</code> already routes configuration failures to stderr with exit 1.</p>
+        <p class="downside"><strong>Downsides:</strong> The executable currently constructs some dependencies eagerly, so “offline” should promise no runtime operations rather than literally zero initialization. The result intentionally says nothing about provider reachability.</p>
+      </article>
+
+      <article class="idea" id="idea-5">
+        <div class="idea-head">
+          <span class="rank">5</span>
+          <div class="idea-title">
+            <p class="eyebrow">Safety, determinism, and automation behavior</p>
+            <h3>5. Byte-stable JSON snapshots</h3>
+          </div>
+        </div>
+        <p><strong>Description:</strong> Go beyond “valid JSON” and make unchanged logical alias state produce identical bytes: canonical alias ordering, stable record field order, literal nulls, and one final newline. Benign differences in legacy key casing or file insertion order disappear from the published snapshot.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>Stable bytes make change detection, fixture tests, caches, and generated voice menus dependable and cheap.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>84%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Low</dd></div>
+          <div class="field"><dt>Meeting test</dt><dd>Two stores with the same resolved namespace produce byte-identical successful JSON.</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct:</strong> <code>src/aliases.ts:110-146</code> already sorts during canonicalization, and <code>tests/aliases.test.ts:112-156</code> requires conflict behavior to be independent of source order. A public serializer can extend that determinism to successful output.</p>
+        <p class="downside"><strong>Downsides:</strong> Byte stability constrains otherwise harmless serializer changes, and many JSON consumers should compare parsed values rather than raw bytes. It is leverage for tooling, not a prerequisite for basic enumeration.</p>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <p class="eyebrow">What did not make the cut</p>
+      <h2>Rejection Summary</h2>
+      <table>
+        <thead><tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Explicit <code>--list-aliases</code> verb flag</td><td>Naming preference without evidence strong enough to outrank the shorter collision-proof option.</td></tr>
+          <tr><td>2</td><td>Format-bearing inventory option</td><td>Folded into the stronger two-view direction; exact flag syntax is a downstream decision.</td></tr>
+          <tr><td>3</td><td>Inventory as a first-class early mode</td><td>Retained inside collision-proof invocation and offline snapshot behavior.</td></tr>
+          <tr><td>4</td><td>Singular alias inspection</td><td>Useful adjacent scope, but not justified by the requested enumerate-all use case.</td></tr>
+          <tr><td>5</td><td>Capability-catalog framing</td><td>Documentation positioning rather than a distinct product or contract direction.</td></tr>
+          <tr><td>6</td><td>JSON as the only representation</td><td>Simpler, but weak evidence that it serves routine human inspection better than a roster.</td></tr>
+          <tr><td>7</td><td>JSON-only automation lane</td><td>Retained as the machine half of the stronger two-view direction.</td></tr>
+          <tr><td>8</td><td>Names-only grammar export</td><td>Derivable from JSON and adds a third format without demonstrated demand.</td></tr>
+          <tr><td>9</td><td>TTY-dependent format switching</td><td>Rejected because redirection should not silently alter the output contract.</td></tr>
+          <tr><td>10</td><td>Friendly labels only in human output</td><td>Retained as a field-semantic detail inside the two-view direction.</td></tr>
+          <tr><td>11</td><td>Canonical resolver projection</td><td>Merged into the public canonical manifest.</td></tr>
+          <tr><td>12</td><td>Raw alias-document dump</td><td>Basis refuted: it can expose legacy spellings rather than the callable canonical namespace.</td></tr>
+          <tr><td>13</td><td>Sorted record array</td><td>Merged into the public canonical manifest.</td></tr>
+          <tr><td>14</td><td>Alias-keyed object contract</td><td>Weaker for deterministic enumeration and evolution than explicit sorted records.</td></tr>
+          <tr><td>15</td><td>Render <code>null</code> as <code>"default"</code></td><td>Rejected because it conflates provider-default data with CLI/display syntax.</td></tr>
+          <tr><td>16</td><td>Voice-command grammar branding</td><td>Useful positioning, but not a separately justified API contract.</td></tr>
+          <tr><td>17</td><td>Atomic snapshot or failure</td><td>Merged into the offline atomic configuration snapshot.</td></tr>
+          <tr><td>18</td><td>Empty inventory as a separate feature</td><td>Retained as one state in the offline atomic contract.</td></tr>
+          <tr><td>19</td><td>Config diagnostics as a separate idea</td><td>Retained as one stream guarantee in the offline atomic contract.</td></tr>
+          <tr><td>20</td><td>Runtime health in the inventory</td><td>Rejected because volatile health checks would make configuration inspection slow and environment-dependent.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer class="composition-signal">Updated 2026-08-01T06:59:19Z by ce-ideate from the user decision: “use --aliases to trigger printing out the aliases and their provider name and model.”</footer>
+  </main>
+</body>
+</html>

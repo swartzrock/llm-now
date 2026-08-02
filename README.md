@@ -66,8 +66,31 @@ llm-now daily --input "Summarize this idea"
 printf 'Explain this diff' | llm-now daily
 ```
 
-Alias names are exact and case-sensitive. Options may appear before or after the alias,
-though the alias-first form above is recommended. The explicit
+List the saved alias inventory without prompting or contacting a provider:
+
+```console
+$ llm-now --aliases
+aliases → Codex CLI · provider default
+daily → OpenAI · gpt-5
+```
+
+Inventory output has one uncolored, unpadded `alias → Provider Label · model`
+row per canonical lowercase alias, sorted by canonical alias, with no header. A
+null model is shown as `provider default`. A missing or empty alias store exits
+`0` with zero stdout bytes. Successful inventory writes only to stdout and
+leaves stderr empty.
+
+`--aliases` is standalone and ignores stdin. Combining it with any other option
+or positional value exits `2`, leaves stdout empty, and writes a `usage:`
+diagnostic to stderr. An invalid, unreadable, or case-conflicting alias store
+exits `1`, leaves stdout empty, and writes the existing `config:` diagnostic to
+stderr. Inventory returns before prompt handling, provider discovery or runtime
+calls, credential access, and alias mutation. The bare word `aliases` remains a
+positional alias and generates normally when that alias is configured.
+
+Alias names are ASCII case-insensitive but spelling-exact: `daily`, `Daily`, and
+`DAILY` select the same alias, while `dailly` does not. Aliases are stored and
+displayed in lowercase. Options may appear before or after the alias, though the alias-first form above is recommended. The explicit
 `--alias daily` form remains available for scripts and for resolving any future command-name
 ambiguity.
 
@@ -87,7 +110,14 @@ After a successful unnamed interactive call, `llm-now` shows a green contextual 
 - macOS/Linux: `~/.config/llm-now/aliases.json`
 - Windows: `%APPDATA%\\llm-now\\aliases.json`, otherwise `%USERPROFILE%\\AppData\\Roaming\\llm-now\\aliases.json`
 
-Saving the same name and target reports that it is already saved. Reusing a name for a different target requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.
+Saving the same name and target, in any capitalization, reports that it is already saved. Reusing a name for a different target requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.
+
+Existing version 1 alias files need no eager migration. Case-only legacy entries
+that point to the same provider and model collapse to one lowercase alias in
+memory without rewriting the file; the next successful alias save persists all
+keys in lowercase. If case-only entries point to different targets, `llm-now`
+fails closed with a diagnostic naming the entries and alias-file path so you can
+keep the intended target. It never chooses between conflicting targets.
 
 ## Secure API-key storage
 
@@ -132,7 +162,7 @@ If no provider is found, stderr lists every checked provider class and manual se
 
 Exit codes:
 
-- `0`: successful generation, help, version, or completed/declined setup action (including declined/cancelled post-success alias saving)
-- `1`: discovery, model-list, generation, configuration, credential-store, or post-credential alias failure
-- `2`: invalid usage
+- `0`: successful generation or alias inventory, help, version, or completed/declined setup action (including declined/cancelled post-success alias saving)
+- `1`: discovery, model-list, generation, configuration (including an invalid, unreadable, or case-conflicting alias store), credential-store, or post-credential alias failure
+- `2`: invalid usage, including combining `--aliases` with another option or positional value
 - `130`: interactive setup or alias/provider/model selection cancelled before a durable action

@@ -13,6 +13,7 @@ import {
   AliasStoreError,
   isValidAliasName,
   loadAliases as loadStoredAliases,
+  normalizeAliasName,
   resolveAlias as resolveStoredAlias,
   resolveAliasPath,
   saveAlias as saveStoredAlias,
@@ -35,6 +36,7 @@ import {
   cloudCredentialProviderOptions,
   createSearchablePrompter,
   createTerminalColors,
+  formatAliasInventory,
   formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
   providerLabel,
@@ -257,16 +259,17 @@ async function prepareCredentialAlias(
       continue;
     }
 
-    const current = aliases[name];
+    const canonicalName = normalizeAliasName(name);
+    const current = Object.hasOwn(aliases, canonicalName) ? aliases[canonicalName] : undefined;
     if (current !== undefined && !sameAliasRecord(current, selection)) {
       const overwrite = await deps.prompter.confirm(
-        `Overwrite alias ${name}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, selection)}`,
+        `Overwrite alias ${canonicalName}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, selection)}`,
         { initialValue: false },
       );
       if (overwrite === null) return 130;
       if (!overwrite) continue;
     }
-    return { name, selection, expectedCurrent: current };
+    return { name: canonicalName, selection, expectedCurrent: current };
   }
 }
 
@@ -413,24 +416,25 @@ async function offerAliasSave(
       diagnostic("config: invalid alias name; use 1-64 ASCII letters, numbers, hyphens, or underscores.");
       continue;
     }
+    const canonicalName = normalizeAliasName(name);
     try {
-      const result = await save(applicationAliasPath(deps), name, selection, {
+      const result = await save(applicationAliasPath(deps), canonicalName, selection, {
         confirmOverwrite: async (_alias, current) =>
           (await deps.prompter.confirm(
-            `Overwrite alias ${name}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}`,
+            `Overwrite alias ${canonicalName}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}`,
             { initialValue: false },
           )) === true,
       });
       if (result === "saved") {
         deps.stderr.write(
           colors.green("◆ Saved alias ")
-          + colors.white(name)
+          + colors.white(canonicalName)
           + colors.green(` → ${target}\n  Next time, use `)
-          + colors.white(`llm-now ${name} --input "<prompt>"`)
+          + colors.white(`llm-now ${canonicalName} --input "<prompt>"`)
           + "\n",
         );
       } else if (result === "already-saved") {
-        deps.stderr.write(`${colors.green(`◆ Already saved ${name} → ${target}`)}\n`);
+        deps.stderr.write(`${colors.green(`◆ Already saved ${canonicalName} → ${target}`)}\n`);
       }
       return true;
     } catch (error) {
@@ -668,6 +672,14 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     }
     if (parsed.kind === "version") {
       deps.stdout.write(`${deps.version}\n`);
+      return 0;
+    }
+    if (parsed.kind === "aliases") {
+      const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
+        applicationAliasPath(deps),
+      )).aliases;
+      const roster = formatAliasInventory(aliases);
+      if (roster.length > 0) deps.stdout.write(`${roster}\n`);
       return 0;
     }
 

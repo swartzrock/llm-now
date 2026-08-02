@@ -69,11 +69,11 @@ try {
       executable: spike,
       args: ["--help"],
       exitCode: 0,
-      stdoutIncludes: "Usage:\n  llm-now\n  llm-now --input <text>",
+      stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>",
       stdoutLandmarks: [
-        "Usage:\n  llm-now\n  llm-now --input <text>",
+        "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>",
         "Rules:\n  Run llm-now with no arguments in a terminal to set up providers and API keys.\n  Input comes from exactly one of --input or stdin.",
-        "Options:\n  --input <text>       Prompt text",
+        "Options:\n  --aliases            List saved aliases\n  --input <text>       Prompt text",
         "API key environment variables:\n  ANTHROPIC_API_KEY",
         "  DEEPINFRA_TOKEN",
         "  XAI_API_KEY",
@@ -110,7 +110,7 @@ try {
     {
       name: "fake CLI generation through positional alias",
       executable: spike,
-      args: ["Daily", "--input", "smoke"],
+      args: ["dAiLy", "--input", "smoke"],
       exitCode: 0,
       stdout: "fake:smoke",
       stderr: "",
