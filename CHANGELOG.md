@@ -1,5 +1,21 @@
 # llm-now
 
+## 2.0.0
+
+### Major Changes
+
+- 2e1745d: Make aliases ASCII case-insensitive while keeping spelling exact. Saved aliases
+  are canonical lowercase. Same-target case-only entries in legacy alias files
+  collapse in memory and are persisted canonically on the next successful save;
+  different-target conflicts fail closed with an actionable repair diagnostic.
+
+### Minor Changes
+
+- c7c3e95: Make bare interactive launch adaptive: run saved shortcuts or freshly selected models in the same invocation, while keeping provider and API-key management in a separate route.
+- dc39189: Prompt once for input when a saved alias is invoked interactively without `--input`.
+- ac7c6ab: Add `llm-now --aliases` to print a sorted human-readable inventory of saved
+  aliases with provider labels and configured or provider-default models.
+
 ## 1.0.0
 
 ### Major Changes
