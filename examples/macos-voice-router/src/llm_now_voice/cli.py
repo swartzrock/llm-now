@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import math
+import os
 import re
+import shutil
+import signal
+import subprocess
+import sys
+import threading
 import tomllib
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable, Protocol, TextIO
 
 from rapidfuzz import fuzz
 
@@ -15,10 +21,134 @@ ALIAS_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MIN_FUZZY_LENGTH = 4
 MIN_FUZZY_SIMILARITY = 65.0
 MIN_FUZZY_MARGIN = 15.0
+INVENTORY_TIMEOUT = 5
+GENERATION_TIMEOUT = 50
+CLIPBOARD_TIMEOUT = 5
+SPEECH_TIMEOUT = 120
+RETRY_NOTICE = b"I couldn't match an alias and question. Please try again."
+REQUEST_FAILED_NOTICE = b"The request failed. Please try again."
+CONFIG_FAILED_NOTICE = b"The voice router needs attention. Check the Shortcut result."
+COPY_FAILED_NOTICE = b"I couldn't copy the answer. Check the Shortcut result."
+CONCISE_PROMPT = (
+    "Answer concisely in plain text suitable for speech. "
+    "Do not use Markdown or code fences unless the question requires code."
+)
 
 
 class VoiceRouterError(ValueError):
     """Raised when router input or configuration is invalid."""
+
+
+class ProcessCancelled(Exception):
+    """Raised after cancellation stops and reaps an active process group."""
+
+
+class ProcessTimedOut(Exception):
+    def __init__(self, args: tuple[str, ...], timeout: float) -> None:
+        super().__init__(f"command timed out after {timeout:g} seconds: {args[0]}")
+        self.command = args
+        self.timeout = timeout
+
+
+@dataclass(frozen=True)
+class ProcessResult:
+    returncode: int
+    stdout: bytes = b""
+    stderr: bytes = b""
+
+
+class ProcessRunner(Protocol):
+    def run(
+        self, args: tuple[str, ...], input_data: bytes | None, timeout: float
+    ) -> ProcessResult: ...
+
+
+class SubprocessRunner:
+    def __init__(
+        self,
+        *,
+        popen: Callable[..., object] = subprocess.Popen,
+        killpg: Callable[[int, int], None] = os.killpg,
+    ) -> None:
+        self._popen = popen
+        self._killpg = killpg
+        self._cancelled = threading.Event()
+        self._lock = threading.Lock()
+        self._active: object | None = None
+
+    def run(
+        self, args: tuple[str, ...], input_data: bytes | None, timeout: float
+    ) -> ProcessResult:
+        if self._cancelled.is_set():
+            raise ProcessCancelled()
+
+        process = self._popen(
+            args,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            start_new_session=True,
+        )
+        with self._lock:
+            self._active = process
+            cancelled_after_spawn = self._cancelled.is_set()
+        if cancelled_after_spawn:
+            self._terminate_and_reap(process)
+            self._clear_active(process)
+            raise ProcessCancelled()
+
+        try:
+            try:
+                stdout, stderr = process.communicate(input=input_data, timeout=timeout)
+            except subprocess.TimeoutExpired as error:
+                self._terminate_and_reap(process)
+                raise ProcessTimedOut(args, timeout) from error
+            if self._cancelled.is_set():
+                raise ProcessCancelled()
+            return ProcessResult(process.returncode, stdout, stderr)
+        finally:
+            self._clear_active(process)
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+        with self._lock:
+            process = self._active
+        if process is None or process.poll() is not None:
+            return
+        try:
+            self._killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        if process.poll() is None:
+            try:
+                self._killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def _clear_active(self, process: object) -> None:
+        with self._lock:
+            if self._active is process:
+                self._active = None
+
+    def _terminate_and_reap(self, process: object) -> None:
+        if process.poll() is None:
+            try:
+                self._killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        try:
+            process.communicate(timeout=1)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+        if process.poll() is None:
+            try:
+                self._killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.communicate()
 
 
 @dataclass(frozen=True)
@@ -97,6 +227,25 @@ def parse_inventory(text: str) -> tuple[str, ...]:
     if not aliases:
         raise VoiceRouterError("alias inventory is empty")
     return tuple(aliases)
+
+
+def parse_voice_inventory(text: str) -> dict[str, str]:
+    voices: dict[str, str] = {}
+    row_pattern = re.compile(r"^(.+?)\s+([A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)+)\s+#")
+    for line_number, row in enumerate(text.splitlines(), start=1):
+        if not row:
+            continue
+        match = row_pattern.match(row)
+        if match is None:
+            raise VoiceRouterError(f"invalid macOS voice inventory row {line_number}")
+        voice = match.group(1).strip()
+        key = voice.casefold()
+        if not voice or key in voices:
+            raise VoiceRouterError(f'duplicate macOS voice: "{voice}"')
+        voices[key] = voice
+    if not voices:
+        raise VoiceRouterError("macOS voice inventory is empty")
+    return voices
 
 
 def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
@@ -409,5 +558,262 @@ def _fuzzy_match(
     return RouteResult(best_alias, best_question, "fuzzy", best_score, runner_up)
 
 
+def run_voice_router(
+    transcript_data: bytes,
+    *,
+    runner: ProcessRunner,
+    config_data: bytes | None = None,
+    stderr: TextIO,
+    llm_now: str = "llm-now",
+    pbcopy: str = "/usr/bin/pbcopy",
+    say: str = "/usr/bin/say",
+    command_available: Callable[[str], bool] | None = None,
+) -> int:
+    try:
+        if command_available is not None:
+            missing = next(
+                (command for command in (llm_now, pbcopy, say) if not command_available(command)),
+                None,
+            )
+            if missing is not None:
+                _write_diagnostic(stderr, f"required command is unavailable: {missing}")
+                if missing == say:
+                    return 1
+                _speak_notice(runner, say, CONFIG_FAILED_NOTICE, stderr)
+                return 1
+
+        try:
+            transcript = transcript_data.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            _write_diagnostic(stderr, "dictated transcript is not valid UTF-8")
+            return 0 if _speak_notice(runner, say, RETRY_NOTICE, stderr) else 1
+
+        try:
+            inventory_result = runner.run((llm_now, "--aliases"), None, INVENTORY_TIMEOUT)
+        except FileNotFoundError:
+            _write_diagnostic(stderr, f"required command is unavailable: {llm_now}")
+            _speak_notice(runner, say, CONFIG_FAILED_NOTICE, stderr)
+            return 1
+        except (ProcessTimedOut, OSError) as error:
+            _write_diagnostic(stderr, f"alias inventory failed: {error}")
+            return 0 if _speak_notice(runner, say, RETRY_NOTICE, stderr) else 1
+
+        _write_child_diagnostic(stderr, "alias inventory", inventory_result.stderr)
+        if inventory_result.returncode != 0:
+            _write_diagnostic(
+                stderr, f"alias inventory exited with status {inventory_result.returncode}"
+            )
+            return 0 if _speak_notice(runner, say, RETRY_NOTICE, stderr) else 1
+        try:
+            aliases = parse_inventory(
+                inventory_result.stdout.decode("utf-8", errors="strict")
+            )
+        except (UnicodeDecodeError, VoiceRouterError) as error:
+            _write_diagnostic(stderr, f"invalid alias inventory: {error}")
+            return 0 if _speak_notice(runner, say, RETRY_NOTICE, stderr) else 1
+
+        try:
+            config = parse_config(config_data, aliases)
+        except VoiceRouterError as error:
+            _write_diagnostic(stderr, str(error))
+            _speak_notice(runner, say, CONFIG_FAILED_NOTICE, stderr)
+            return 1
+
+        route = route_transcript(transcript, aliases, config)
+        if not route.accepted:
+            _write_diagnostic(stderr, f"request rejected: {route.reason}")
+            return 0 if _speak_notice(runner, say, RETRY_NOTICE, stderr) else 1
+
+        alias = route.alias
+        question = route.question
+        assert alias is not None and question is not None
+        profile = config.profiles.get(alias, AliasProfile())
+
+        installed_voice: str | None = None
+        if profile.voice is not None:
+            try:
+                voice_result = runner.run((say, "-v", "?"), None, INVENTORY_TIMEOUT)
+            except (FileNotFoundError, ProcessTimedOut, OSError) as error:
+                _write_diagnostic(stderr, f"macOS voice inventory failed: {error}")
+                _speak_notice(runner, say, CONFIG_FAILED_NOTICE, stderr)
+                return 1
+            _write_child_diagnostic(stderr, "macOS voice inventory", voice_result.stderr)
+            if voice_result.returncode != 0:
+                _write_diagnostic(
+                    stderr,
+                    f"macOS voice inventory exited with status {voice_result.returncode}",
+                )
+                _speak_notice(runner, say, CONFIG_FAILED_NOTICE, stderr)
+                return 1
+            try:
+                voices = parse_voice_inventory(
+                    voice_result.stdout.decode("utf-8", errors="strict")
+                )
+            except (UnicodeDecodeError, VoiceRouterError) as error:
+                _write_diagnostic(stderr, f"invalid macOS voice inventory: {error}")
+                _speak_notice(runner, say, CONFIG_FAILED_NOTICE, stderr)
+                return 1
+            installed_voice = voices.get(profile.voice.casefold())
+            if installed_voice is None:
+                _write_diagnostic(
+                    stderr, f'configured voice is not installed: "{profile.voice}"'
+                )
+                _speak_notice(runner, say, CONFIG_FAILED_NOTICE, stderr)
+                return 1
+
+        prompt = f"{CONCISE_PROMPT}\n\n{question}".encode("utf-8")
+        try:
+            generation = runner.run(
+                (llm_now, "--alias", alias), prompt, GENERATION_TIMEOUT
+            )
+        except FileNotFoundError:
+            _write_diagnostic(stderr, f"required command is unavailable: {llm_now}")
+            _speak_notice(runner, say, CONFIG_FAILED_NOTICE, stderr)
+            return 1
+        except (ProcessTimedOut, OSError) as error:
+            _write_diagnostic(stderr, f"model request failed: {error}")
+            return 0 if _speak_notice(runner, say, REQUEST_FAILED_NOTICE, stderr) else 1
+
+        _write_child_diagnostic(stderr, "model request", generation.stderr)
+        if generation.returncode != 0:
+            _write_diagnostic(
+                stderr, f"model request exited with status {generation.returncode}"
+            )
+            return 0 if _speak_notice(runner, say, REQUEST_FAILED_NOTICE, stderr) else 1
+
+        try:
+            answer_text = generation.stdout.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            _write_diagnostic(stderr, "model response is not valid UTF-8")
+            return 0 if _speak_notice(runner, say, REQUEST_FAILED_NOTICE, stderr) else 1
+        if not answer_text.strip():
+            _write_diagnostic(stderr, "model response is empty")
+            return 0 if _speak_notice(runner, say, REQUEST_FAILED_NOTICE, stderr) else 1
+        if _unsafe_for_speech(answer_text):
+            _write_diagnostic(stderr, "model response contains unsafe speech controls")
+            return 0 if _speak_notice(runner, say, REQUEST_FAILED_NOTICE, stderr) else 1
+
+        answer = generation.stdout
+        try:
+            copy_result = runner.run((pbcopy,), answer, CLIPBOARD_TIMEOUT)
+        except (FileNotFoundError, ProcessTimedOut, OSError) as error:
+            _write_diagnostic(stderr, f"clipboard copy failed: {error}")
+            _speak_notice(runner, say, COPY_FAILED_NOTICE, stderr)
+            return 1
+        _write_child_diagnostic(stderr, "clipboard copy", copy_result.stderr)
+        if copy_result.returncode != 0:
+            _write_diagnostic(
+                stderr, f"clipboard copy exited with status {copy_result.returncode}"
+            )
+            _speak_notice(runner, say, COPY_FAILED_NOTICE, stderr)
+            return 1
+
+        speech_args = [say]
+        if installed_voice is not None:
+            speech_args.extend(("-v", installed_voice))
+        if profile.rate is not None:
+            speech_args.extend(("-r", str(profile.rate)))
+        try:
+            speech_result = runner.run(tuple(speech_args), answer, SPEECH_TIMEOUT)
+        except (FileNotFoundError, ProcessTimedOut, OSError) as error:
+            _write_diagnostic(stderr, f"answer speech failed: {error}")
+            return 1
+        _write_child_diagnostic(stderr, "answer speech", speech_result.stderr)
+        if speech_result.returncode != 0:
+            _write_diagnostic(
+                stderr, f"answer speech exited with status {speech_result.returncode}"
+            )
+            return 1
+        return 0
+    except ProcessCancelled:
+        _write_diagnostic(stderr, "voice request cancelled")
+        return 130
+
+
+def _unsafe_for_speech(value: str) -> bool:
+    if "[[" in value or "\x1b" in value:
+        return True
+    return any(
+        (ord(character) < 32 and character not in "\t\n\r")
+        or 127 <= ord(character) <= 159
+        for character in value
+    )
+
+
+def _speak_notice(
+    runner: ProcessRunner, say: str, notice: bytes, stderr: TextIO
+) -> bool:
+    try:
+        result = runner.run((say,), notice, SPEECH_TIMEOUT)
+    except ProcessCancelled:
+        raise
+    except (FileNotFoundError, ProcessTimedOut, OSError) as error:
+        _write_diagnostic(stderr, f"notice speech failed: {error}")
+        return False
+    _write_child_diagnostic(stderr, "notice speech", result.stderr)
+    if result.returncode != 0:
+        _write_diagnostic(stderr, f"notice speech exited with status {result.returncode}")
+        return False
+    return True
+
+
+def _write_child_diagnostic(stderr: TextIO, label: str, data: bytes) -> None:
+    if data:
+        text = data.decode("utf-8", errors="replace").strip()
+        if text:
+            _write_diagnostic(stderr, f"{label}: {text}")
+
+
+def _write_diagnostic(stderr: TextIO, message: str) -> None:
+    safe = message.replace("\x1b", "")
+    safe = "".join(
+        character
+        for character in safe
+        if character in "\t\n\r" or not (ord(character) < 32 or 127 <= ord(character) <= 159)
+    )
+    if len(safe) > 2048:
+        safe = f"{safe[:2047]}…"
+    stderr.write(f"{safe.rstrip()}\n")
+
+
+def _command_available(command: str) -> bool:
+    if os.sep in command:
+        return os.path.isfile(command) and os.access(command, os.X_OK)
+    return shutil.which(command) is not None
+
+
 def main() -> int:
-    raise SystemExit("voice orchestration is not implemented yet")
+    runner = SubprocessRunner()
+
+    def cancel(_signum: int, _frame: object) -> None:
+        runner.cancel()
+
+    previous_handlers: dict[int, object] = {}
+    for current_signal in (signal.SIGINT, signal.SIGTERM):
+        previous_handlers[current_signal] = signal.signal(current_signal, cancel)
+
+    try:
+        try:
+            config_path = resolve_config_path(
+                Path.home(), os.environ.get("XDG_CONFIG_HOME")
+            )
+            try:
+                config_data = config_path.read_bytes()
+            except FileNotFoundError:
+                config_data = None
+            transcript_data = sys.stdin.buffer.read()
+        except (OSError, VoiceRouterError) as error:
+            _write_diagnostic(sys.stderr, f"voice router setup failed: {error}")
+            _speak_notice(runner, "/usr/bin/say", CONFIG_FAILED_NOTICE, sys.stderr)
+            return 1
+
+        return run_voice_router(
+            transcript_data,
+            runner=runner,
+            config_data=config_data,
+            stderr=sys.stderr,
+            command_available=_command_available,
+        )
+    finally:
+        for current_signal, previous_handler in previous_handlers.items():
+            signal.signal(current_signal, previous_handler)

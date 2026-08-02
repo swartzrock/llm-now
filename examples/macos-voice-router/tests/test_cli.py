@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import unittest
+import signal
+import subprocess
+from io import StringIO
 
 from llm_now_voice.cli import (
+    ProcessCancelled,
+    ProcessResult,
+    ProcessTimedOut,
+    SubprocessRunner,
     VoiceRouterError,
     parse_config,
     parse_inventory,
+    parse_voice_inventory,
     route_transcript,
+    run_voice_router,
 )
 
 
@@ -238,6 +247,337 @@ class RoutingTests(unittest.TestCase):
                 self.assertFalse(result.accepted)
                 self.assertIsNone(result.alias)
                 self.assertIsNone(result.question)
+
+
+class FakeRunner:
+    def __init__(self, results: list[ProcessResult | Exception]) -> None:
+        self.results = results
+        self.calls: list[tuple[tuple[str, ...], bytes | None, float]] = []
+
+    def run(
+        self, args: tuple[str, ...], input_data: bytes | None, timeout: float
+    ) -> ProcessResult:
+        self.calls.append((args, input_data, timeout))
+        result = self.results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
+def completed(
+    stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0
+) -> ProcessResult:
+    return ProcessResult(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+INVENTORY = (
+    b"haiku \xe2\x86\x92 Anthropic \xc2\xb7 claude-haiku\n"
+    b"terra \xe2\x86\x92 Codex CLI \xc2\xb7 gpt-5.6-terra\n"
+)
+
+
+class VoiceInventoryTests(unittest.TestCase):
+    def test_parses_multiword_voice_names_case_insensitively(self) -> None:
+        voices = parse_voice_inventory(
+            "Samantha            en_US    # Hello\n"
+            "Eddy (English (US)) en_US    # Hello\n"
+        )
+
+        self.assertEqual(voices["samantha"], "Samantha")
+        self.assertEqual(voices["eddy (english (us))"], "Eddy (English (US))")
+
+    def test_rejects_malformed_or_duplicate_voice_rows(self) -> None:
+        for text in ("not a voice row\n", "Samantha en_US # one\nSAMANTHA en_US # two\n"):
+            with self.subTest(text=text), self.assertRaises(VoiceRouterError):
+                parse_voice_inventory(text)
+
+
+class OrchestrationTests(unittest.TestCase):
+    def run_router(
+        self,
+        transcript: bytes,
+        results: list[ProcessResult | Exception],
+        *,
+        config_data: bytes | None = None,
+    ) -> tuple[int, FakeRunner, str]:
+        runner = FakeRunner(results)
+        stderr = StringIO()
+        exit_code = run_voice_router(
+            transcript,
+            runner=runner,
+            config_data=config_data,
+            stderr=stderr,
+        )
+        self.assertEqual(runner.results, [])
+        return exit_code, runner, stderr.getvalue()
+
+    def test_success_calls_inventory_generation_copy_and_speech_once_in_order(self) -> None:
+        answer = b"Tender smoke rises\nBrisket rests beneath the stars\nSummer on the plate\n"
+        code, runner, diagnostics = self.run_router(
+            b"Hey haiku, write about brisket",
+            [completed(INVENTORY), completed(answer), completed(), completed()],
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(diagnostics, "")
+        self.assertEqual(
+            [call[0] for call in runner.calls],
+            [
+                ("llm-now", "--aliases"),
+                ("llm-now", "--alias", "haiku"),
+                ("/usr/bin/pbcopy",),
+                ("/usr/bin/say",),
+            ],
+        )
+        prompt = runner.calls[1][1]
+        self.assertIsNotNone(prompt)
+        self.assertTrue(prompt.endswith(b"\n\nwrite about brisket"))
+        self.assertEqual(runner.calls[2][1], answer)
+        self.assertEqual(runner.calls[3][1], answer)
+        self.assertEqual([call[2] for call in runner.calls], [5, 50, 5, 120])
+
+    def test_selected_voice_and_rate_are_validated_before_generation(self) -> None:
+        config = b"[terra]\nvoice = 'samantha'\nrate = 205\n"
+        voices = b"Samantha en_US    # Hello\nAlex en_US    # Hello\n"
+        code, runner, _ = self.run_router(
+            b"Tara, answer this",
+            [completed(INVENTORY), completed(voices), completed(b"Answer"), completed(), completed()],
+            config_data=config,
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            [call[0] for call in runner.calls],
+            [
+                ("llm-now", "--aliases"),
+                ("/usr/bin/say", "-v", "?"),
+                ("llm-now", "--alias", "terra"),
+                ("/usr/bin/pbcopy",),
+                ("/usr/bin/say", "-v", "Samantha", "-r", "205"),
+            ],
+        )
+
+    def test_unavailable_voice_fails_before_generation(self) -> None:
+        code, runner, diagnostics = self.run_router(
+            b"terra, answer this",
+            [completed(INVENTORY), completed(b"Alex en_US    # Hello\n"), completed()],
+            config_data=b"[terra]\nvoice = 'Samantha'\n",
+        )
+
+        self.assertEqual(code, 1)
+        self.assertIn("Samantha", diagnostics)
+        self.assertEqual(runner.calls[-1][0], ("/usr/bin/say",))
+        self.assertNotIn(("llm-now", "--alias", "terra"), [call[0] for call in runner.calls])
+
+    def test_rejected_input_speaks_retry_without_generation_or_clipboard(self) -> None:
+        code, runner, _ = self.run_router(
+            b"unknown, answer this",
+            [completed(INVENTORY), completed()],
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual([call[0] for call in runner.calls], [("llm-now", "--aliases"), ("/usr/bin/say",)])
+        self.assertIn(b"try again", runner.calls[-1][1] or b"")
+
+    def test_malformed_inventory_speaks_retry_and_preserves_diagnostics_locally(self) -> None:
+        code, runner, diagnostics = self.run_router(
+            b"haiku, answer this",
+            [completed(b"malformed\n", b"inventory warning"), completed()],
+        )
+
+        self.assertEqual(code, 0)
+        self.assertIn("invalid alias inventory", diagnostics)
+        self.assertNotIn(b"inventory warning", runner.calls[-1][1] or b"")
+
+    def test_provider_failures_never_reach_clipboard_or_spoken_payload(self) -> None:
+        failures: list[ProcessResult | Exception] = [
+            completed(stderr=b"secret provider detail", returncode=2),
+            ProcessTimedOut(("llm-now", "--alias", "haiku"), 50),
+            completed(stdout=b"   \n"),
+            completed(stdout=b"bad \xff output"),
+            completed(stdout=b"unsafe\x1b[31m text"),
+            completed(stdout=b"unsafe [[slnc 100]] text"),
+            completed(stdout=b"unsafe\x00 text"),
+        ]
+
+        for failure in failures:
+            with self.subTest(failure=failure):
+                code, runner, diagnostics = self.run_router(
+                    b"haiku, answer this",
+                    [completed(INVENTORY), failure, completed()],
+                )
+                self.assertEqual(code, 0)
+                self.assertNotIn(("/usr/bin/pbcopy",), [call[0] for call in runner.calls])
+                self.assertIn(b"request failed", (runner.calls[-1][1] or b"").lower())
+                self.assertNotIn(b"secret provider detail", runner.calls[-1][1] or b"")
+                self.assertTrue(diagnostics)
+
+    def test_clipboard_failure_prevents_answer_speech(self) -> None:
+        answer = b"answer"
+        code, runner, _ = self.run_router(
+            b"haiku, answer this",
+            [completed(INVENTORY), completed(answer), completed(returncode=1), completed()],
+        )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(runner.calls[-1][0], ("/usr/bin/say",))
+        self.assertNotEqual(runner.calls[-1][1], answer)
+
+    def test_speech_failure_after_copy_leaves_answer_without_new_notice(self) -> None:
+        answer = b"answer"
+        code, runner, _ = self.run_router(
+            b"haiku, answer this",
+            [completed(INVENTORY), completed(answer), completed(), completed(returncode=1)],
+        )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(len(runner.calls), 4)
+        self.assertEqual(runner.calls[2][1], answer)
+        self.assertEqual(runner.calls[3][1], answer)
+
+    def test_cancellation_stops_downstream_work_at_each_side_effect(self) -> None:
+        for prior, cancellation_index in (
+            ([completed(INVENTORY), completed(b"answer")], 2),
+            ([completed(INVENTORY), completed(b"answer"), completed()], 3),
+        ):
+            with self.subTest(cancellation_index=cancellation_index):
+                runner = FakeRunner([*prior, ProcessCancelled()])
+                code = run_voice_router(
+                    b"haiku, answer this", runner=runner, config_data=None, stderr=StringIO()
+                )
+                self.assertEqual(code, 130)
+                self.assertEqual(len(runner.calls), cancellation_index + 1)
+
+    def test_missing_command_is_a_setup_failure(self) -> None:
+        runner = FakeRunner([FileNotFoundError("llm-now") , completed()])
+        stderr = StringIO()
+
+        code = run_voice_router(b"haiku, answer this", runner=runner, stderr=stderr)
+
+        self.assertEqual(code, 1)
+        self.assertIn("llm-now", stderr.getvalue())
+        self.assertEqual(runner.calls[-1][0], ("/usr/bin/say",))
+
+    def test_preflight_missing_side_effect_command_starts_no_llm_now_process(self) -> None:
+        for missing in ("/usr/bin/pbcopy", "/usr/bin/say"):
+            with self.subTest(missing=missing):
+                runner = FakeRunner([] if missing.endswith("say") else [completed()])
+                stderr = StringIO()
+                code = run_voice_router(
+                    b"haiku, answer this",
+                    runner=runner,
+                    stderr=stderr,
+                    command_available=lambda command: command != missing,
+                )
+                self.assertEqual(code, 1)
+                self.assertNotIn(("llm-now", "--aliases"), [call[0] for call in runner.calls])
+                self.assertIn(missing, stderr.getvalue())
+
+
+class FakeProcess:
+    def __init__(self, communicate_results: list[object]) -> None:
+        self.pid = 4321
+        self.returncode: int | None = None
+        self.communicate_results = communicate_results
+        self.inputs: list[bytes | None] = []
+
+    def communicate(self, input: bytes | None = None, timeout: float | None = None):
+        self.inputs.append(input)
+        result = self.communicate_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+
+class SubprocessRunnerTests(unittest.TestCase):
+    def test_timeout_terminates_and_reaps_the_process_group(self) -> None:
+        process = FakeProcess([
+            subprocess.TimeoutExpired(("slow",), 5),
+            (b"", b""),
+        ])
+        spawned: list[dict[str, object]] = []
+        signals: list[tuple[int, int]] = []
+
+        def popen(args: tuple[str, ...], **kwargs: object) -> FakeProcess:
+            spawned.append({"args": args, **kwargs})
+            return process
+
+        def killpg(pid: int, sent_signal: int) -> None:
+            signals.append((pid, sent_signal))
+            process.returncode = -sent_signal
+
+        runner = SubprocessRunner(popen=popen, killpg=killpg)
+
+        with self.assertRaises(ProcessTimedOut):
+            runner.run(("slow",), b"input", 5)
+
+        self.assertTrue(spawned[0]["start_new_session"])
+        self.assertFalse(spawned[0]["shell"])
+        self.assertEqual(signals, [(4321, signal.SIGTERM)])
+        self.assertEqual(process.communicate_results, [])
+
+    def test_timeout_force_kills_when_termination_does_not_finish(self) -> None:
+        process = FakeProcess([
+            subprocess.TimeoutExpired(("slow",), 5),
+            subprocess.TimeoutExpired(("slow",), 1),
+            (b"", b""),
+        ])
+        signals: list[int] = []
+
+        def killpg(_pid: int, sent_signal: int) -> None:
+            signals.append(sent_signal)
+            if sent_signal == signal.SIGKILL:
+                process.returncode = -sent_signal
+
+        runner = SubprocessRunner(popen=lambda _args, **_kwargs: process, killpg=killpg)
+
+        with self.assertRaises(ProcessTimedOut):
+            runner.run(("slow",), None, 5)
+
+        self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
+        self.assertEqual(process.communicate_results, [])
+
+    def test_precancelled_runner_never_spawns(self) -> None:
+        spawned = False
+
+        def popen(_args: tuple[str, ...], **_kwargs: object) -> FakeProcess:
+            nonlocal spawned
+            spawned = True
+            return FakeProcess([])
+
+        runner = SubprocessRunner(popen=popen)
+        runner.cancel()
+
+        with self.assertRaises(ProcessCancelled):
+            runner.run(("never",), None, 5)
+        self.assertFalse(spawned)
+
+    def test_active_cancellation_stops_and_reaps_the_process_group(self) -> None:
+        signals: list[int] = []
+        runner: SubprocessRunner
+
+        class CancellingProcess(FakeProcess):
+            def communicate(self, input: bytes | None = None, timeout: float | None = None):
+                self.inputs.append(input)
+                runner.cancel()
+                self.returncode = -signal.SIGKILL
+                return b"", b""
+
+        process = CancellingProcess([])
+
+        def killpg(_pid: int, sent_signal: int) -> None:
+            signals.append(sent_signal)
+
+        runner = SubprocessRunner(popen=lambda _args, **_kwargs: process, killpg=killpg)
+
+        with self.assertRaises(ProcessCancelled):
+            runner.run(("slow",), None, 50)
+
+        self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
+        self.assertEqual(process.inputs, [None])
 
 
 if __name__ == "__main__":
