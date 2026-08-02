@@ -115,6 +115,10 @@ export type InteractiveAliasResult =
   | { kind: "fresh" }
   | { kind: "cancelled"; exitCode: 130 };
 
+export type InteractiveAliasSelectionResult =
+  | { kind: "selected"; alias: string; selection: AliasRecord }
+  | { kind: "cancelled"; exitCode: 130 };
+
 export interface SelectionDependencies {
   runtime: RuntimeGateway;
   prompter: SearchablePrompter;
@@ -163,7 +167,7 @@ export function sanitizePromptText(text: string): string {
 export function formatSelection(selection: AliasRecord): string {
   const provider = providerLabel(selection.provider);
   const model = selection.model === null
-    ? "provider default"
+    ? "default model"
     : sanitizePromptText(selection.model);
   return `${provider} · ${model}`;
 }
@@ -183,30 +187,68 @@ export function formatAliasInventory(
     .join("\n");
 }
 
-export async function selectAliasOrFresh(
+type FormatAliasOption = (
+  alias: string,
+  selection: AliasRecord,
+) => { label: string; hint: string };
+
+function defaultAliasOption(alias: string, selection: AliasRecord) {
+  return {
+    label: alias,
+    hint: formatSelection(selection),
+  };
+}
+
+function formatAliasOptions(
   aliases: Readonly<Record<string, AliasRecord>>,
-  prompter: SearchablePrompter,
-): Promise<InteractiveAliasResult> {
-  const aliasOptions = sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => {
+  formatOption: FormatAliasOption = defaultAliasOption,
+): PromptOption[] {
+  return sortPromptOptions(Object.entries(aliases).map(([alias, selection]) => {
+    const formatted = formatOption(alias, selection);
     return {
       value: alias,
-      label: sanitizePromptText(alias),
-      hint: formatSelection(selection),
+      label: sanitizePromptText(formatted.label),
+      hint: sanitizePromptText(formatted.hint),
     };
   }));
-  const options: PromptOption[] = [
-    ...aliasOptions,
-    { value: false, label: "Select a new provider and model…" },
-  ];
-  const value = await prompter.select("Choose an alias", options);
-  if (value === null) return { kind: "cancelled", exitCode: 130 };
-  if (value === false) return { kind: "fresh" };
+}
+
+function resolveAliasChoice(
+  value: PromptValue,
+  aliases: Readonly<Record<string, AliasRecord>>,
+): { alias: string; selection: AliasRecord } {
   if (typeof value !== "string" || !Object.hasOwn(aliases, value)) {
     throw new RangeError("Prompter returned an invalid alias choice.");
   }
   const selection = aliases[value];
   if (selection === undefined) throw new RangeError("Alias choice was unavailable.");
-  return { kind: "selected", selection };
+  return { alias: value, selection };
+}
+
+export async function selectAlias(
+  aliases: Readonly<Record<string, AliasRecord>>,
+  prompter: SearchablePrompter,
+  formatOption: FormatAliasOption = defaultAliasOption,
+): Promise<InteractiveAliasSelectionResult> {
+  const options = formatAliasOptions(aliases, formatOption);
+  const value = await prompter.select("Choose a saved shortcut", options);
+  if (value === null) return { kind: "cancelled", exitCode: 130 };
+  const resolved = resolveAliasChoice(value, aliases);
+  return { kind: "selected", alias: resolved.alias, selection: resolved.selection };
+}
+
+export async function selectAliasOrFresh(
+  aliases: Readonly<Record<string, AliasRecord>>,
+  prompter: SearchablePrompter,
+): Promise<InteractiveAliasResult> {
+  const options: PromptOption[] = [
+    ...formatAliasOptions(aliases),
+    { value: false, label: "Select a new provider and model…" },
+  ];
+  const value = await prompter.select("Choose an alias", options);
+  if (value === null) return { kind: "cancelled", exitCode: 130 };
+  if (value === false) return { kind: "fresh" };
+  return { kind: "selected", selection: resolveAliasChoice(value, aliases).selection };
 }
 
 function selectedString(
@@ -270,7 +312,7 @@ export async function selectProviderAndModel(
         continue;
       }
 
-      const defaultOptions: PromptOption[] = [{ value: false, label: "provider default" }];
+      const defaultOptions: PromptOption[] = [{ value: false, label: "default model" }];
       const defaultChoice = await deps.prompter.select("Choose a model", defaultOptions);
       if (defaultChoice === null) return { kind: "cancelled", exitCode: 130 };
       if (defaultChoice !== false) throw new RangeError("Prompter returned an invalid model choice.");

@@ -222,24 +222,44 @@ printf 'Reply with a short greeting.' |
 
 Repeat with `codex-cli`. Both must use the authenticated CLI's default model. Confirm that `default` remains a usage error for every non-CLI provider.
 
-### MT-10: Interactive discovery
+### MT-10: Adaptive launcher and interactive discovery
 
-Make at least two providers available, then run:
+Start with an isolated config that contains no aliases, make at least two providers available,
+then run the bare executable with stdout redirected:
 
 ```bash
-"$BIN" --input "Write a two-line poem about rain." >stdout.txt
+"$BIN" >stdout.txt
 ```
 
-Keep stderr attached to the terminal. Confirm that:
+Keep stderr attached to the terminal. Confirm that the root asks “What would you like to do?”
+and contains exactly:
 
-- with no saved aliases, the provider picker opens directly on stderr;
+- “Choose a model to use…”; and
+- “Manage connections…”.
+
+Opening the root must not display discovery progress or access a provider. Choose “Choose a
+model to use…” and confirm that discovery begins only then. Select a provider and model, enter
+`Write a two-line poem about rain.` at `Prompt for PROVIDER · MODEL`, and confirm that:
+
 - providers and models are sorted deterministically, and typing filters each list without changing the selected raw identifier;
 - selecting a provider displays its filtered model picker;
-- arrow keys and Enter select the highlighted option, while Ctrl-C cancels;
+- arrow keys and Enter select the highlighted option;
 - the final response appears only in `stdout.txt`;
 - the response is followed by a clean terminal boundary on stderr even when it has no trailing newline or leaves SGR styling active;
 - the green contextual alias field emphasizes the selected provider and raw model and explains that Enter exits; and
 - machine-controlled work completes within approximately 60 seconds, excluding human menu time.
+
+Save that target as `daily`, then run bare `"$BIN" >stdout.txt` again. The configured root must
+contain exactly “Run with a saved shortcut…”, “Choose another model…”, and “Manage
+connections…”. Choosing the shortcut route must open “Choose a saved shortcut”, filter to
+`daily`, ask `Prompt for daily · PROVIDER · MODEL`, generate once, and bypass provider
+discovery and model listing. A delegated CLI model must appear as `default model`.
+
+Finally, repeat and cancel at the root, shortcut picker, provider picker, model picker, work
+prompt, and “What would you like to manage?” submenu. Escape or Ctrl-C at every
+pre-generation boundary must exit `130`, generate nothing, and leave stdout empty.
+Management must contain only “Discover available providers…” and “Add or manage API keys…”;
+opening it alone must not discover providers or access the credential store.
 
 ## Alias lifecycle
 
@@ -263,7 +283,12 @@ The model value is `null` when a supported CLI provider uses its default. Confir
 
 ### MT-12: Use an alias from another directory
 
-First run an interactive call with no explicit selection. Confirm that the sorted alias picker appears before discovery, typing `dai` filters to `daily`, and selecting it bypasses provider/model discovery and does not show another alias field. Repeat through “Select a new provider and model…”, choose the provider/model already stored as `daily`, and confirm the CLI reports that existing alias, suggests `llm-now daily --input "<prompt>"`, and does not show the alias field. Then verify deterministic non-interactive reuse from another directory:
+First run the bare command and choose “Run with a saved shortcut…”. Confirm that the focused
+“Choose a saved shortcut” picker is sorted, typing `dai` filters to `daily`, and selecting it
+bypasses provider/model discovery and does not show another alias field. Repeat through
+“Choose another model…”, choose the provider/model already stored as `daily`, and confirm the
+CLI reports that existing alias, suggests `llm-now daily --input "<prompt>"`, and does not
+show the alias field. Then verify deterministic non-interactive reuse from another directory:
 
 ```bash
 mkdir -p "$TEST_ROOT/alias-reuse"
@@ -665,13 +690,13 @@ Replace `TARGET_ID` with the exact candidate target, such as `macos-arm64` or `l
 
 ### MT-36: Add, replace, and delete a provider fallback
 
-In a disposable logged-in user account, obtain a temporary revocable provider credential and keep it out of the shell environment. Run bare `"$BIN"`, choose “Add or manage API keys…”, select the provider, and paste the value only into the hidden field.
+In a disposable logged-in user account, obtain a temporary revocable provider credential and keep it out of the shell environment. Run bare `"$BIN"`, choose “Manage connections…”, then choose “Add or manage API keys…”, select the provider, and paste the value only into the hidden field.
 
 Confirm that invalid input and failed authentication write nothing; final save defaults to No; acceptance creates one provider record; and stdout, stderr, terminal capture, aliases, and config files contain no credential. Repeat with a second temporary credential. Declining or failing replacement must preserve the old record; accepting a verified replacement must change it once. Finally delete the record, confirming deletion defaults to No and a concurrent/already-absent delete remains successful. Revoke both temporary credentials after testing.
 
 ### MT-37: Verify environment precedence and fallback behavior
 
-With both a stored fallback and a recognized environment credential present, make the two credentials distinguishable through provider-side test-account evidence without printing either value. Generation must use the environment credential and make no vault read. Remove the environment variable and repeat; generation must use the stored fallback. Restore the environment variable, delete the stored fallback through setup, and confirm the CLI explains that the provider remains available through the environment source.
+With both a stored fallback and a recognized environment credential present, make the two credentials distinguishable through provider-side test-account evidence without printing either value. Generation must use the environment credential and make no vault read. Remove the environment variable and repeat; generation must use the stored fallback. Restore the environment variable, delete the stored fallback through “Manage connections…”, and confirm the CLI explains that the provider remains available through the environment source.
 
 An authentication failure from the selected source must fail closed. The CLI must not retry the other source, switch provider, or overwrite/delete a stored record.
 

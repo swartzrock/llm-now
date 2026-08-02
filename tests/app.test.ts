@@ -6,7 +6,11 @@ import {
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
 import pc from "picocolors";
-import { AliasStoreError, type SaveAliasResult } from "../src/aliases.ts";
+import {
+  AliasStoreError,
+  type AliasDocument,
+  type SaveAliasResult,
+} from "../src/aliases.ts";
 import { renderHelpText } from "../src/args.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import { createRuntimeGateway } from "../src/runtime.ts";
@@ -529,12 +533,12 @@ describe("alias inventory", () => {
 });
 
 describe("one-shot application", () => {
-  test("routes a bare TTY invocation into setup before reading generation input", async () => {
+  test("shows the exact configured adaptive root without starting discovery or work", async () => {
     const seen: Array<{ message: string; options: PromptOption[] }> = [];
     const stdin = {
       isTTY: true,
       async *[Symbol.asyncIterator]() {
-        throw new Error("setup must not resolve a generation prompt");
+        throw new Error("the root must not resolve a generation prompt");
       },
     };
     const app = dependencies({
@@ -551,14 +555,321 @@ describe("one-shot application", () => {
 
     expect(await runApplication(app.value)).toBe(130);
     expect(app.stdout.text()).toBe("");
-    expect(app.runtime.calls.generate).toBe(0);
-    expect(app.runtime.calls.discover).toBe(0);
-    expect(seen[0]?.message).toBe("What would you like to set up?");
-    expect(seen[0]?.options.map(({ label }) => label)).toEqual([
-      "daily",
-      "Discover available providers…",
-      "Add or manage API keys…",
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+    expect(seen).toEqual([{
+      message: "What would you like to do?",
+      options: [
+        { value: "launcher:run-shortcut", label: "Run with a saved shortcut…" },
+        { value: "launcher:choose-model", label: "Choose another model…" },
+        { value: "launcher:manage-connections", label: "Manage connections…" },
+      ],
+    }]);
+  });
+
+  test("shows the exact unconfigured adaptive root without starting discovery", async () => {
+    const seen: Array<{ message: string; options: PromptOption[] }> = [];
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({ choices: [null], seen }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      runtime: runtime({
+        discover: async () => {
+          throw new Error("rendering the root must not discover providers");
+        },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(app.stdout.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+    expect(seen).toEqual([{
+      message: "What would you like to do?",
+      options: [
+        { value: "launcher:choose-model", label: "Choose a model to use…" },
+        { value: "launcher:manage-connections", label: "Manage connections…" },
+      ],
+    }]);
+  });
+
+  test("runs a selected shortcut with one alias snapshot through the shared output tail", async () => {
+    const seen: Array<{ message: string; options: PromptOption[] }> = [];
+    const inputMessages: string[] = [];
+    let loads = 0;
+    let saves = 0;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      prompter: prompts({
+        choices: ["launcher:run-shortcut", "daily"],
+        names: ["hello"],
+        seen,
+        inputMessages,
+      }),
+      loadAliases: async () => {
+        loads += 1;
+        return {
+          version: 1,
+          aliases: {
+            daily: loads === 1
+              ? { provider: "openai", model: "gpt-5" }
+              : { provider: "ollama", model: "qwen" },
+          },
+        };
+      },
+      runtime: runtime({
+        generate: async (provider, model, prompt) => {
+          expect({ provider, model, prompt }).toEqual({
+            provider: "openai",
+            model: "gpt-5",
+            prompt: "hello",
+          });
+          return "shortcut response";
+        },
+      }),
+      saveAlias: async () => {
+        saves += 1;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(loads).toBe(1);
+    expect(saves).toBe(0);
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
+    expect(app.stdout.text()).toBe("shortcut response");
+    expect(app.stderr.text()).toBe("\u001b[0m\n\n");
+    expect(seen.map(({ message }) => message)).toEqual([
+      "What would you like to do?",
+      "Choose a saved shortcut",
     ]);
+    expect(seen[1]?.options).toEqual([
+      { value: "daily", label: "daily", hint: "OpenAI · gpt-5" },
+    ]);
+    expect(inputMessages).toEqual(["Prompt for daily · OpenAI · gpt-5"]);
+  });
+
+  test("cancels the shortcut picker or prompt without generating response bytes", async () => {
+    const scenarios = [
+      {
+        name: "shortcut picker",
+        choices: ["launcher:run-shortcut", null],
+        names: [] as Array<string | null>,
+      },
+      {
+        name: "shortcut prompt",
+        choices: ["launcher:run-shortcut", "daily"],
+        names: [null],
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const app = dependencies({
+        args: [],
+        stdin: input("", true),
+        stderrTty: true,
+        prompter: prompts({ choices: scenario.choices, names: scenario.names }),
+        loadAliases: async () => ({
+          version: 1,
+          aliases: { daily: { provider: "openai", model: "gpt-5" } },
+        }),
+      });
+
+      expect(await runApplication(app.value), scenario.name).toBe(130);
+      expect(app.stdout.text(), scenario.name).toBe("");
+      expect(app.runtime.calls, scenario.name).toEqual({ discover: 0, list: 0, generate: 0 });
+    }
+  });
+
+  test("opens the exact static management submenu without starting either operation", async () => {
+    const seen: Array<{ message: string; options: PromptOption[] }> = [];
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({
+        choices: ["launcher:manage-connections", null],
+        seen,
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      runtime: runtime({
+        discover: async () => {
+          throw new Error("opening management must not discover providers");
+        },
+      }),
+      credentialVault: {
+        get: async () => {
+          throw new Error("opening management must not read the vault");
+        },
+        set: async () => {
+          throw new Error("opening management must not write the vault");
+        },
+        delete: async () => {
+          throw new Error("opening management must not delete from the vault");
+        },
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(app.stdout.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+    expect(seen[1]).toEqual({
+      message: "What would you like to manage?",
+      options: [
+        { value: "setup:discover-providers", label: "Discover available providers…" },
+        { value: "setup:manage-api-keys", label: "Add or manage API keys…" },
+      ],
+    });
+  });
+
+  test("configured and unconfigured model actions collect one prompt and generate once", async () => {
+    const scenarios: Array<{
+      name: string;
+      aliases: AliasDocument["aliases"];
+      actionLabel: string;
+      names: string[];
+      expectedInputMessages: string[];
+    }> = [
+      {
+        name: "configured",
+        aliases: { daily: { provider: "ollama" as const, model: "qwen" } },
+        actionLabel: "Choose another model…",
+        names: ["hello"],
+        expectedInputMessages: ["Prompt for Ollama · qwen"],
+      },
+      {
+        name: "unconfigured",
+        aliases: {},
+        actionLabel: "Choose a model to use…",
+        names: ["hello", ""],
+        expectedInputMessages: [
+          "Prompt for Ollama · qwen",
+          "Enter an alias name for Ollama · qwen (Enter to exit)",
+        ],
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const seen: Array<{ message: string; options: PromptOption[] }> = [];
+      const inputMessages: string[] = [];
+      let loads = 0;
+      const app = dependencies({
+        args: [],
+        stdin: input("", true),
+        stderrTty: true,
+        env: { NO_COLOR: "1" },
+        prompter: prompts({
+          choices: ["launcher:choose-model", "ollama", "qwen"],
+          names: scenario.names,
+          seen,
+          inputMessages,
+        }),
+        loadAliases: async () => {
+          loads += 1;
+          return { version: 1, aliases: scenario.aliases };
+        },
+        runtime: runtime({
+          providers: ["ollama"],
+          generate: async (provider, model, prompt) => {
+            expect({ provider, model, prompt }, scenario.name).toEqual({
+              provider: "ollama",
+              model: "qwen",
+              prompt: "hello",
+            });
+            return `${scenario.name} response`;
+          },
+        }),
+      });
+
+      expect(await runApplication(app.value), scenario.name).toBe(0);
+      expect(loads, scenario.name).toBe(1);
+      expect(app.runtime.calls, scenario.name).toEqual({ discover: 1, list: 1, generate: 1 });
+      expect(app.stdout.text(), scenario.name).toBe(`${scenario.name} response`);
+      expect(seen[0]?.options.find(({ value }) => value === "launcher:choose-model")?.label)
+        .toBe(scenario.actionLabel);
+      expect(seen.slice(1).map(({ message }) => message), scenario.name).toEqual([
+        "Choose a provider",
+        "Choose a model",
+      ]);
+      expect(inputMessages, scenario.name).toEqual(scenario.expectedInputMessages);
+      if (scenario.name === "configured") {
+        expect(app.stderr.text()).toContain(
+          "◆ Ollama · qwen is already saved as alias daily",
+        );
+      }
+    }
+  });
+
+  test("passes a CLI default model through contextual input and generation as null", async () => {
+    const inputMessages: string[] = [];
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({
+        choices: ["launcher:choose-model", "codex-cli", false],
+        names: ["hello", ""],
+        inputMessages,
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      runtime: runtime({
+        providers: ["codex-cli"],
+        listModels: async () => [],
+        generate: async (provider, model, prompt) => {
+          expect({ provider, model, prompt }).toEqual({
+            provider: "codex-cli",
+            model: null,
+            prompt: "hello",
+          });
+          return "default response";
+        },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("default response");
+    expect(inputMessages).toEqual([
+      "Prompt for Codex CLI · default model",
+      expect.stringContaining("Codex CLI · default model"),
+    ]);
+  });
+
+  test("cancels fresh provider, model, or target prompts before generation", async () => {
+    const scenarios = [
+      {
+        name: "provider",
+        choices: ["launcher:choose-model", null],
+        names: [] as Array<string | null>,
+      },
+      {
+        name: "model",
+        choices: ["launcher:choose-model", "ollama", null],
+        names: [] as Array<string | null>,
+      },
+      {
+        name: "target prompt",
+        choices: ["launcher:choose-model", "ollama", "qwen"],
+        names: [null],
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const app = dependencies({
+        args: [],
+        stdin: input("", true),
+        stderrTty: true,
+        prompter: prompts({ choices: scenario.choices, names: scenario.names }),
+        loadAliases: async () => ({ version: 1, aliases: {} }),
+        runtime: runtime({ providers: ["ollama"] }),
+      });
+
+      expect(await runApplication(app.value), scenario.name).toBe(130);
+      expect(app.runtime.calls.generate, scenario.name).toBe(0);
+      expect(app.stdout.text(), scenario.name).toBe("");
+    }
   });
 
   test("runs provider discovery only after the explicit setup choice", async () => {
@@ -567,14 +878,17 @@ describe("one-shot application", () => {
       args: [],
       stdin: input("", true),
       stderrTty: true,
-      prompter: prompts({ choices: ["setup:discover-providers", "ollama"], seen }),
+      prompter: prompts({
+        choices: ["launcher:manage-connections", "setup:discover-providers", "ollama"],
+        seen,
+      }),
       runtime: runtime({ providers: ["ollama", "codex-cli"] }),
     });
 
     expect(await runApplication(app.value)).toBe(0);
     expect(app.runtime.calls).toEqual({ discover: 1, list: 0, generate: 0 });
-    expect(seen[1]?.message).toBe("Choose an available provider");
-    expect(seen[1]?.options).toEqual([
+    expect(seen[2]?.message).toBe("Choose an available provider");
+    expect(seen[2]?.options).toEqual([
       { value: "codex-cli", label: "Codex CLI", hint: "authenticated CLI · available" },
       { value: "ollama", label: "Ollama", hint: "local server · available" },
     ]);
@@ -591,7 +905,9 @@ describe("one-shot application", () => {
       args: [],
       stdin: input("", true),
       stderrTty: true,
-      prompter: prompts({ choices: ["setup:discover-providers"] }),
+      prompter: prompts({
+        choices: ["launcher:manage-connections", "setup:discover-providers"],
+      }),
       runtime: runtime({
         discover: async () => {
           throw new RuntimeStageError("discovery", null, vaultError.message, vaultError);
@@ -615,14 +931,17 @@ describe("one-shot application", () => {
       args: [],
       stdin: input("", true),
       stderrTty: true,
-      prompter: prompts({ choices: ["setup:manage-api-keys", null], seen }),
+      prompter: prompts({
+        choices: ["launcher:manage-connections", "setup:manage-api-keys", null],
+        seen,
+      }),
       runtime: runtime({ providers: [] }),
     });
 
     expect(await runApplication(app.value)).toBe(130);
     expect(app.stdout.text()).toBe("");
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
-    expect(seen[1]?.options).toEqual([
+    expect(seen[2]?.options).toEqual([
       { value: "anthropic", label: "Anthropic", hint: "API key" },
       { value: "deepinfra", label: "DeepInfra", hint: "API key" },
       { value: "deepseek", label: "DeepSeek", hint: "API key" },
@@ -644,7 +963,7 @@ describe("one-shot application", () => {
       stdin: input("", true),
       stderrTty: true,
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai"],
+        choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai"],
         passwords: [invalid, null],
         passwordMessages,
       }),
@@ -681,7 +1000,7 @@ describe("one-shot application", () => {
         stderrTty: true,
         env: { ...terminalEnv, OPENAI_API_KEY: environmentCredential },
         prompter: prompts({
-          choices: ["setup:manage-api-keys", "openai", false],
+          choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai", false],
           passwords: [candidate],
           confirms: [true],
           passwordMessages,
@@ -787,7 +1106,7 @@ describe("one-shot application", () => {
     expect(seen).toEqual([{
       message: "Choose an alias",
       options: [
-        { value: "assistant", label: "assistant", hint: "Claude CLI · provider default" },
+        { value: "assistant", label: "assistant", hint: "Claude CLI · default model" },
         { value: "Daily", label: "Daily", hint: "Ollama · llama3" },
         { value: "fast", label: "fast", hint: "OpenAI · gpt-5" },
         { value: false, label: "Select a new provider and model…" },
@@ -914,7 +1233,7 @@ describe("one-shot application", () => {
     expect(inputMessages).toEqual([]);
     expect(saves).toBe(0);
     expect(app.stderr.text()).toContain(
-      "◆ Claude CLI · provider default is already saved as alias quick\n"
+      "◆ Claude CLI · default model is already saved as alias quick\n"
       + "  Next time, use llm-now quick --input \"<prompt>\"\n",
     );
   });
@@ -1773,7 +2092,7 @@ describe("API-key management", () => {
     const confirmInitialValues: Array<boolean | undefined> = [];
     const promptFlow: string[] = [];
     const basePrompter = prompts({
-      choices: ["setup:manage-api-keys", "openai", true, "gpt-5"],
+      choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai", true, "gpt-5"],
       passwords: [candidate],
       names: ["FAST"],
       confirms: [true],
@@ -1830,7 +2149,8 @@ describe("API-key management", () => {
     expect(invalidations).toEqual(["openai"]);
     expect(confirmInitialValues).toEqual([false]);
     expect(promptFlow).toEqual([
-      "select:What would you like to set up?",
+      "select:What would you like to do?",
+      "select:What would you like to manage?",
       "select:Choose an API-key provider",
       "confirm:Save this verified OpenAI API key?",
       "receipt",
@@ -1855,7 +2175,13 @@ describe("API-key management", () => {
     let saved: { name: string; model: string | null } | undefined;
     const app = management({
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", true, "safe-model"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          true,
+          "safe-model",
+        ],
         passwords: [candidate],
         names: [candidate, "safe-alias"],
         confirms: [true],
@@ -1889,7 +2215,7 @@ describe("API-key management", () => {
     const seen: Array<{ message: string; options: PromptOption[] }> = [];
     const app = management({
       env: { OPENAI_API_KEY: envSecret },
-      prompter: prompts({ choices: [null], seen }),
+      prompter: prompts({ choices: ["launcher:run-shortcut", null], seen }),
       loadAliases: async () => ({
         version: 1,
         aliases: { unsafe: { provider: "openai", model: `model-${envSecret}` } },
@@ -1904,7 +2230,7 @@ describe("API-key management", () => {
   test("invalid candidate and validation failure perform zero writes and preserve an old record", async () => {
     const invalid = management({
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai"],
+        choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai"],
         passwords: [" bad-secret ", null],
       }),
       runtime: runtime({ providers: [] }),
@@ -1918,7 +2244,12 @@ describe("API-key management", () => {
     const failed = management({
       initial: old,
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "replace"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          "replace",
+        ],
         confirms: [true],
         passwords: [candidate],
       }),
@@ -1940,7 +2271,12 @@ describe("API-key management", () => {
     const declined = management({
       initial: "u4-old-decline-sentinel",
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "replace"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          "replace",
+        ],
         confirms: [false],
         passwordMessages,
       }),
@@ -1961,7 +2297,12 @@ describe("API-key management", () => {
         new Error(`backend included ${replacement}`),
       ),
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "replace"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          "replace",
+        ],
         confirms: [true, true],
         passwords: [replacement],
       }),
@@ -1996,7 +2337,9 @@ describe("API-key management", () => {
         "openrouter",
         new Error(backendDetail),
       ),
-      prompter: prompts({ choices: ["setup:manage-api-keys", "openrouter"] }),
+      prompter: prompts({
+        choices: ["launcher:manage-connections", "setup:manage-api-keys", "openrouter"],
+      }),
       runtime: runtime({ providers: [] }),
     });
 
@@ -2031,7 +2374,9 @@ describe("API-key management", () => {
     const plain = management({
       getError: new CredentialVaultError("get", "openrouter", new Error("unavailable")),
       env: { NO_COLOR: "1" },
-      prompter: prompts({ choices: ["setup:manage-api-keys", "openrouter"] }),
+      prompter: prompts({
+        choices: ["launcher:manage-connections", "setup:manage-api-keys", "openrouter"],
+      }),
       runtime: runtime({ providers: [] }),
     });
     expect(await runApplication(plain.value)).toBe(1);
@@ -2097,7 +2442,12 @@ describe("API-key management", () => {
         new Error(backendDetail),
       ),
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "delete"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          "delete",
+        ],
         confirms: [true],
       }),
       runtime: runtime({ providers: [] }),
@@ -2126,7 +2476,13 @@ describe("API-key management", () => {
     const app = management({
       initial: old,
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "replace", false],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          "replace",
+          false,
+        ],
         confirms: [true, true],
         passwords: [replacement],
       }),
@@ -2145,9 +2501,28 @@ describe("API-key management", () => {
 
   test("cancellation at operation and replacement/delete consent mutates nothing", async () => {
     const scenarios = [
-      { choices: ["setup:manage-api-keys", "openai", null], confirms: [] },
-      { choices: ["setup:manage-api-keys", "openai", "replace"], confirms: [null] },
-      { choices: ["setup:manage-api-keys", "openai", "delete"], confirms: [null] },
+      {
+        choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai", null],
+        confirms: [],
+      },
+      {
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          "replace",
+        ],
+        confirms: [null],
+      },
+      {
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          "delete",
+        ],
+        confirms: [null],
+      },
     ] as const;
     for (const scenario of scenarios) {
       const app = management({
@@ -2169,7 +2544,7 @@ describe("API-key management", () => {
     for (const decision of [false, null] as const) {
       const app = management({
         prompter: prompts({
-          choices: ["setup:manage-api-keys", "openai"],
+          choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai"],
           passwords: ["u4-final-decision-sentinel"],
           confirms: [decision],
         }),
@@ -2187,21 +2562,33 @@ describe("API-key management", () => {
     const cases = [
       {
         prompter: prompts({
-          choices: ["setup:manage-api-keys", "openai", null],
+          choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai", null],
           passwords: [candidate],
           confirms: [true],
         }),
       },
       {
         prompter: prompts({
-          choices: ["setup:manage-api-keys", "openai", true, null],
+          choices: [
+            "launcher:manage-connections",
+            "setup:manage-api-keys",
+            "openai",
+            true,
+            null,
+          ],
           passwords: [candidate],
           confirms: [true],
         }),
       },
       {
         prompter: prompts({
-          choices: ["setup:manage-api-keys", "openai", true, "qwen"],
+          choices: [
+            "launcher:manage-connections",
+            "setup:manage-api-keys",
+            "openai",
+            true,
+            "qwen",
+          ],
           passwords: [candidate],
           names: [null],
           confirms: [true],
@@ -2209,7 +2596,13 @@ describe("API-key management", () => {
       },
       {
         prompter: prompts({
-          choices: ["setup:manage-api-keys", "openai", true, "qwen"],
+          choices: [
+            "launcher:manage-connections",
+            "setup:manage-api-keys",
+            "openai",
+            true,
+            "qwen",
+          ],
           passwords: [candidate],
           names: ["fast"],
           confirms: [true, null],
@@ -2239,7 +2632,7 @@ describe("API-key management", () => {
     let aliasSaves = 0;
     const app = management({
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai"],
+        choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai"],
         passwords: ["u4-empty-model-sentinel"],
         confirms: [true],
         inputMessages,
@@ -2265,7 +2658,12 @@ describe("API-key management", () => {
     const declined = management({
       initial: "u4-delete-decline-sentinel",
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "delete"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          "delete",
+        ],
         confirms: [false],
         confirmInitialValues: initialValues,
       }),
@@ -2280,7 +2678,12 @@ describe("API-key management", () => {
       initial: "u4-delete-stored-sentinel",
       env,
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", "delete"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          "delete",
+        ],
         confirms: [true],
       }),
       runtime: runtime({ providers: [] }),
@@ -2301,7 +2704,12 @@ describe("API-key management", () => {
       delete: async () => { deleteCalls += 1; return false; },
     };
     deleted.value.prompter = prompts({
-      choices: ["setup:manage-api-keys", "openai", "delete"],
+      choices: [
+        "launcher:manage-connections",
+        "setup:manage-api-keys",
+        "openai",
+        "delete",
+      ],
       confirms: [true],
     });
     expect(await runApplication(deleted.value)).toBe(0);
@@ -2313,7 +2721,13 @@ describe("API-key management", () => {
     const candidate = "u4-partial-success-sentinel";
     const promptEvents: string[] = [];
     const base = prompts({
-      choices: ["setup:manage-api-keys", "openai", true, "qwen"],
+      choices: [
+        "launcher:manage-connections",
+        "setup:manage-api-keys",
+        "openai",
+        true,
+        "qwen",
+      ],
       passwords: [candidate],
       names: ["fast"],
       confirms: [true],
@@ -2346,7 +2760,13 @@ describe("API-key management", () => {
     const confirmMessages: string[] = [];
     const app = management({
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", true, "qwen"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          true,
+          "qwen",
+        ],
         passwords: ["u4-alias-preflight-sentinel"],
         names: ["FAST"],
         confirms: [true, true],
@@ -2379,7 +2799,13 @@ describe("API-key management", () => {
     const savedNames: string[] = [];
     const app = management({
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", true, "qwen"],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          true,
+          "qwen",
+        ],
         passwords: ["prototype-alias-sentinel"],
         names: ["constructor"],
         confirms: [true],
@@ -2402,7 +2828,9 @@ describe("API-key management", () => {
   test("disabled target returns environment-only guidance without reading the vault", async () => {
     const app = management({
       enabled: false,
-      prompter: prompts({ choices: ["setup:manage-api-keys", "openai"] }),
+      prompter: prompts({
+        choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai"],
+      }),
       runtime: runtime({ providers: [] }),
     });
     expect(await runApplication(app.value)).toBe(1);
@@ -2442,7 +2870,12 @@ describe("API-key management", () => {
       stderrTty: true,
       runtime: { value: gateway, calls: { discover: 0, list: 0, generate: 0 } },
       prompter: prompts({
-        choices: ["setup:manage-api-keys", "openai", false],
+        choices: [
+          "launcher:manage-connections",
+          "setup:manage-api-keys",
+          "openai",
+          false,
+        ],
         passwords: [candidate],
         confirms: [true],
       }),

@@ -336,6 +336,7 @@
         <span><b>Topic</b> no-input-launcher-experience</span>
         <span><b>Focus</b> guide users through aliases, provider discovery, and commands</span>
         <span><b>Mode</b> repo-grounded</span>
+        <span><b>Status</b> Idea 1 + Idea 2 implemented on the feature branch</span>
       </div>
       <nav class="toc" aria-label="Document sections">
         <p class="eyebrow">Navigate</p>
@@ -424,7 +425,7 @@
             <span class="chip axis">State · intent · presentation</span>
           </div>
         </div>
-        <p><strong>Description:</strong> Preserve two stable concepts—work and management—while changing their emphasis using already-known state. A returning user sees “Run with a saved shortcut” first and “Manage connections and shortcuts” second. A user with no shortcuts sees “Choose a model to use” first and “Connect or manage providers” second. Each route opens a homogeneous searchable picker; provider discovery runs only after the user chooses a route that needs it.</p>
+        <p><strong>Description:</strong> Preserve two stable concepts—work and management—while changing their emphasis using already-known state. A returning user sees “Run with a saved shortcut…”, “Choose another model…”, and “Manage connections…”. A user with no shortcuts sees “Choose a model to use…” and “Manage connections…”. Each route opens a homogeneous picker; provider discovery runs only after the user chooses a route that needs it.</p>
         <div class="diagram" role="img" aria-label="Conceptual flow from known launcher state to a work or management route">
           <svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg">
             <defs>
@@ -686,7 +687,7 @@ $ llm-now setup
           <pre class="terminal"><span class="hot">READY · 4 SAVED SHORTCUTS</span>
 
 › Run with haiku
-  <span class="dim">Claude CLI · provider default</span>
+  <span class="dim">Claude CLI · default model</span>
   Run with local
   <span class="dim">Ollama · llama3</span></pre>
           <pre class="terminal"><span class="cyan">NO SAVED SHORTCUT YET</span>

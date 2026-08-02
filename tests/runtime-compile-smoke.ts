@@ -72,7 +72,7 @@ try {
       stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>\n  llm-now <alias>",
       stdoutLandmarks: [
         "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>\n  llm-now <alias>",
-        "Rules:\n  Run llm-now with no arguments in a terminal to set up providers and API keys.\n  A terminal alias with no input source asks for one prompt.\n  Otherwise, input comes from exactly one of --input or stdin.",
+        "Rules:\n  Run llm-now with no arguments in a terminal to open the adaptive launcher.\n  Launcher work asks for one prompt and generates in the same invocation.\n  Provider discovery starts only after you choose a route that needs it.\n  A terminal alias with no input source also asks for one prompt.\n  Otherwise, input comes from exactly one of --input or stdin.",
         "Options:\n  --aliases            List saved aliases\n  --input <text>       Prompt text",
         "API key environment variables:\n  ANTHROPIC_API_KEY",
         "  DEEPINFRA_TOKEN",
