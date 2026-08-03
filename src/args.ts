@@ -43,7 +43,8 @@ ${heading("Rules:")}
   Without shortcuts: “Create a new shortcut…”, “Run once with a provider and model…”,
   then “Manage connections…”.
   Creation uses “Use an available provider…” or “Add a provider with an API key…”.
-  Creation saves the provider/model target before its first prompt, then runs it once.
+  Creation saves the provider/model target and optional instructions before its first prompt.
+  Saved instructions are sent separately on every shortcut run.
   Run once generates without saving or offering a shortcut.
   Manage connections owns discovery and API-key addition, replacement, and deletion.
   Opening a launcher menu performs no provider discovery or credential access.
@@ -56,7 +57,7 @@ ${heading("Rules:")}
 ${heading("Options:")}
   ${literal("--aliases")}            List saved aliases
   ${literal("--input")} ${metadata("<text>")}       Prompt text
-  ${literal("--alias")} ${metadata("<name>")}       Saved provider/model selection
+  ${literal("--alias")} ${metadata("<name>")}       Saved shortcut selection
   ${literal("--provider")} ${metadata("<id>")}      Explicit provider
   ${literal("--model")} ${metadata("<id>")}         Explicit model, or default for a supported CLI provider
   ${literal("-h, --help")}           Show help

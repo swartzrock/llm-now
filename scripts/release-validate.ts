@@ -1,5 +1,5 @@
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { basename, delimiter, join } from "node:path";
+import { basename, join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
 import {
   NATIVE_VAULT_BUN_VERSION,
@@ -221,20 +221,29 @@ async function smoke(archivePath: string): Promise<void> {
 
     const configHome = join(temporary, "config");
     await mkdir(join(configHome, "llm-now"), { recursive: true });
+    const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.';
     await Bun.write(join(configHome, "llm-now", "aliases.json"), `${JSON.stringify({
-      version: 1,
+      version: 2,
       aliases: {
         zeta: { provider: "openai", model: "gpt-5" },
-        aliases: { provider: "codex-cli", model: null },
+        aliases: {
+          provider: "codex-cli",
+          model: null,
+          instructions: smokeInstructions,
+        },
       },
     }, null, 2)}\n`);
     const aliasEnvironment = process.platform === "win32"
       ? { APPDATA: configHome }
       : { XDG_CONFIG_HOME: configHome };
 
+    const inheritedEnvironment = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => name.toUpperCase() !== "PATH"),
+    );
     const env = {
-      ...process.env,
-      PATH: [temporary, process.env.PATH].filter(Boolean).join(delimiter),
+      ...inheritedEnvironment,
+      PATH: temporary,
+      ...(process.platform === "win32" ? {} : { SHELL: join(temporary, "missing-login-shell") }),
       ...aliasEnvironment,
     };
     const cases = [
@@ -247,8 +256,8 @@ async function smoke(archivePath: string): Promise<void> {
         stdout: "aliases → Codex CLI · provider default\nzeta → OpenAI · gpt-5\n",
         stderr: "",
       },
-      { args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:smoke", stderrIncludes: "" },
-      { args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:smoke", stderr: "" },
+      { args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:instruction-absent", stderrIncludes: "" },
+      { args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:instruction-present", stderr: "" },
     ] as const;
 
     for (const testCase of cases) {

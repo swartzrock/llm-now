@@ -117,6 +117,28 @@ describe("native release build", () => {
     expect(readme).not.toContain("$Version =");
   });
 
+  test("keeps packaged shortcut-instruction coverage hermetic and observable", async () => {
+    const releaseValidation = await Bun.file(
+      new URL("../scripts/release-validate.ts", import.meta.url),
+    ).text();
+    const fakeCli = await Bun.file(
+      new URL("./fixtures/fake-cli.ts", import.meta.url),
+    ).text();
+
+    expect(releaseValidation).toContain("version: 2");
+    expect(releaseValidation).toContain('Use "quoted" runtime smoke \\\\ transport.');
+    expect(fakeCli).toContain('Use "quoted" runtime smoke \\\\ transport.');
+    expect(releaseValidation).toContain("fake:instruction-present");
+    expect(releaseValidation).toContain("fake:instruction-absent");
+    expect(releaseValidation).toContain("PATH: temporary");
+    expect(releaseValidation).toContain('name.toUpperCase() !== "PATH"');
+    expect(releaseValidation).toContain("missing-login-shell");
+    expect(releaseValidation).not.toContain("process.env.PATH");
+    expect(fakeCli).toContain("unexpected fake CLI instruction configuration");
+    expect(fakeCli).toContain("unexpected fake CLI prompt");
+    expect(fakeCli).not.toContain("args.join");
+  });
+
   test("creates a deterministic archive containing one executable", () => {
     const bytes = Uint8Array.from([1, 2, 3, 4]);
     const first = createExecutableArchive("llm-now", bytes, testArchiveMtime);
