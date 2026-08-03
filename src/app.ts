@@ -16,6 +16,7 @@ import {
   normalizeAliasName,
   resolveAlias as resolveStoredAlias,
   resolveAliasPath,
+  sameAliasRecord,
   saveAlias as saveStoredAlias,
 } from "./aliases.ts";
 import {
@@ -246,12 +247,6 @@ async function collectOneShotPrompt(
     if (prompt === null) return null;
     if (promptValidationMessage(prompt) === undefined) return prompt;
   }
-}
-
-function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
-  return left.provider === right.provider
-    && left.model === right.model
-    && left.instructions === right.instructions;
 }
 
 type InstructionCaptureResult =

@@ -346,8 +346,7 @@ export async function saveAlias(
         [canonicalName]: storedAliasRecord(record),
       };
       const next: AliasDocument = {
-        version: document.version === 2
-            || Object.values(nextAliases).some((candidate) => candidate.instructions !== undefined)
+        version: document.version === 2 || record.instructions !== undefined
           ? 2
           : 1,
         aliases: nextAliases,
@@ -369,7 +368,7 @@ export async function saveAlias(
   }
 }
 
-function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
+export function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
   return left.provider === right.provider
     && left.model === right.model
     && left.instructions === right.instructions;

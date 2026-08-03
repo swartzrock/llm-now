@@ -1,4 +1,5 @@
 import {
+  BYOK_API_KEY_ENV_VARS,
   BYOK_PROVIDER_API_KEY_ENV_VARS,
   type ByokCloudProviderId,
   type ByokEnvironment,
@@ -303,17 +304,18 @@ export function createPersistenceBlocker(
       values.add(value);
     }
   };
-  for (const names of Object.values(BYOK_PROVIDER_API_KEY_ENV_VARS)) {
-    for (const name of names) {
-      const value = env[name];
-      if (value !== undefined) register(value, "environment");
-    }
+  for (const name of BYOK_API_KEY_ENV_VARS) {
+    const value = env[name];
+    if (value !== undefined) register(value, "environment");
   }
 
   return {
     register,
     blocks(text) {
-      return [...values].some((value) => text.includes(value));
+      for (const value of values) {
+        if (text.includes(value)) return true;
+      }
+      return false;
     },
   };
 }

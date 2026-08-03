@@ -14,6 +14,7 @@ import {
 } from "@swartzrock/byok-runtime/node";
 import {
   CredentialVaultError,
+  createSensitiveValueRegistry,
   type CredentialResolver,
   type ResolvedCredential,
   type SensitiveValueRegistry,
@@ -114,13 +115,12 @@ function redactInstruction(text: string, instructions: string | undefined): stri
   const serialized = JSON.stringify(instructions);
   const escaped = serialized.slice(1, -1);
   const transportEscaped = JSON.stringify(escaped).slice(1, -1);
-  const variants = [...new Set([instructions, serialized, escaped, transportEscaped])]
-    .filter((value) => value.length > 0)
-    .sort((left, right) => right.length - left.length);
-
-  let redacted = text;
-  for (const value of variants) redacted = redacted.replaceAll(value, "[REDACTED]");
-  return redacted;
+  return createSensitiveValueRegistry([
+    instructions,
+    serialized,
+    escaped,
+    transportEscaped,
+  ]).redact(text);
 }
 
 function runtimeStageError(
