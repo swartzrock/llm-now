@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@clack/prompts": "1.7.0",
-    "@swartzrock/byok-runtime": "2.1.0",
+    "@swartzrock/byok-runtime": "file:../cuecraft/byok-runtime",
     "picocolors": "1.1.1"
   }
 }

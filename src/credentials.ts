@@ -282,6 +282,42 @@ export interface SensitiveValueRegistry {
   redact(text: string): string;
 }
 
+export type PersistenceCredentialSource = "environment" | "validated" | "vault";
+
+export interface PersistenceBlocker {
+  register(value: string, source: PersistenceCredentialSource): void;
+  blocks(text: string): boolean;
+}
+
+const MINIMUM_ENVIRONMENT_BLOCKER_LENGTH = 8;
+
+export function createPersistenceBlocker(
+  env: ByokEnvironment = {},
+): PersistenceBlocker {
+  const values = new Set<string>();
+  const register = (value: string, source: PersistenceCredentialSource): void => {
+    if (
+      value.length > 0
+      && (source !== "environment" || value.length >= MINIMUM_ENVIRONMENT_BLOCKER_LENGTH)
+    ) {
+      values.add(value);
+    }
+  };
+  for (const names of Object.values(BYOK_PROVIDER_API_KEY_ENV_VARS)) {
+    for (const name of names) {
+      const value = env[name];
+      if (value !== undefined) register(value, "environment");
+    }
+  }
+
+  return {
+    register,
+    blocks(text) {
+      return [...values].some((value) => text.includes(value));
+    },
+  };
+}
+
 export function createSensitiveValueRegistry(
   initialValues: readonly string[] = [],
 ): SensitiveValueRegistry {

@@ -8,6 +8,7 @@ import {
   NATIVE_VAULT_SERVICE,
   createBunCredentialVault,
   createCredentialResolver,
+  createPersistenceBlocker,
   createSensitiveValueRegistry,
   isNativeVaultEnabled,
   nativeVaultName,
@@ -145,6 +146,22 @@ describe("native credential vault", () => {
 });
 
 describe("credential resolution and redaction", () => {
+  test("separates source-aware persistence blocking from broad output redaction", () => {
+    const blocker = createPersistenceBlocker({
+      OPENAI_API_KEY: "x",
+      ANTHROPIC_API_KEY: "12345678",
+    });
+    const sensitive = createSensitiveValueRegistry(["x", "12345678"]);
+
+    expect(blocker.blocks("ordinary x prose")).toBe(false);
+    expect(blocker.blocks("contains 12345678")).toBe(true);
+    blocker.register("y", "validated");
+    blocker.register("z", "vault");
+    expect(blocker.blocks("contains y")).toBe(true);
+    expect(blocker.blocks("contains z")).toBe(true);
+    expect(sensitive.redact("ordinary x prose")).toBe("ordinary [REDACTED] prose");
+  });
+
   test("uses the first nonempty provider environment value without reading the vault", async () => {
     let gets = 0;
     const env: ByokEnvironment = {
