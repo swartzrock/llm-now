@@ -376,10 +376,14 @@ describe("alias inventory", () => {
       loadAliases: async (path) => {
         operations.push(`load:${path}`);
         return {
-          version: 1,
+          version: 2,
           aliases: {
             zeta: { provider: "openai", model: "gpt-\u001b[31m5" },
-            alpha: { provider: "google", model: "gemini-2.5-pro" },
+            alpha: {
+              provider: "google",
+              model: "gemini-2.5-pro",
+              instructions: "hidden inventory role",
+            },
             middle: { provider: "claude-cli", model: null },
           },
         };
@@ -420,6 +424,7 @@ describe("alias inventory", () => {
       + "zeta → OpenAI · gpt-5\n",
     );
     expect(app.stdout.text()).not.toContain("\u001b");
+    expect(app.stdout.text()).not.toContain("hidden inventory role");
     expect(app.stderr.text()).toBe("");
     expect(stdinReads).toBe(0);
     expect(operations).toEqual(["load:/config/aliases.json"]);
@@ -704,8 +709,8 @@ describe("one-shot application", () => {
         events.push("models");
         return [{ id: "qwen", label: "Qwen" }];
       },
-      generate: async (provider, model, prompt) => {
-        events.push(`generate:${provider}:${model}:${prompt}`);
+      generate: async (provider, model, prompt, signal, instructions) => {
+        events.push(`generate:${provider}:${model}:${prompt}:${signal !== undefined}:${instructions}`);
         return "first response";
       },
     });
@@ -739,7 +744,7 @@ describe("one-shot application", () => {
     expect(events).toEqual([
       "models",
       "save:daily:ollama:qwen:  You are an architect  ",
-      "generate:ollama:qwen:first prompt",
+      "generate:ollama:qwen:first prompt:true:  You are an architect  ",
     ]);
     expect(instructionMessages).toEqual([
       "Optional instructions for this shortcut (leave blank for none)",
@@ -917,8 +922,8 @@ describe("one-shot application", () => {
         events.push(`validate:${provider}:${value === candidate}`);
         return [{ id: "gpt-5", label: "GPT-5" }];
       },
-      generate: async (provider, model, prompt) => {
-        events.push(`generate:${provider}:${model}:${prompt}`);
+      generate: async (provider, model, prompt, signal, instructions) => {
+        events.push(`generate:${provider}:${model}:${prompt}:${signal !== undefined}:${instructions}`);
         return "credential response";
       },
     });
@@ -953,7 +958,7 @@ describe("one-shot application", () => {
       "validate:openai:true",
       "key:openai",
       "shortcut:fast:openai:gpt-5:future role",
-      "generate:openai:gpt-5:credential prompt",
+      "generate:openai:gpt-5:credential prompt:true:future role",
     ]);
     expect(appRuntime.calls.list).toBe(0);
     expect(appRuntime.calls.generate).toBe(1);
@@ -1845,12 +1850,13 @@ describe("one-shot application", () => {
         },
         runtime: runtime({
           providers: ["ollama"],
-          generate: async (provider, model, prompt) => {
+          generate: async (provider, model, prompt, _signal, instructions) => {
             expect({ provider, model, prompt }, scenario.name).toEqual({
               provider: "ollama",
               model: "qwen",
               prompt: "hello",
             });
+            expect(instructions, scenario.name).toBeUndefined();
             return `${scenario.name} response`;
           },
         }),
@@ -2157,17 +2163,22 @@ describe("one-shot application", () => {
         loads += 1;
         expect(path).toBe("/config/aliases.json");
         return {
-          version: 1,
+          version: 2,
           aliases: {
-            fast: { provider: "openai", model: "gpt-5" },
+            fast: {
+              provider: "openai",
+              model: "gpt-5",
+              instructions: "interactive picker role",
+            },
             Daily: { provider: "ollama", model: "llama3" },
             assistant: { provider: "claude-cli", model: null },
           },
         };
       },
       runtime: runtime({
-        generate: async (provider, model) => {
+        generate: async (provider, model, _prompt, _signal, instructions) => {
           expect({ provider, model }).toEqual({ provider: "openai", model: "gpt-5" });
+          expect(instructions).toBe("interactive picker role");
           return "alias-result";
         },
       }),
@@ -2408,6 +2419,12 @@ describe("one-shot application", () => {
       stdin: input("", true),
       stderrTty: true,
       prompter: prompts({ confirms: [false] }),
+      runtime: runtime({
+        generate: async (_provider, _model, _prompt, _signal, instructions) => {
+          expect(instructions).toBeUndefined();
+          return "response";
+        },
+      }),
       loadAliases: async () => {
         throw new Error("explicit selection must not load aliases");
       },
@@ -2462,14 +2479,18 @@ describe("one-shot application", () => {
       const app = dependencies({
         args,
         runtime: runtime({
-          generate: async (provider, model, prompt) => {
-            calls.push(`${provider}:${model}:${prompt}`);
+          generate: async (provider, model, prompt, signal, instructions) => {
+            calls.push(`${provider}:${model}:${prompt}:${signal !== undefined}:${instructions}`);
             return "alias-result";
           },
         }),
         resolveAlias: async (_path, name) => {
           calls.push(`resolve:${name}`);
-          return { provider: "claude-cli", model: null };
+          return {
+            provider: "claude-cli",
+            model: null,
+            instructions: "shared alias role",
+          };
         },
       });
 
@@ -2488,7 +2509,7 @@ describe("one-shot application", () => {
       stdout: "alias-result",
       stderr: "",
       runtimeCalls: { discover: 0, list: 0, generate: 1 },
-      calls: ["resolve:Daily", "claude-cli:null:hello"],
+      calls: ["resolve:Daily", "claude-cli:null:hello:true:shared alias role"],
     });
   });
 
@@ -2720,14 +2741,19 @@ describe("one-shot application", () => {
       args: ["Daily"],
       stdin: input("piped prompt"),
       runtime: runtime({
-        generate: async (_provider, _model, prompt) => {
+        generate: async (_provider, _model, prompt, _signal, instructions) => {
           expect(prompt).toBe("piped prompt");
+          expect(instructions).toBe("piped alias role");
           return "alias-result";
         },
       }),
       resolveAlias: async (_path, name) => {
         expect(name).toBe("Daily");
-        return { provider: "claude-cli", model: null };
+        return {
+          provider: "claude-cli",
+          model: null,
+          instructions: "piped alias role",
+        };
       },
     });
 

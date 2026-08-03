@@ -13,6 +13,7 @@ const runtimeSmoke = join(
   directory,
   process.platform === "win32" ? "runtime-smoke.exe" : "runtime-smoke",
 );
+const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.';
 
 try {
   const configHome = join(directory, "config");
@@ -24,7 +25,11 @@ try {
     home: directory,
     env: aliasEnvironment,
   });
-  await saveAlias(aliasPath, "Daily", { provider: "codex-cli", model: null });
+  await saveAlias(aliasPath, "Daily", {
+    provider: "codex-cli",
+    model: null,
+    instructions: smokeInstructions,
+  });
 
   const builds: Array<[string, string]> = [
     [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
@@ -61,7 +66,7 @@ try {
       executable: runtimeSmoke,
       args: [fakeCli],
       exitCode: 0,
-      stdout: "http-ok\nfake:smoke\n",
+      stdout: "http-ok\nfake:instruction-absent\n",
       stderr: "",
     },
     {
@@ -108,7 +113,7 @@ try {
       executable: spike,
       args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"],
       exitCode: 0,
-      stdout: "fake:smoke",
+      stdout: "fake:instruction-absent",
       stderr: "",
     },
     {
@@ -116,7 +121,7 @@ try {
       executable: spike,
       args: ["dAiLy", "--input", "smoke"],
       exitCode: 0,
-      stdout: "fake:smoke",
+      stdout: "fake:instruction-present",
       stderr: "",
     },
   ] as const;

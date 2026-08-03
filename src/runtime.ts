@@ -63,6 +63,7 @@ export interface RuntimeGateway {
     model: string | null,
     prompt: string,
     signal?: AbortSignal,
+    instructions?: string,
   ): Promise<string>;
 }
 
@@ -107,16 +108,32 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function redactInstruction(text: string, instructions: string | undefined): string {
+  if (instructions === undefined) return text;
+
+  const serialized = JSON.stringify(instructions);
+  const escaped = serialized.slice(1, -1);
+  const transportEscaped = JSON.stringify(escaped).slice(1, -1);
+  const variants = [...new Set([instructions, serialized, escaped, transportEscaped])]
+    .filter((value) => value.length > 0)
+    .sort((left, right) => right.length - left.length);
+
+  let redacted = text;
+  for (const value of variants) redacted = redacted.replaceAll(value, "[REDACTED]");
+  return redacted;
+}
+
 function runtimeStageError(
   stage: RuntimeStage,
   provider: ByokProviderId | null,
   error: unknown,
   sensitive: SensitiveValueRegistry,
+  instructions?: string,
 ): RuntimeStageError {
   return new RuntimeStageError(
     stage,
     provider,
-    sensitive.redact(errorMessage(error)),
+    sensitive.redact(redactInstruction(errorMessage(error), instructions)),
     error instanceof CredentialVaultError ? error : undefined,
   );
 }
@@ -186,12 +203,18 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
       }
     },
 
-    async generate(provider, model, prompt, signal) {
+    async generate(provider, model, prompt, signal, instructions) {
       try {
-        const result = await (await runtime(provider, model)).generateText({ prompt }, signal);
+        const result = await (await runtime(provider, model)).generateText(
+          {
+            prompt,
+            ...(instructions === undefined ? {} : { instructions }),
+          },
+          signal,
+        );
         return result.text;
       } catch (error) {
-        throw runtimeStageError("generation", provider, error, sensitive);
+        throw runtimeStageError("generation", provider, error, sensitive, instructions);
       }
     },
   };

@@ -586,6 +586,7 @@ async function generateWithTimeout(
   provider: ByokProviderId,
   model: string | null,
   prompt: string,
+  instructions?: string,
 ): Promise<string> {
   const timeoutMs = deps.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS;
   const controller = new AbortController();
@@ -595,7 +596,13 @@ async function generateWithTimeout(
     controller.abort();
   }, timeoutMs);
   try {
-    return await deps.runtime.generate(provider, model, prompt, controller.signal);
+    return await deps.runtime.generate(
+      provider,
+      model,
+      prompt,
+      controller.signal,
+      instructions,
+    );
   } catch (error) {
     if (timedOut) {
       throw new RuntimeStageError("generation", provider, `timed out after ${timeoutMs}ms`);
@@ -1357,6 +1364,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       selection.selection.provider,
       selection.selection.model,
       prompt,
+      selection.selection.instructions,
     );
     const terminalResponse = stripTerminalSequences(response);
     if (

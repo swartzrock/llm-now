@@ -164,6 +164,83 @@ describe("runtime gateway", () => {
     ]);
   });
 
+  test("forwards exact instructions after the positional abort signal and omits them when absent", async () => {
+    const calls: Array<{
+      input: { prompt: string; instructions?: string };
+      signal?: AbortSignal;
+    }> = [];
+    const gateway = createTestGateway({
+      env: {},
+      createProvider: () => runtime({
+        generateText: async (input, signal) => {
+          calls.push({ input, signal });
+          return { text: "generated" };
+        },
+      }),
+    });
+    const controller = new AbortController();
+
+    await gateway.generate(
+      "ollama",
+      "qwen",
+      "first prompt",
+      controller.signal,
+      '  Use "quotes" and \\slashes.  ',
+    );
+    await gateway.generate("ollama", "qwen", "second prompt", controller.signal);
+
+    expect(calls).toEqual([
+      {
+        input: {
+          prompt: "first prompt",
+          instructions: '  Use "quotes" and \\slashes.  ',
+        },
+        signal: controller.signal,
+      },
+      {
+        input: { prompt: "second prompt" },
+        signal: controller.signal,
+      },
+    ]);
+  });
+
+  test("redacts raw and JSON-escaped instructions only from generation failures", async () => {
+    const instructions = '  Use "quotes" and \\slashes.  ';
+    const jsonEscaped = JSON.stringify(instructions).slice(1, -1);
+    const transportEscaped = JSON.stringify(jsonEscaped).slice(1, -1);
+    const failing = createTestGateway({
+      env: {},
+      createProvider: () => runtime({
+        generateText: async () => {
+          throw new Error(
+            `raw=${instructions} serialized=${jsonEscaped} transport=${transportEscaped}`,
+          );
+        },
+      }),
+    });
+
+    try {
+      await failing.generate("ollama", "qwen", "prompt", undefined, instructions);
+      throw new Error("expected generation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(RuntimeStageError);
+      expect(String(error)).not.toContain(instructions);
+      expect(String(error)).not.toContain(jsonEscaped);
+      expect(String(error)).not.toContain(transportEscaped);
+      expect(String(error)).toContain("[REDACTED]");
+    }
+
+    const successful = createTestGateway({
+      env: {},
+      createProvider: () => runtime({
+        generateText: async () => ({ text: `model echoed ${instructions}` }),
+      }),
+    });
+    expect(
+      await successful.generate("ollama", "qwen", "prompt", undefined, instructions),
+    ).toBe(`model echoed ${instructions}`);
+  });
+
   test("preserves usable providers on vault failure and fails when none are usable", async () => {
     const cause = new Error("backend detail");
     const resolver = createCredentialResolver({
