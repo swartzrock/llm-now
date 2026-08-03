@@ -4,6 +4,7 @@ import {
   type ByokModelOption,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
+import { isCancel as isCoreCancel, TextPrompt } from "@clack/core";
 import {
   autocomplete,
   confirm as clackConfirm,
@@ -69,6 +70,7 @@ export interface ConfirmPromptOptions {
 export interface SearchablePrompter {
   select(message: string, options: readonly PromptOption[]): Promise<PromptValue | null>;
   input(message: string, options?: TextPromptOptions): Promise<string | null>;
+  instruction(message: string): Promise<string | null>;
   password(message: string, options?: TextPromptOptions): Promise<string | null>;
   confirm(message: string, options?: ConfirmPromptOptions): Promise<boolean | null>;
 }
@@ -380,6 +382,32 @@ export function createSearchablePrompter(
         output,
       });
       return isCancel(result) ? null : result;
+    },
+    async instruction(message) {
+      let resolved = "";
+      const prompt = new TextPrompt({
+        input,
+        output,
+        render() {
+          switch (this.state) {
+            case "submit":
+              return `◇  ${message}\n│`;
+            case "cancel":
+              return `■  ${message}\n│`;
+            case "error":
+              return `▲  ${message}\n│  ${this.error}\n│`;
+            default:
+              return `◆  ${message}\n│  ${this.userInputWithCursor}\n│`;
+          }
+        },
+      });
+      prompt.on("finalize", () => {
+        resolved = prompt.value ?? "";
+        prompt.value = "";
+        prompt.userInput = "";
+      });
+      const result = await prompt.prompt();
+      return isCoreCancel(result) ? null : resolved;
     },
     async password(message, options = {}) {
       const result = await clackPassword({
