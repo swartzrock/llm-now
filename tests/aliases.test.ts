@@ -287,7 +287,16 @@ describe("global aliases", () => {
   test("rejects invalid instruction save input without creating storage artifacts", async () => {
     const directory = await temporaryDirectory();
     const path = join(directory, "nested/aliases.json");
-    const invalid = ["", "   ", "two\nlines", "bad\tvalue", "bad\u007fvalue", "bad\u009fvalue"];
+    const invalid = [
+      "",
+      "   ",
+      "two\nlines",
+      "bad\tvalue",
+      "bad\u007fvalue",
+      "bad\u009fvalue",
+      "bad\u2028value",
+      "bad\u2029value",
+    ];
 
     for (const instructions of invalid) {
       await expect(saveAlias(path, "fred", {

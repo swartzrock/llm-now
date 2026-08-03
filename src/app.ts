@@ -10,6 +10,7 @@ import pc from "picocolors";
 import type { Readable, Writable } from "node:stream";
 import {
   type AliasRecord,
+  type SaveAliasResult,
   AliasStoreError,
   isValidAliasName,
   loadAliases as loadStoredAliases,
@@ -254,6 +255,9 @@ type InstructionCaptureResult =
   | { kind: "cancelled" }
   | { kind: "failed" };
 
+class InstructionCredentialBlockedError extends Error {}
+class InstructionCredentialRefreshError extends Error {}
+
 async function captureShortcutInstructions(
   deps: ApplicationDependencies,
   diagnostic: (text: string) => void,
@@ -262,7 +266,7 @@ async function captureShortcutInstructions(
   while (true) {
     const value = await deps.prompter.instruction(INSTRUCTION_PROMPT_MESSAGE);
     if (value === null) return { kind: "cancelled" };
-    if (/[\u0000-\u001F\u007F-\u009F]/.test(value)) {
+    if (/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/.test(value)) {
       diagnostic("config: instructions must be a single line without control characters.");
       continue;
     }
@@ -292,6 +296,51 @@ async function captureShortcutInstructions(
     }
     return { kind: "ready", instructions: value, persistenceBlocker };
   }
+}
+
+function runWithAllCredentialMutationLocks<T>(
+  deps: ApplicationDependencies,
+  operation: () => Promise<T>,
+  index = 0,
+): Promise<T> {
+  if (index === CLOUD_CREDENTIAL_PROVIDERS.length) return operation();
+  return runWithCredentialMutationLock(
+    deps,
+    CLOUD_CREDENTIAL_PROVIDERS[index]!,
+    () => runWithAllCredentialMutationLocks(deps, operation, index + 1),
+  );
+}
+
+function instructionPersistenceGuard(
+  deps: ApplicationDependencies,
+  instructions: string | undefined,
+  persistenceBlocker: PersistenceBlocker | undefined,
+): (<T>(operation: () => Promise<T>) => Promise<T>) | undefined {
+  if (instructions === undefined || deps.nativeVaultEnabled !== true) {
+    return undefined;
+  }
+
+  const blocker = persistenceBlocker ?? createPersistenceBlocker(deps.env);
+  return (operation) => runWithAllCredentialMutationLocks(deps, async () => {
+    for (const name of BYOK_API_KEY_ENV_VARS) {
+      const value = deps.env[name];
+      if (value !== undefined) blocker.register(value, "environment");
+    }
+    for (const provider of CLOUD_CREDENTIAL_PROVIDERS) {
+      let credential: string | null;
+      try {
+        credential = await deps.credentialVault.get(provider);
+      } catch (error) {
+        throw new InstructionCredentialRefreshError(undefined, { cause: error });
+      }
+      if (credential !== null) {
+        deps.sensitive.register(credential);
+        blocker.register(credential, "vault");
+      }
+    }
+    if (blocker.blocks(instructions)) throw new InstructionCredentialBlockedError();
+    return operation();
+  });
 }
 
 function withInstructions(
@@ -496,7 +545,7 @@ async function prepareRequiredShortcut(
 
   const save = deps.saveAlias ?? saveStoredAlias;
   const targetLabel = safeFormatSelection(deps, selection);
-  while (true) {
+  namePrompt: while (true) {
     const name = await deps.prompter.input("Name this shortcut", {
       validate: (value) => {
         if (value === undefined || value === "") return "Enter a shortcut name.";
@@ -522,37 +571,57 @@ async function prepareRequiredShortcut(
       continue;
     }
 
-    const capture = await captureShortcutInstructions(deps, diagnostic, validatedCredentials);
-    if (capture.kind === "cancelled") return { kind: "cancelled" };
-    if (capture.kind === "failed") return { kind: "failed", reason: "instructions" };
-    const pendingSelection = withInstructions(selection, capture.instructions);
+    while (true) {
+      const capture = await captureShortcutInstructions(deps, diagnostic, validatedCredentials);
+      if (capture.kind === "cancelled") return { kind: "cancelled" };
+      if (capture.kind === "failed") return { kind: "failed", reason: "instructions" };
+      const pendingSelection = withInstructions(selection, capture.instructions);
 
-    let overwriteCancelled = false;
-    const result = await save(applicationAliasPath(deps), name, pendingSelection, {
-      persistenceBlocker: capture.persistenceBlocker,
-      confirmOverwrite: async (_name, current) => {
-        const overwrite = await deps.prompter.confirm(
-          `Overwrite shortcut ${name}?\nOld: ${
-            current === undefined ? "(not present)" : safeFormatSelection(deps, current)
-          }\nNew: ${targetLabel}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
-          { initialValue: false },
-        );
-        overwriteCancelled = overwrite === null;
-        return overwrite === true;
-      },
-    });
-    if (result === "declined") {
-      if (overwriteCancelled) return { kind: "cancelled" };
-      continue;
+      let overwriteCancelled = false;
+      let result: SaveAliasResult;
+      try {
+        result = await save(applicationAliasPath(deps), name, pendingSelection, {
+          persistenceBlocker: capture.persistenceBlocker,
+          persistenceGuard: instructionPersistenceGuard(
+            deps,
+            capture.instructions,
+            capture.persistenceBlocker,
+          ),
+          confirmOverwrite: async (_name, current) => {
+            const overwrite = await deps.prompter.confirm(
+              `Overwrite shortcut ${name}?\nOld: ${
+                current === undefined ? "(not present)" : safeFormatSelection(deps, current)
+              }\nNew: ${targetLabel}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
+              { initialValue: false },
+            );
+            overwriteCancelled = overwrite === null;
+            return overwrite === true;
+          },
+        });
+      } catch (error) {
+        if (error instanceof InstructionCredentialBlockedError) {
+          diagnostic(INSTRUCTION_CREDENTIAL_DIAGNOSTIC);
+          continue;
+        }
+        if (error instanceof InstructionCredentialRefreshError) {
+          diagnostic(INSTRUCTION_VAULT_DIAGNOSTIC);
+          return { kind: "failed", reason: "instructions" };
+        }
+        throw error;
+      }
+      if (result === "declined") {
+        if (overwriteCancelled) return { kind: "cancelled" };
+        continue namePrompt;
+      }
+
+      const colors = createTerminalColors(deps.stderr, deps.env);
+      deps.stderr.write(
+        result === "already-saved"
+          ? `${colors.green(`◆ Shortcut already saved ${name} → ${targetLabel}`)}\n`
+          : `${colors.green(`◆ Saved shortcut ${name} → ${targetLabel}`)}\n`,
+      );
+      return { kind: "saved", name, selection: pendingSelection };
     }
-
-    const colors = createTerminalColors(deps.stderr, deps.env);
-    deps.stderr.write(
-      result === "already-saved"
-        ? `${colors.green(`◆ Shortcut already saved ${name} → ${targetLabel}`)}\n`
-        : `${colors.green(`◆ Saved shortcut ${name} → ${targetLabel}`)}\n`,
-    );
-    return { kind: "saved", name, selection: pendingSelection };
   }
 }
 
@@ -731,35 +800,50 @@ async function offerAliasSave(
       diagnostic("config: invalid alias name; use 1-64 ASCII letters, numbers, hyphens, or underscores.");
       continue;
     }
-    const capture = await captureShortcutInstructions(deps, diagnostic);
-    if (capture.kind === "cancelled") return true;
-    if (capture.kind === "failed") return false;
-    const pendingSelection = withInstructions(selection, capture.instructions);
-    const canonicalName = normalizeAliasName(name);
-    try {
-      const result = await save(applicationAliasPath(deps), canonicalName, pendingSelection, {
-        persistenceBlocker: capture.persistenceBlocker,
-        confirmOverwrite: async (_alias, current) =>
-          (await deps.prompter.confirm(
-            `Overwrite alias ${canonicalName}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
-            { initialValue: false },
-          )) === true,
-      });
-      if (result === "saved") {
-        deps.stderr.write(
-          colors.green("◆ Saved alias ")
-          + colors.white(canonicalName)
-          + colors.green(` → ${target}\n  Next time, use `)
-          + colors.white(`llm-now ${canonicalName} --input "<prompt>"`)
-          + "\n",
-        );
-      } else if (result === "already-saved") {
-        deps.stderr.write(`${colors.green(`◆ Already saved ${canonicalName} → ${target}`)}\n`);
+    while (true) {
+      const capture = await captureShortcutInstructions(deps, diagnostic);
+      if (capture.kind === "cancelled") return true;
+      if (capture.kind === "failed") return false;
+      const pendingSelection = withInstructions(selection, capture.instructions);
+      const canonicalName = normalizeAliasName(name);
+      try {
+        const result = await save(applicationAliasPath(deps), canonicalName, pendingSelection, {
+          persistenceBlocker: capture.persistenceBlocker,
+          persistenceGuard: instructionPersistenceGuard(
+            deps,
+            capture.instructions,
+            capture.persistenceBlocker,
+          ),
+          confirmOverwrite: async (_alias, current) =>
+            (await deps.prompter.confirm(
+              `Overwrite alias ${canonicalName}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
+              { initialValue: false },
+            )) === true,
+        });
+        if (result === "saved") {
+          deps.stderr.write(
+            colors.green("◆ Saved alias ")
+            + colors.white(canonicalName)
+            + colors.green(` → ${target}\n  Next time, use `)
+            + colors.white(`llm-now ${canonicalName} --input "<prompt>"`)
+            + "\n",
+          );
+        } else if (result === "already-saved") {
+          deps.stderr.write(`${colors.green(`◆ Already saved ${canonicalName} → ${target}`)}\n`);
+        }
+        return true;
+      } catch (error) {
+        if (error instanceof InstructionCredentialBlockedError) {
+          diagnostic(INSTRUCTION_CREDENTIAL_DIAGNOSTIC);
+          continue;
+        }
+        if (error instanceof InstructionCredentialRefreshError) {
+          diagnostic(INSTRUCTION_VAULT_DIAGNOSTIC);
+          return false;
+        }
+        diagnostic(`config: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
       }
-      return true;
-    } catch (error) {
-      diagnostic(`config: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
     }
   }
 }
@@ -965,14 +1049,20 @@ async function runCredentialManagement(
   const pendingAlias = aliasResult.alias;
   try {
     const saveAlias = deps.saveAlias ?? saveStoredAlias;
+    const persistenceGuard = instructionPersistenceGuard(
+      deps,
+      pendingAlias.selection.instructions,
+      pendingAlias.persistenceBlocker,
+    );
     const result = await saveAlias(
       applicationAliasPath(deps),
       pendingAlias.name,
       pendingAlias.selection,
       pendingAlias.expectedCurrent === undefined
-        ? { persistenceBlocker: pendingAlias.persistenceBlocker }
+        ? { persistenceBlocker: pendingAlias.persistenceBlocker, persistenceGuard }
         : {
           persistenceBlocker: pendingAlias.persistenceBlocker,
+          persistenceGuard,
           confirmOverwrite: async (_name, current) =>
             current !== undefined && sameAliasRecord(current, pendingAlias.expectedCurrent!),
         },
@@ -987,6 +1077,14 @@ async function runCredentialManagement(
     );
     return 0;
   } catch (error) {
+    if (error instanceof InstructionCredentialBlockedError) {
+      diagnostic(INSTRUCTION_CREDENTIAL_DIAGNOSTIC);
+      return 1;
+    }
+    if (error instanceof InstructionCredentialRefreshError) {
+      diagnostic(INSTRUCTION_VAULT_DIAGNOSTIC);
+      return 1;
+    }
     diagnostic(
       `API key was saved, but the alias was not saved: ${error instanceof Error ? error.message : String(error)}`,
     );

@@ -26,6 +26,7 @@ import {
   type SensitiveValueRegistry,
 } from "../src/credentials.ts";
 import {
+  CLOUD_CREDENTIAL_PROVIDERS,
   stripTerminalSequences,
   type PromptOption,
   type TextPromptOptions,
@@ -758,6 +759,145 @@ describe("one-shot application", () => {
       "Choose a model",
     ]);
     expect(app.stderr.text()).toContain("◆ Saved shortcut daily → Ollama · qwen");
+  });
+
+  test("rejects Unicode line separators before saving shortcut instructions", async () => {
+    let savedInstructions: string | undefined;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      nativeVaultEnabled: false,
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "ollama",
+          "qwen",
+        ],
+        names: ["daily", "first prompt"],
+        instructions: ["first\u2028second", "safe role"],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async (_path, _name, selection, options) => {
+        const persist = async (): Promise<SaveAliasResult> => {
+          savedInstructions = selection.instructions;
+          return "saved";
+        };
+        return options?.persistenceGuard?.(persist) ?? persist();
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(savedInstructions).toBe("safe role");
+    expect(app.stderr.text()).toContain(
+      "config: instructions must be a single line without control characters.",
+    );
+    expect(app.stderr.text()).not.toContain("first\u2028second");
+  });
+
+  test("rechecks vault credentials under fixed-order locks before alias persistence", async () => {
+    const candidate = "u2-save-time-vault-key";
+    const lockProviders: string[] = [];
+    let vaultReads = 0;
+    let savedInstructions: string | undefined;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      credentialVault: {
+        get: async (provider) => {
+          vaultReads += 1;
+          return vaultReads > CLOUD_CREDENTIAL_PROVIDERS.length
+              && provider === CLOUD_CREDENTIAL_PROVIDERS[0]
+            ? candidate
+            : null;
+        },
+        set: async () => undefined,
+        delete: async () => false,
+      },
+      credentialMutationLock: async (_directory, provider, operation) => {
+        lockProviders.push(provider);
+        return operation();
+      },
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "ollama",
+          "qwen",
+        ],
+        names: ["daily", "first prompt"],
+        instructions: [candidate, "safe role"],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async (_path, _name, selection, options) => {
+        const persist = async (): Promise<SaveAliasResult> => {
+          savedInstructions = selection.instructions;
+          return "saved";
+        };
+        return options?.persistenceGuard?.(persist) ?? persist();
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(savedInstructions).toBe("safe role");
+    expect(lockProviders).toEqual([
+      ...CLOUD_CREDENTIAL_PROVIDERS,
+      ...CLOUD_CREDENTIAL_PROVIDERS,
+    ]);
+    expect(app.stderr.text()).toContain("instructions must not contain an API key");
+    expect(app.stderr.text()).not.toContain(candidate);
+  });
+
+  test("fails closed when the save-time vault refresh fails", async () => {
+    let vaultReads = 0;
+    let saves = 0;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      credentialVault: {
+        get: async () => {
+          vaultReads += 1;
+          if (vaultReads > CLOUD_CREDENTIAL_PROVIDERS.length) {
+            throw new Error("u2-save-time-vault-detail");
+          }
+          return null;
+        },
+        set: async () => undefined,
+        delete: async () => false,
+      },
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "ollama",
+          "qwen",
+        ],
+        names: ["daily"],
+        instructions: ["safe role"],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async (_path, _name, _selection, options) => {
+        const persist = async (): Promise<SaveAliasResult> => {
+          saves += 1;
+          return "saved";
+        };
+        return options?.persistenceGuard?.(persist) ?? persist();
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(saves).toBe(0);
+    expect(app.stderr.text()).toContain(
+      "config: instructions could not be checked against saved API keys; the shortcut was not saved.",
+    );
+    expect(app.stderr.text()).not.toContain("u2-save-time-vault-detail");
+    expect(app.stderr.text()).not.toContain("safe role");
   });
 
   test("skips vault reads when instruction capture is blank or native vaults are disabled", async () => {
@@ -3283,11 +3423,14 @@ describe("API-key management", () => {
           return [{ id: "gpt-5", label: "GPT-5" }];
         },
       }),
-      saveAlias: async (_path, name, selection) => {
-        events.push(`alias:${name}:${selection.provider}:${selection.model}:${selection.instructions}`);
-        expect(Object.keys(selection).sort()).toEqual(["instructions", "model", "provider"]);
-        expect(JSON.stringify(selection)).not.toContain(candidate);
-        return "saved";
+      saveAlias: async (_path, name, selection, options) => {
+        const persist = async (): Promise<SaveAliasResult> => {
+          events.push(`alias:${name}:${selection.provider}:${selection.model}:${selection.instructions}`);
+          expect(Object.keys(selection).sort()).toEqual(["instructions", "model", "provider"]);
+          expect(JSON.stringify(selection)).not.toContain(candidate);
+          return "saved";
+        };
+        return options?.persistenceGuard?.(persist) ?? persist();
       },
     });
     const invalidations: string[] = [];
@@ -3310,7 +3453,9 @@ describe("API-key management", () => {
       "set:openai",
     ]);
     expect(events.at(-1)).toBe("alias:fast:openai:gpt-5:managed role");
-    expect(events.filter((event) => event.startsWith("get:"))).toHaveLength(11);
+    expect(events.filter((event) => event.startsWith("get:"))).toHaveLength(
+      11 + CLOUD_CREDENTIAL_PROVIDERS.length,
+    );
     expect(app.events.filter((event) => event === "set:openai")).toHaveLength(1);
     expect(invalidations).toEqual(["openai"]);
     expect(confirmInitialValues).toEqual([false]);

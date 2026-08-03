@@ -44,6 +44,7 @@ export interface AliasPathOptions {
 export interface SaveAliasOptions {
   confirmOverwrite?: (name: string, current: AliasRecord | undefined) => Promise<boolean>;
   persistenceBlocker?: PersistenceBlocker;
+  persistenceGuard?: <T>(operation: () => Promise<T>) => Promise<T>;
   lockTimeoutMs?: number;
   retryDelayMs?: number;
   staleLockMs?: number;
@@ -106,7 +107,7 @@ function validateAliasTarget(value: Record<string, unknown>): boolean {
 function isValidInstructions(value: unknown): value is string {
   return typeof value === "string"
     && value.trim().length > 0
-    && !/[\u0000-\u001F\u007F-\u009F]/.test(value);
+    && !/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/.test(value);
 }
 
 function validateVersion1AliasRecord(value: unknown): value is AliasRecord {
@@ -335,32 +336,37 @@ export async function saveAlias(
         if (!hasExpected) return { current };
       }
 
-      if (
-        record.instructions !== undefined
-        && options.persistenceBlocker?.blocks(record.instructions) === true
-      ) {
-        throw new AliasStoreError("instructions must not contain an API key");
-      }
-      const nextAliases = {
-        ...document.aliases,
-        [canonicalName]: storedAliasRecord(record),
+      const persist = async (): Promise<"saved"> => {
+        if (
+          record.instructions !== undefined
+          && options.persistenceBlocker?.blocks(record.instructions) === true
+        ) {
+          throw new AliasStoreError("instructions must not contain an API key");
+        }
+        const nextAliases = {
+          ...document.aliases,
+          [canonicalName]: storedAliasRecord(record),
+        };
+        const next: AliasDocument = {
+          version: document.version === 2 || record.instructions !== undefined
+            ? 2
+            : 1,
+          aliases: nextAliases,
+        };
+        temporaryPath = join(directory, `.aliases-${process.pid}-${randomUUID()}.tmp`);
+        const handle = await open(temporaryPath, "wx", 0o600);
+        try {
+          await handle.writeFile(`${JSON.stringify(next, null, 2)}\n`);
+        } finally {
+          await handle.close();
+        }
+        await (dependencies.rename ?? rename)(temporaryPath, path);
+        temporaryPath = undefined;
+        return "saved";
       };
-      const next: AliasDocument = {
-        version: document.version === 2 || record.instructions !== undefined
-          ? 2
-          : 1,
-        aliases: nextAliases,
-      };
-      temporaryPath = join(directory, `.aliases-${process.pid}-${randomUUID()}.tmp`);
-      const handle = await open(temporaryPath, "wx", 0o600);
-      try {
-        await handle.writeFile(`${JSON.stringify(next, null, 2)}\n`);
-      } finally {
-        await handle.close();
-      }
-      await (dependencies.rename ?? rename)(temporaryPath, path);
-      temporaryPath = undefined;
-      return "saved";
+      return await (options.persistenceGuard === undefined
+        ? persist()
+        : options.persistenceGuard(persist));
     } finally {
       if (temporaryPath !== undefined) await unlink(temporaryPath).catch(() => undefined);
       await unlink(lockPath).catch(() => undefined);
