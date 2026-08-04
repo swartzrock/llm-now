@@ -124,10 +124,12 @@ describe("native release build", () => {
     const fakeCli = await Bun.file(
       new URL("./fixtures/fake-cli.ts", import.meta.url),
     ).text();
+    const expectedInstructions =
+      'Use "quoted" runtime smoke \\\\ transport.\\nKeep each answer concise.';
 
     expect(releaseValidation).toContain("version: 2");
-    expect(releaseValidation).toContain('Use "quoted" runtime smoke \\\\ transport.');
-    expect(fakeCli).toContain('Use "quoted" runtime smoke \\\\ transport.');
+    expect(releaseValidation).toContain(expectedInstructions);
+    expect(fakeCli).toContain(expectedInstructions);
     expect(releaseValidation).toContain("fake:instruction-present");
     expect(releaseValidation).toContain("fake:instruction-absent");
     expect(releaseValidation).toContain("PATH: temporary");

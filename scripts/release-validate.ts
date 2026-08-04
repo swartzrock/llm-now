@@ -221,7 +221,7 @@ async function smoke(archivePath: string): Promise<void> {
 
     const configHome = join(temporary, "config");
     await mkdir(join(configHome, "llm-now"), { recursive: true });
-    const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.';
+    const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
     await Bun.write(join(configHome, "llm-now", "aliases.json"), `${JSON.stringify({
       version: 2,
       aliases: {
