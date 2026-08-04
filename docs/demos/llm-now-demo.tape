@@ -86,6 +86,7 @@ Wait+Screen@10 s /Name this shortcut/
 Type "explain"
 Enter
 Wait+Screen@10 s /Optional instructions for this shortcut/
+Wait+Screen@10 s /Press Tab to select \[ save \], then Enter to save/
 Type `Use "quoted" runtime smoke \ transport.`
 Enter
 Type "Keep each answer concise."

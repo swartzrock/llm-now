@@ -405,8 +405,12 @@ export function createSearchablePrompter(
               return `■  ${message}\n│`;
             case "error":
               return `▲  ${message}\n│  ${this.error}\n│`;
-            default:
-              return `◆  ${message}\n│  ${this.userInputWithCursor.replaceAll("\n", "\n│  ")}\n│  ${this.focused === "submit" ? pc.cyan("[ save ]") : pc.dim("[ save ]")}\n│`;
+            default: {
+              const saveInstructions = this.focused === "submit"
+                ? `${pc.cyan("[ save ]")} selected — press Enter to save`
+                : `Press Tab to select ${pc.dim("[ save ]")}, then Enter to save`;
+              return `◆  ${message}\n│  ${this.userInputWithCursor.replaceAll("\n", "\n│  ")}\n│  ${saveInstructions}\n│`;
+            }
           }
         },
       });

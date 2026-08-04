@@ -482,7 +482,12 @@ describe("terminal provider and model selection", () => {
     }, 1);
 
     expect(await entered).toBe(candidate);
-    expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain("[ save ]");
+    expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain(
+      "Press Tab to select [ save ], then Enter to save",
+    );
+    expect(stripTerminalSequences(rendered)).toContain(
+      "[ save ] selected — press Enter to save",
+    );
     expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain("First instruction paragraph");
     expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain("Second instruction paragraph");
     expect(stripTerminalSequences(rendered.slice(submitOffset))).not.toContain("First instruction paragraph");

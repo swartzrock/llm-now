@@ -79,7 +79,7 @@ const MANAGE_CONNECTIONS_VALUE = "launcher:manage-connections";
 const AVAILABLE_PROVIDER_SOURCE_VALUE = "shortcut-source:available-provider";
 const ADD_API_KEY_SOURCE_VALUE = "shortcut-source:add-api-key";
 const INSTRUCTION_PROMPT_MESSAGE =
-  "Optional instructions for this shortcut (blank for none; Tab then Enter to save text)";
+  "Optional instructions for this shortcut (press Enter to skip)";
 const INSTRUCTION_CREDENTIAL_DIAGNOSTIC = "config: instructions must not contain an API key.";
 const INSTRUCTION_VAULT_DIAGNOSTIC =
   "config: instructions could not be checked against saved API keys; the shortcut was not saved.";

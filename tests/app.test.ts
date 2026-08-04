@@ -748,7 +748,7 @@ describe("one-shot application", () => {
       "generate:ollama:qwen:first prompt:true:You are an architect.\nFocus on realtime voice systems.",
     ]);
     expect(instructionMessages).toEqual([
-      "Optional instructions for this shortcut (blank for none; Tab then Enter to save text)",
+      "Optional instructions for this shortcut (press Enter to skip)",
     ]);
     expect(app.stdout.text()).toBe("first response");
     expect(appRuntime.calls.generate).toBe(1);
