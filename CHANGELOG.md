@@ -1,5 +1,11 @@
 # llm-now
 
+## 2.2.0
+
+### Minor Changes
+
+- 5b31c09: Add optional saved shortcut instructions that are sent separately on every shortcut invocation.
+
 ## 2.1.0
 
 ### Minor Changes
