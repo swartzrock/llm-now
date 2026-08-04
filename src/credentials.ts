@@ -1,4 +1,5 @@
 import {
+  BYOK_API_KEY_ENV_VARS,
   BYOK_PROVIDER_API_KEY_ENV_VARS,
   type ByokCloudProviderId,
   type ByokEnvironment,
@@ -280,6 +281,43 @@ export function createBunCredentialVault(
 export interface SensitiveValueRegistry {
   register(value: string): void;
   redact(text: string): string;
+}
+
+export type PersistenceCredentialSource = "environment" | "validated" | "vault";
+
+export interface PersistenceBlocker {
+  register(value: string, source: PersistenceCredentialSource): void;
+  blocks(text: string): boolean;
+}
+
+const MINIMUM_ENVIRONMENT_BLOCKER_LENGTH = 8;
+
+export function createPersistenceBlocker(
+  env: ByokEnvironment = {},
+): PersistenceBlocker {
+  const values = new Set<string>();
+  const register = (value: string, source: PersistenceCredentialSource): void => {
+    if (
+      value.length > 0
+      && (source !== "environment" || value.length >= MINIMUM_ENVIRONMENT_BLOCKER_LENGTH)
+    ) {
+      values.add(value);
+    }
+  };
+  for (const name of BYOK_API_KEY_ENV_VARS) {
+    const value = env[name];
+    if (value !== undefined) register(value, "environment");
+  }
+
+  return {
+    register,
+    blocks(text) {
+      for (const value of values) {
+        if (text.includes(value)) return true;
+      }
+      return false;
+    },
+  };
 }
 
 export function createSensitiveValueRegistry(

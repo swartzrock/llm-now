@@ -55,6 +55,9 @@ function choices(
     input: async () => {
       throw new Error("unexpected input prompt");
     },
+    instruction: async () => {
+      throw new Error("unexpected instruction prompt");
+    },
     password: async () => {
       throw new Error("unexpected password prompt");
     },
@@ -462,6 +465,61 @@ describe("terminal provider and model selection", () => {
 
     expect(await entered).toBe("  exact prompt  ");
     expect(stripTerminalSequences(rendered)).toContain("prompt must not be blank.");
+  });
+
+  test("real instruction input preserves pasted blank lines and a trailing newline", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let rendered = "";
+    let submitOffset = 0;
+    output.on("data", (chunk) => rendered += chunk.toString());
+    const candidate = "First instruction paragraph\n\nSecond instruction paragraph\n";
+    const entered = createSearchablePrompter(input, output).instruction("Optional instructions");
+    setTimeout(() => {
+      input.write(candidate.replaceAll("\n", "\r"));
+      submitOffset = rendered.length;
+      input.write("\t\r");
+    }, 1);
+
+    expect(await entered).toBe(candidate);
+    expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain(
+      "Press Tab to select [ save ], then Enter to save",
+    );
+    expect(stripTerminalSequences(rendered)).toContain(
+      "[ save ] selected — press Enter to save",
+    );
+    expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain("First instruction paragraph");
+    expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain("Second instruction paragraph");
+    expect(stripTerminalSequences(rendered.slice(submitOffset))).not.toContain("First instruction paragraph");
+    expect(stripTerminalSequences(rendered.slice(submitOffset))).not.toContain("Second instruction paragraph");
+  });
+
+  test("real instruction input submits blank with one Enter", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const entered = createSearchablePrompter(input, output).instruction("Optional instructions");
+    setTimeout(() => input.write("\r"), 1);
+
+    expect(await entered).toBe("");
+  });
+
+  test("real instruction input clears the active value before cancellation renders", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let rendered = "";
+    let cancelOffset = 0;
+    output.on("data", (chunk) => rendered += chunk.toString());
+    const candidate = "u2-cancelled-instruction";
+    const entered = createSearchablePrompter(input, output).instruction("Optional instructions");
+    setTimeout(() => input.write(candidate), 1);
+    setTimeout(() => {
+      cancelOffset = rendered.length;
+      input.write("\u0003");
+    }, 20);
+
+    expect(await entered).toBeNull();
+    expect(stripTerminalSequences(rendered.slice(0, cancelOffset))).toContain(candidate);
+    expect(stripTerminalSequences(rendered.slice(cancelOffset))).not.toContain(candidate);
   });
 
   for (const [name, key] of [

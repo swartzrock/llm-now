@@ -2,6 +2,7 @@ import { isByokProviderId, type ByokEnvironment, type ByokProviderId } from "@sw
 import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname, join, posix, win32 } from "node:path";
 import { randomUUID } from "node:crypto";
+import type { PersistenceBlocker } from "./credentials.ts";
 
 const ALIAS_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH = 128;
@@ -19,12 +20,20 @@ export function normalizeAliasName(name: string): string {
 export interface AliasRecord {
   provider: ByokProviderId;
   model: string | null;
+  instructions?: string;
 }
 
-export interface AliasDocument {
+export interface AliasDocumentV1 {
   version: 1;
   aliases: Record<string, AliasRecord>;
 }
+
+export interface AliasDocumentV2 {
+  version: 2;
+  aliases: Record<string, AliasRecord>;
+}
+
+export type AliasDocument = AliasDocumentV1 | AliasDocumentV2;
 
 export interface AliasPathOptions {
   platform: NodeJS.Platform;
@@ -34,6 +43,8 @@ export interface AliasPathOptions {
 
 export interface SaveAliasOptions {
   confirmOverwrite?: (name: string, current: AliasRecord | undefined) => Promise<boolean>;
+  persistenceBlocker?: PersistenceBlocker;
+  persistenceGuard?: <T>(operation: () => Promise<T>) => Promise<T>;
   lockTimeoutMs?: number;
   retryDelayMs?: number;
   staleLockMs?: number;
@@ -87,19 +98,51 @@ function hasErrorCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
 }
 
-function validateAliasRecord(value: unknown): value is AliasRecord {
-  if (!isObject(value) || !hasExactlyKeys(value, ["model", "provider"])) return false;
+function validateAliasTarget(value: Record<string, unknown>): boolean {
   if (!isByokProviderId(value.provider)) return false;
   if (value.model === null) return DEFAULT_MODEL_PROVIDERS.has(value.provider);
   return typeof value.model === "string" && value.model.length > 0;
 }
 
+export function hasInvalidInstructionCharacters(value: string): boolean {
+  return /[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u2028\u2029]/.test(value);
+}
+
+function isValidInstructions(value: unknown): value is string {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && !hasInvalidInstructionCharacters(value);
+}
+
+function validateVersion1AliasRecord(value: unknown): value is AliasRecord {
+  return isObject(value)
+    && hasExactlyKeys(value, ["model", "provider"])
+    && validateAliasTarget(value);
+}
+
+function validateVersion2AliasRecord(value: unknown): value is AliasRecord {
+  if (!isObject(value)) return false;
+  const keys = value.instructions === undefined
+    ? ["model", "provider"]
+    : ["instructions", "model", "provider"];
+  return hasExactlyKeys(value, keys)
+    && validateAliasTarget(value)
+    && (value.instructions === undefined || isValidInstructions(value.instructions));
+}
+
 function validateDocument(value: unknown): value is AliasDocument {
   if (!isObject(value) || !hasExactlyKeys(value, ["aliases", "version"])) return false;
-  if (value.version !== 1 || !isObject(value.aliases)) return false;
+  if (!isObject(value.aliases)) return false;
+
+  const validateRecord = value.version === 1
+    ? validateVersion1AliasRecord
+    : value.version === 2
+    ? validateVersion2AliasRecord
+    : null;
+  if (validateRecord === null) return false;
 
   return Object.entries(value.aliases).every(
-    ([name, record]) => isValidAliasName(name) && validateAliasRecord(record),
+    ([name, record]) => isValidAliasName(name) && validateRecord(record),
   );
 }
 
@@ -143,7 +186,7 @@ function canonicalizeDocument(document: AliasDocument, path: string): AliasDocum
     );
   }
 
-  return { version: 1, aliases };
+  return { version: document.version, aliases };
 }
 
 function formatAliasTarget(record: AliasRecord): string {
@@ -180,10 +223,21 @@ export async function resolveAlias(path: string, name: string): Promise<AliasRec
 
 function validateSaveInput(name: string, record: AliasRecord): string {
   const canonicalName = normalizeAliasName(name);
-  if (!validateAliasRecord({ provider: record.provider, model: record.model })) {
+  if (!validateAliasTarget({ provider: record.provider, model: record.model })) {
     throw new AliasStoreError(`invalid alias selection: ${name}`);
   }
+  if (record.instructions !== undefined && !isValidInstructions(record.instructions)) {
+    throw new AliasStoreError("invalid alias instructions");
+  }
   return canonicalName;
+}
+
+function storedAliasRecord(record: AliasRecord): AliasRecord {
+  return {
+    provider: record.provider,
+    model: record.model,
+    ...(record.instructions === undefined ? {} : { instructions: record.instructions }),
+  };
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -286,19 +340,37 @@ export async function saveAlias(
         if (!hasExpected) return { current };
       }
 
-      const next: AliasDocument = {
-        version: 1,
-        aliases: {
+      const persist = async (): Promise<"saved"> => {
+        if (
+          record.instructions !== undefined
+          && options.persistenceBlocker?.blocks(record.instructions) === true
+        ) {
+          throw new AliasStoreError("instructions must not contain an API key");
+        }
+        const nextAliases = {
           ...document.aliases,
-          [canonicalName]: { provider: record.provider, model: record.model },
-        },
+          [canonicalName]: storedAliasRecord(record),
+        };
+        const next: AliasDocument = {
+          version: document.version === 2 || record.instructions !== undefined
+            ? 2
+            : 1,
+          aliases: nextAliases,
+        };
+        temporaryPath = join(directory, `.aliases-${process.pid}-${randomUUID()}.tmp`);
+        const handle = await open(temporaryPath, "wx", 0o600);
+        try {
+          await handle.writeFile(`${JSON.stringify(next, null, 2)}\n`);
+        } finally {
+          await handle.close();
+        }
+        await (dependencies.rename ?? rename)(temporaryPath, path);
+        temporaryPath = undefined;
+        return "saved";
       };
-      temporaryPath = join(directory, `.aliases-${process.pid}-${randomUUID()}.tmp`);
-      await Bun.write(temporaryPath, `${JSON.stringify(next, null, 2)}\n`);
-      if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
-      await (dependencies.rename ?? rename)(temporaryPath, path);
-      temporaryPath = undefined;
-      return "saved";
+      return await (options.persistenceGuard === undefined
+        ? persist()
+        : options.persistenceGuard(persist));
     } finally {
       if (temporaryPath !== undefined) await unlink(temporaryPath).catch(() => undefined);
       await unlink(lockPath).catch(() => undefined);
@@ -306,6 +378,8 @@ export async function saveAlias(
   }
 }
 
-function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
-  return left.provider === right.provider && left.model === right.model;
+export function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
+  return left.provider === right.provider
+    && left.model === right.model
+    && left.instructions === right.instructions;
 }

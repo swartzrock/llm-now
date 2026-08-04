@@ -11,6 +11,7 @@ A candidate is ready when:
 - every target with native credential storage enabled passes the compiled production-adapter lifecycle gate in its representative user session;
 - each supported provider completes at least one successful generation on a reference platform;
 - no credential appears in stdout, stderr, alias files, or captured shell logs;
+- shortcut inventory and diagnostics do not disclose saved instruction text or instruction-bearing child-process arguments;
 - no unexplained release-blocking manual failure remains.
 
 Homebrew and Chocolatey are intentionally outside the current release scope. Do not test or publish package-manager integration unless a future version explicitly reintroduces it.
@@ -105,7 +106,7 @@ bun build ./tests/fixtures/fake-cli.ts --compile --outfile "$FAKE_CODEX"
 chmod +x "$BRANCH_BIN" "$FAKE_CODEX"
 
 export XDG_CONFIG_HOME="$PTY_ROOT/config"
-export PATH="$PTY_ROOT/bin:$PATH"
+export PATH="$PTY_ROOT/bin"
 export SHELL="$PTY_ROOT/bin/missing-login-shell"
 cd "$PTY_ROOT/work"
 ```
@@ -124,9 +125,9 @@ It must not show a saved-shortcut row. Merely rendering the root must perform no
 
 ### SC-02: Create from an available provider and run it once
 
-From the empty root, choose `Create a new shortcut…`. Confirm `How should this shortcut connect?` offers exactly `Use an available provider…` followed by `Add a provider with an API key…`, with no discovery before a source is chosen. Select the available-provider route, then the fake Codex provider and its safe model. At `Name this shortcut`, enter `daily`.
+From the empty root, choose `Create a new shortcut…`. Confirm `How should this shortcut connect?` offers exactly `Use an available provider…` followed by `Add a provider with an API key…`, with no discovery before a source is chosen. Select the available-provider route, then the fake Codex provider and its safe model. At `Name this shortcut`, enter `daily`. Confirm the visible `Optional instructions for this shortcut (press Enter to skip)` field and `Press Tab to select [ save ], then Enter to save` callout appear next. Paste `Use "quoted" runtime smoke \ transport.` followed by a newline and `Keep each answer concise.`, press Tab, confirm the callout changes to `[ save ] selected — press Enter to save`, then press Enter to submit it.
 
-When `Prompt for daily · Codex CLI · MODEL` appears, inspect the isolated alias file from a second terminal before entering a prompt. It must already contain only `provider` and `model` identity for `daily`; no prompt, response, or credential may be present. Enter `Reply with one short sentence.` The command must generate exactly once, exit `0`, and write only `fake:Reply with one short sentence.` to `stdout.bin`. The shortcut-save receipt must precede the work prompt on stderr.
+When `Prompt for daily · Codex CLI · MODEL` appears, inspect the isolated alias file from a second terminal before entering a prompt. It must be a version 2 document whose `daily` record contains only `provider`, `model`, and the exact `instructions` string; no prompt, response, or credential may be present. Enter `smoke`. The command must generate exactly once, exit `0`, and write only `fake:instruction-present` to `stdout.bin`. The shortcut-save receipt must precede the work prompt on stderr.
 
 ### SC-03: Configured root and saved-shortcut route
 
@@ -137,31 +138,31 @@ Run bare `"$BRANCH_BIN" >stdout.bin` after SC-02. The configured root must conta
 3. `Run once with another provider and model…`
 4. `Manage connections…`
 
-Choose the saved-shortcut route, filter to `daily`, and confirm `Prompt for daily · Codex CLI · MODEL`. Enter one prompt. It must generate once without discovery, model listing, or another shortcut offer.
+Choose the saved-shortcut route, filter to `daily`, and confirm `Prompt for daily · Codex CLI · MODEL`. Enter `smoke`. It must write only `fake:instruction-present` to stdout and generate once without discovery, model listing, or another shortcut offer. Neither the prompt UI nor the root inventory may display the saved instruction text or an instruction-presence marker.
 
 ### SC-04: True run once never saves
 
-Record a checksum or byte-for-byte copy of the alias file. From both empty and configured roots, choose the state-appropriate `Run once…` action, select the fake provider/model, and enter one prompt at `Prompt for Codex CLI · MODEL`.
+Record a checksum or byte-for-byte copy of the alias file. From both empty and configured roots, choose the state-appropriate `Run once…` action, select the fake provider/model, and enter `smoke` at `Prompt for Codex CLI · MODEL`.
 
-Each invocation must generate exactly once and exit without showing a naming, save, or overwrite prompt. The alias file must remain byte-for-byte unchanged, including when the selected target already belongs to `daily`.
+Each invocation must write only `fake:instruction-absent`, generate exactly once, and exit without showing an instruction, naming, save, or overwrite prompt. The alias file must remain byte-for-byte unchanged, including when the selected target already belongs to instructed shortcut `daily`.
 
 ### SC-05: Cancellation before durable work
 
-With a fresh empty store, repeat shortcut creation and cancel separately at the root, `How should this shortcut connect?`, provider picker, model picker, and `Name this shortcut`. Each cancellation must exit `130`, generate nothing, leave stdout empty, and create neither a credential nor a shortcut. Repeat at the run-once provider, model, and work prompts with the same result.
+With a fresh empty store, repeat shortcut creation and cancel separately at the root, `How should this shortcut connect?`, provider picker, model picker, `Name this shortcut`, and the optional-instructions field. Each cancellation must exit `130`, generate nothing, leave stdout empty, and create neither a credential nor a shortcut. Repeat at the run-once provider, model, and work prompts with the same result.
 
 ### SC-06: Cancellation after a shortcut write
 
-Create a shortcut and wait until its save receipt and contextual first prompt appear. Cancel that prompt with Escape, then repeat with Ctrl-C using another name. Each invocation must exit `0`, preserve the saved shortcut, report that creation completed but generation did not, and leave stdout empty. Running the saved shortcut on a later invocation must work.
+Create a shortcut, submit its optional instructions, and wait until its save receipt and contextual first prompt appear. Cancel that prompt with Escape, then repeat with Ctrl-C using another name. Each invocation must exit `0`, preserve the complete saved shortcut including instructions, report that creation completed but generation did not, and leave stdout empty. Running the saved shortcut with `smoke` on a later invocation must write `fake:instruction-present`.
 
 ### SC-07: Required naming and collision handling
 
-Create the same name and target again. It must report the identical saved target and continue to the first prompt without rewriting unrelated aliases. Next make a second safe provider/model available and try the same name for that different target. The overwrite confirmation must show the old and new targets and default to No. Declining must return to `Name this shortcut` with the existing record unchanged; accepting on a later attempt must replace only that shortcut before its first prompt.
+Create the same name, target, and instructions again. It must report the identical saved shortcut and continue to the first prompt without rewriting unrelated aliases. Recreate it three more times to add instructions to an instruction-free record, change the existing text, and remove it by submitting a blank field. Each change must show an overwrite confirmation whose `Instructions:` line says `none → set`, `set → changed`, or `set → none`, and defaults to No. Declining must return to `Name this shortcut` with the existing record unchanged; accepting must replace only that shortcut before its first prompt. Also repeat with a different safe provider/model and confirm the old and new targets are shown.
 
 ### SC-08: API-key creation without credential exposure
 
 First use the maintained test suite’s injected fake candidate to exercise the full successful transaction without a network credential:
 
-From the repository root:
+From the repository root in a separate terminal with its normal Bun `PATH`:
 
 ```bash
 bun test tests/app.test.ts --test-name-pattern "adds a missing API-key provider"
@@ -177,16 +178,16 @@ Choose `Manage connections…` from either root. Its menu must contain only `Dis
 
 ### SC-10: Direct invocation, bypass, and redirected stdout
 
-With `daily` configured, run:
+With instructed shortcut `daily` configured, run the maintained fake fixture’s exact prompt:
 
 ```bash
-"$BRANCH_BIN" daily --input "direct" >stdout.bin 2>stderr.txt
-printf 'piped' | "$BRANCH_BIN" daily >stdout.bin 2>stderr.txt
-"$BRANCH_BIN" --alias daily --input "long form" >stdout.bin 2>stderr.txt
-"$BRANCH_BIN" --provider codex-cli --model default --input "explicit" >stdout.bin 2>stderr.txt
+"$BRANCH_BIN" daily --input "smoke" >stdout.bin 2>stderr.txt
+printf 'smoke' | "$BRANCH_BIN" daily >stdout.bin 2>stderr.txt
+"$BRANCH_BIN" --alias daily --input "smoke" >stdout.bin 2>stderr.txt
+"$BRANCH_BIN" --provider codex-cli --model default --input "smoke" >stdout.bin 2>stderr.txt
 ```
 
-Arguments, `--input`, piped stdin, and noninteractive execution must bypass the launcher deterministically. Each command must generate exactly once and write only the unchanged response to stdout. Existing alias/direct terminology, diagnostics, exit codes, and redaction remain unchanged. Also run bare `"$BRANCH_BIN" >stdout.bin` with stderr attached to the PTY and complete one launcher action; menus and prompts must remain on stderr while only the model response reaches the redirected file.
+Arguments, `--input`, piped stdin, and noninteractive execution must bypass the launcher deterministically. The three alias calls must each write only `fake:instruction-present`; the explicit call must write only `fake:instruction-absent`. Existing alias/direct terminology, diagnostics, exit codes, and redaction remain unchanged. Fail one fixture call deliberately and confirm the fixed diagnostic does not echo child-process arguments or saved instructions. Also run bare `"$BRANCH_BIN" >stdout.bin` with stderr attached to the PTY and complete one launcher action; menus and prompts must remain on stderr while only the model response reaches the redirected file.
 
 ### User-owned visual gate
 
@@ -344,8 +345,9 @@ Opening either root and opening the creation-source menu must not display discov
 - arrow keys and Enter select the highlighted option;
 - the final response appears only in `stdout.txt`;
 - the response is followed by a clean terminal boundary on stderr even when it has no trailing newline or leaves SGR styling active;
-- shortcut creation saves before its contextual first prompt and generates exactly once;
-- run once generates without a shortcut naming or save offer;
+- shortcut creation visibly requests optional multiline instructions after naming, preserves pasted line breaks, saves before its contextual first prompt, and generates exactly once;
+- each saved-shortcut call transmits its instructions separately from the prompt, subject to the selected provider's policies;
+- run once generates without an instruction, shortcut naming, or save offer;
 - connection management retains only discovery and API-key management; and
 - machine-controlled work completes within approximately 60 seconds, excluding human menu time.
 
@@ -369,7 +371,24 @@ Run an interactive direct fresh selection such as `"$BIN" --input "Save this tar
 }
 ```
 
-The model value is `null` when a supported CLI provider uses its default. Confirm that no key, token, endpoint credential, prompt, or generated text is stored. On Unix, the directory must have mode `700` and the file mode `600`. No lock or temporary file should remain.
+Submit a blank value at the visible optional-instructions field for this first save. The model value is `null` when a supported CLI provider uses its default. Confirm that no key, token, endpoint credential, prompt, generated text, or `instructions` key is stored and that the file remains version 1.
+
+Next recreate `daily` and paste two visible instruction lines: `You are a Realtime Voice Agent Architect` and `Focus on interruption handling.` Accept the default-No overwrite only after confirming the transition is `none → set`. The alias file must become version 2 and preserve the exact line break:
+
+```json
+{
+  "version": 2,
+  "aliases": {
+    "daily": {
+      "provider": "PROVIDER_ID",
+      "model": "MODEL_ID",
+      "instructions": "You are a Realtime Voice Agent Architect\nFocus on interruption handling."
+    }
+  }
+}
+```
+
+Confirm that ordinary multiline input is accepted, while tabs, non-newline control characters, and Unicode line separators are rejected. Do not enter a secret or data that cannot be disclosed to the provider: instructions are plaintext configuration. On Unix, the directory must have mode `700` and the file mode `600`. No lock or temporary file should remain.
 
 ### MT-12: Use an alias from another directory
 
@@ -387,7 +406,7 @@ rm -f stdout.txt stderr.txt
 "$BIN" daily >stdout.txt
 ```
 
-The terminal must show `Prompt for daily · PROVIDER · MODEL`, using `default model` only when the alias has no pinned model. Submit whitespace first and confirm validation keeps the field open, then enter `Summarize the idea of gravity.`. The command must generate exactly once, exit `0`, and leave `stdout.txt` containing only the response even though stdout was redirected. Repeat the alias-only command with Escape and Ctrl-C; each cancellation must exit `130`, generate nothing, and leave stdout empty.
+The terminal must show `Prompt for daily · PROVIDER · MODEL`, using `default model` only when the alias has no pinned model. It must not display the saved instruction text. Submit whitespace first and confirm validation keeps the field open, then enter `Summarize the idea of gravity.`. The command must transmit the saved instruction separately from that prompt, generate exactly once, exit `0`, and leave `stdout.txt` containing only the response even though stdout was redirected. Repeat the alias-only command with Escape and Ctrl-C; each cancellation must exit `130`, generate nothing, and leave stdout empty.
 
 Then verify deterministic reuse:
 
@@ -415,10 +434,14 @@ the deliberately unsorted source order:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "aliases": {
     "zeta": { "provider": "openai", "model": "gpt-5" },
-    "aliases": { "provider": "codex-cli", "model": null }
+    "aliases": {
+      "provider": "codex-cli",
+      "model": null,
+      "instructions": "inventory must not print this"
+    }
   }
 }
 ```
@@ -439,8 +462,9 @@ aliases → Codex CLI · provider default
 zeta → OpenAI · gpt-5
 ```
 
-It must not prompt, discover providers, list models, access credentials,
-generate text, or mutate the alias file.
+It must not print instruction text or an instruction-presence marker, prompt,
+discover providers, list models, access credentials, generate text, or mutate
+the alias file.
 
 ### MT-14: List an empty inventory
 
@@ -528,15 +552,16 @@ coexist as separate targets.
 ### MT-20: Handle alias collisions
 
 Save `Daily` and confirm the file contains the canonical key `daily`. Complete
-`Create a new shortcut…` with the same provider/model and enter `DAILY`. The CLI
-must report that the target is already saved and continue to the first prompt
-without asking to overwrite it. Next create a shortcut for another
-provider/model and enter `dAiLy`. Confirm the
-prompt identifies the canonical alias `daily`, shows the old and new targets,
-and defaults to No. First decline the overwrite: the flow must return to
-required naming and leave the record unchanged. Repeat and accept the overwrite:
-only `daily` should change, the durable receipt must precede its first prompt,
-and every other alias must remain preserved.
+`Create a new shortcut…` with the same provider/model, instructions, and the
+name `DAILY`. The CLI must report that the shortcut is already saved and
+continue to the first prompt without asking to overwrite it. Repeat with the
+same target while adding, changing, and removing instructions. Confirm the
+prompt identifies canonical alias `daily`, reports the matching `none → set`,
+`set → changed`, or `set → none` instruction transition, and defaults to No. First
+decline each overwrite and confirm the record is unchanged; then accept and
+confirm only `daily` changes. Finally repeat for another provider/model. The
+durable receipt must precede its first prompt, and every other alias must remain
+preserved.
 
 ### MT-21: Fail closed on missing or stale aliases
 
@@ -559,6 +584,22 @@ without rewriting the file. Save an unrelated alias, then confirm that the
 successful write persists `fred` and the new alias as lowercase keys with only
 one `fred` record.
 
+Restore a clean version 1 file and save a shortcut with blank instructions;
+the file must remain version 1. Add instructions to any shortcut and confirm
+the whole document upgrades to version 2 while all provider/model records are
+preserved. Remove the final instruction and confirm the document remains
+version 2 rather than silently downgrading.
+
+Exercise downgrade recovery without risking the only copy: copy the version 2
+file while preserving its original mode, leave that backup untouched, and
+manually create a restrictive-permission version 1 file containing only each
+alias's `provider` and `model`. Confirm this intentionally drops every
+instruction and works with the older binary under test. Prefer reinstalling a
+version-2-compatible binary instead; a pre-version-2 binary may reject alias
+operations while the version 2 file is present. Confirm an explicit
+`--provider`/`--model` call remains available for recovery without using an
+alias.
+
 Finally, give `fred` and `Fred` different provider/model records. Any command
 that loads aliases must exit `1` before generation, preserve the file, and
 report a configuration diagnostic that identifies both conflicting entries,
@@ -575,6 +616,24 @@ Verify that:
 - relative `XDG_CONFIG_HOME` or `APPDATA` values are ignored in favor of the fallback.
 
 Use a temporary `HOME` or `USERPROFILE` for fallback tests.
+
+### MT-23A: Verify safe instruction transport boundaries
+
+Use only the maintained fake Codex fixture and the non-secret multiline instruction
+`Use "quoted" runtime smoke \ transport.\nKeep each answer concise.`. The packaged smoke must pass that
+instruction per invocation for an alias call and receive
+`fake:instruction-present`; the otherwise identical explicit call must receive
+`fake:instruction-absent`. The fixture `PATH` must contain only the temporary
+fixture directory, and non-Windows runs must set `SHELL` to a nonexistent file,
+so no real CLI or LLM can be selected. The loopback fake Ollama check may still
+run, but no external network request is permitted.
+
+Confirm failure diagnostics are fixed text and do not echo child-process
+arguments. CLI-backed providers may nevertheless place instructions in their
+child-process arguments, where local process inspection or audit tools can see
+them. Provider-side use, retention, and precedence are governed by each
+provider's policies; do not treat the credential blocker or diagnostic
+redaction as authorization to store secrets or undisclosable data.
 
 ## Discovery and failure behavior
 
@@ -613,6 +672,14 @@ Force an OpenAI failure and capture stderr. The sentinel must not appear in stdo
 ## Release workflow
 
 These tests are maintainer-only. Run them in order while commissioning the reviewed release train, and do not merge another `chore: release` pull request until the previous promotion finishes.
+
+Keep this feature pull request draft while local verification resolves
+`file:../cuecraft/byok-runtime` at sibling commit
+`f4dfa32ab27ce881cd9aa42203e42e6d8ad65396`; hosted CI cannot install that
+sibling path. After the compatible runtime minor is published, restore the
+registry dependency, regenerate and audit `bun.lock` to remove sibling-only
+resolution, and run the full five-target native matrix. Only then may the pull
+request be marked ready.
 
 ### MT-29: Unsigned release candidate
 
@@ -809,6 +876,9 @@ Keep the Bun test suite as the authority for behavior that is difficult or unrel
 - Picocolors output under TTY, `NO_COLOR`, and non-TTY conditions;
 - ANSI and control-sequence stripping;
 - diagnostic truncation at 1,024 characters;
+- v1-to-v2 instruction migration, add/change/remove transitions, and plaintext validation;
+- exact per-invocation instruction forwarding with absent instructions on explicit and run-once calls;
+- fixed fake-CLI diagnostics that never echo instruction-bearing arguments;
 - concurrent alias writers and stale-lock recovery; and
 - atomic rename failure handling.
 

@@ -8,6 +8,7 @@ import {
 import pc from "picocolors";
 import {
   AliasStoreError,
+  type AliasRecord,
   type AliasDocument,
   type SaveAliasResult,
 } from "../src/aliases.ts";
@@ -25,6 +26,7 @@ import {
   type SensitiveValueRegistry,
 } from "../src/credentials.ts";
 import {
+  CLOUD_CREDENTIAL_PROVIDERS,
   stripTerminalSequences,
   type PromptOption,
   type TextPromptOptions,
@@ -75,10 +77,12 @@ function prompts(options: {
   choices?: Array<PromptValue | null>;
   confirms?: Array<boolean | null>;
   names?: Array<string | null>;
+  instructions?: Array<string | null>;
   passwords?: Array<string | null>;
   seen?: Array<{ message: string; options: PromptOption[] }>;
   inputMessages?: string[];
   inputOptions?: TextPromptOptions[];
+  instructionMessages?: string[];
   passwordMessages?: string[];
   confirmMessages?: string[];
   confirmInitialValues?: Array<boolean | undefined>;
@@ -97,6 +101,11 @@ function prompts(options: {
       options.inputMessages?.push(message);
       options.inputOptions?.push(promptOptions);
       return options.names?.shift() ?? null;
+    },
+    instruction: async (message) => {
+      options.instructionMessages?.push(message);
+      const answer = options.instructions?.shift();
+      return answer === undefined ? "" : answer;
     },
     password: async (message) => {
       options.passwordMessages?.push(message);
@@ -147,10 +156,10 @@ function dependencies(options: {
   prompter?: ApplicationPrompter;
   env?: Record<string, string>;
   loadAliases?: (path: string) => Promise<{
-    version: 1;
-    aliases: Record<string, { provider: ByokProviderId; model: string | null }>;
+    version: 1 | 2;
+    aliases: Record<string, AliasRecord>;
   }>;
-  resolveAlias?: (path: string, name: string) => Promise<{ provider: ByokProviderId; model: string | null }>;
+  resolveAlias?: (path: string, name: string) => Promise<AliasRecord>;
   saveAlias?: (...args: Parameters<NonNullable<Parameters<typeof runApplication>[0]["saveAlias"]>>) => Promise<SaveAliasResult>;
   generationTimeoutMs?: number;
   modelListTimeoutMs?: number;
@@ -352,6 +361,10 @@ describe("alias inventory", () => {
           operations.push("input");
           return null;
         },
+        instruction: async () => {
+          operations.push("instruction");
+          return null;
+        },
         password: async () => {
           operations.push("password");
           return null;
@@ -364,10 +377,14 @@ describe("alias inventory", () => {
       loadAliases: async (path) => {
         operations.push(`load:${path}`);
         return {
-          version: 1,
+          version: 2,
           aliases: {
             zeta: { provider: "openai", model: "gpt-\u001b[31m5" },
-            alpha: { provider: "google", model: "gemini-2.5-pro" },
+            alpha: {
+              provider: "google",
+              model: "gemini-2.5-pro",
+              instructions: "hidden inventory role",
+            },
             middle: { provider: "claude-cli", model: null },
           },
         };
@@ -408,6 +425,7 @@ describe("alias inventory", () => {
       + "zeta → OpenAI · gpt-5\n",
     );
     expect(app.stdout.text()).not.toContain("\u001b");
+    expect(app.stdout.text()).not.toContain("hidden inventory role");
     expect(app.stderr.text()).toBe("");
     expect(stdinReads).toBe(0);
     expect(operations).toEqual(["load:/config/aliases.json"]);
@@ -685,14 +703,15 @@ describe("one-shot application", () => {
   test("creates an available-provider shortcut before its first prompt and generates once", async () => {
     const events: string[] = [];
     const seen: Array<{ message: string; options: PromptOption[] }> = [];
+    const instructionMessages: string[] = [];
     const appRuntime = runtime({
       providers: ["ollama"],
       listModels: async () => {
         events.push("models");
         return [{ id: "qwen", label: "Qwen" }];
       },
-      generate: async (provider, model, prompt) => {
-        events.push(`generate:${provider}:${model}:${prompt}`);
+      generate: async (provider, model, prompt, signal, instructions) => {
+        events.push(`generate:${provider}:${model}:${prompt}:${signal !== undefined}:${instructions}`);
         return "first response";
       },
     });
@@ -700,7 +719,7 @@ describe("one-shot application", () => {
       args: [],
       stdin: input("", true),
       stderrTty: true,
-      env: { NO_COLOR: "1" },
+      env: { NO_COLOR: "1", OPENAI_API_KEY: "u2-environment-blocker" },
       runtime: appRuntime,
       prompter: prompts({
         choices: [
@@ -710,11 +729,14 @@ describe("one-shot application", () => {
           "qwen",
         ],
         names: ["daily", "first prompt"],
+        instructions: ["You are an architect.\nFocus on realtime voice systems."],
+        instructionMessages,
         seen,
       }),
       loadAliases: async () => ({ version: 1, aliases: {} }),
-      saveAlias: async (_path, name, selection) => {
-        events.push(`save:${name}:${selection.provider}:${selection.model}`);
+      saveAlias: async (_path, name, selection, options) => {
+        events.push(`save:${name}:${selection.provider}:${selection.model}:${selection.instructions}`);
+        expect(options?.persistenceBlocker?.blocks("u2-environment-blocker")).toBe(true);
         return "saved";
       },
     });
@@ -722,8 +744,11 @@ describe("one-shot application", () => {
     expect(await runApplication(app.value)).toBe(0);
     expect(events).toEqual([
       "models",
-      "save:daily:ollama:qwen",
-      "generate:ollama:qwen:first prompt",
+      "save:daily:ollama:qwen:You are an architect.\nFocus on realtime voice systems.",
+      "generate:ollama:qwen:first prompt:true:You are an architect.\nFocus on realtime voice systems.",
+    ]);
+    expect(instructionMessages).toEqual([
+      "Optional instructions for this shortcut (press Enter to skip)",
     ]);
     expect(app.stdout.text()).toBe("first response");
     expect(appRuntime.calls.generate).toBe(1);
@@ -734,6 +759,290 @@ describe("one-shot application", () => {
       "Choose a model",
     ]);
     expect(app.stderr.text()).toContain("◆ Saved shortcut daily → Ollama · qwen");
+  });
+
+  test("rejects Unicode line separators before saving shortcut instructions", async () => {
+    let savedInstructions: string | undefined;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      nativeVaultEnabled: false,
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "ollama",
+          "qwen",
+        ],
+        names: ["daily", "first prompt"],
+        instructions: ["first\u2028second", "safe role"],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async (_path, _name, selection, options) => {
+        const persist = async (): Promise<SaveAliasResult> => {
+          savedInstructions = selection.instructions;
+          return "saved";
+        };
+        return options?.persistenceGuard?.(persist) ?? persist();
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(savedInstructions).toBe("safe role");
+    expect(app.stderr.text()).toContain(
+      "config: instructions must use ordinary line breaks and contain no other control characters.",
+    );
+    expect(app.stderr.text()).not.toContain("first\u2028second");
+  });
+
+  test("rechecks vault credentials under fixed-order locks before alias persistence", async () => {
+    const candidate = "u2-save-time-vault-key";
+    const lockProviders: string[] = [];
+    let vaultReads = 0;
+    let savedInstructions: string | undefined;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      credentialVault: {
+        get: async (provider) => {
+          vaultReads += 1;
+          return vaultReads > CLOUD_CREDENTIAL_PROVIDERS.length
+              && provider === CLOUD_CREDENTIAL_PROVIDERS[0]
+            ? candidate
+            : null;
+        },
+        set: async () => undefined,
+        delete: async () => false,
+      },
+      credentialMutationLock: async (_directory, provider, operation) => {
+        lockProviders.push(provider);
+        return operation();
+      },
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "ollama",
+          "qwen",
+        ],
+        names: ["daily", "first prompt"],
+        instructions: [candidate, "safe role"],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async (_path, _name, selection, options) => {
+        const persist = async (): Promise<SaveAliasResult> => {
+          savedInstructions = selection.instructions;
+          return "saved";
+        };
+        return options?.persistenceGuard?.(persist) ?? persist();
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(savedInstructions).toBe("safe role");
+    expect(lockProviders).toEqual([
+      ...CLOUD_CREDENTIAL_PROVIDERS,
+      ...CLOUD_CREDENTIAL_PROVIDERS,
+    ]);
+    expect(app.stderr.text()).toContain("instructions must not contain an API key");
+    expect(app.stderr.text()).not.toContain(candidate);
+  });
+
+  test("fails closed when the save-time vault refresh fails", async () => {
+    let vaultReads = 0;
+    let saves = 0;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      credentialVault: {
+        get: async () => {
+          vaultReads += 1;
+          if (vaultReads > CLOUD_CREDENTIAL_PROVIDERS.length) {
+            throw new Error("u2-save-time-vault-detail");
+          }
+          return null;
+        },
+        set: async () => undefined,
+        delete: async () => false,
+      },
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "ollama",
+          "qwen",
+        ],
+        names: ["daily"],
+        instructions: ["safe role"],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async (_path, _name, _selection, options) => {
+        const persist = async (): Promise<SaveAliasResult> => {
+          saves += 1;
+          return "saved";
+        };
+        return options?.persistenceGuard?.(persist) ?? persist();
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(saves).toBe(0);
+    expect(app.stderr.text()).toContain(
+      "config: instructions could not be checked against saved API keys; the shortcut was not saved.",
+    );
+    expect(app.stderr.text()).not.toContain("u2-save-time-vault-detail");
+    expect(app.stderr.text()).not.toContain("safe role");
+  });
+
+  test("skips vault reads when instruction capture is blank or native vaults are disabled", async () => {
+    let vaultReads = 0;
+    let saved: { instructions?: string } | undefined;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1", OPENAI_API_KEY: "u2-disabled-env-key" },
+      nativeVaultEnabled: false,
+      credentialVault: {
+        get: async () => {
+          vaultReads += 1;
+          throw new Error("disabled vault must not be read");
+        },
+        set: async () => undefined,
+        delete: async () => false,
+      },
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "ollama",
+          "qwen",
+        ],
+        names: ["daily", "first prompt"],
+        instructions: ["contains u2-disabled-env-key", "safe role"],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async (_path, _name, selection) => {
+        saved = selection;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(vaultReads).toBe(0);
+    expect(saved?.instructions).toBe("safe role");
+    expect(app.stderr.text()).toContain("instructions must not contain an API key");
+    expect(app.stderr.text()).not.toContain("u2-disabled-env-key");
+  });
+
+  test("fails instruction capture closed when an enabled vault read fails", async () => {
+    let saves = 0;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      credentialVault: {
+        get: async () => {
+          throw new Error("backend leaked u2-vault-detail");
+        },
+        set: async () => undefined,
+        delete: async () => false,
+      },
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "ollama",
+          "qwen",
+        ],
+        names: ["daily"],
+        instructions: ["safe role"],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async () => {
+        saves += 1;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(saves).toBe(0);
+    expect(app.stderr.text()).toContain(
+      "config: instructions could not be checked against saved API keys; the shortcut was not saved.",
+    );
+    expect(app.stderr.text()).not.toContain("u2-vault-detail");
+    expect(app.stderr.text()).not.toContain("safe role");
+  });
+
+  test("uses state-only instruction transitions for shortcut overwrite confirmation", async () => {
+    const scenarios = [
+      {
+        name: "add",
+        current: { provider: "ollama", model: "old" },
+        instructions: "u2-new-add-value",
+        transition: "none → set",
+      },
+      {
+        name: "remove",
+        current: { provider: "ollama", model: "old", instructions: "u2-old-remove-value" },
+        instructions: "   ",
+        transition: "set → none",
+      },
+      {
+        name: "change",
+        current: { provider: "ollama", model: "old", instructions: "u2-old-change-value" },
+        instructions: "u2-new-change-value",
+        transition: "set → changed",
+      },
+      {
+        name: "retain",
+        current: { provider: "ollama", model: "old", instructions: "u2-unchanged-value" },
+        instructions: "u2-unchanged-value",
+        transition: "unchanged",
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const confirmMessages: string[] = [];
+      const app = dependencies({
+        args: [],
+        stdin: input("", true),
+        stderrTty: true,
+        env: { NO_COLOR: "1" },
+        nativeVaultEnabled: false,
+        prompter: prompts({
+          choices: [
+            "launcher:create-shortcut",
+            "shortcut-source:available-provider",
+            "ollama",
+            "qwen",
+          ],
+          names: ["daily", "first prompt"],
+          instructions: [scenario.instructions],
+          confirms: [true],
+          confirmMessages,
+        }),
+        loadAliases: async () => ({ version: 1, aliases: { daily: scenario.current } }),
+        saveAlias: async (_path, name, _selection, options) => {
+          expect(await options?.confirmOverwrite?.(name, scenario.current)).toBe(true);
+          return "saved";
+        },
+      });
+
+      expect(await runApplication(app.value), scenario.name).toBe(0);
+      expect(confirmMessages, scenario.name).toHaveLength(1);
+      expect(confirmMessages[0], scenario.name).toContain(`Instructions: ${scenario.transition}`);
+      expect(confirmMessages[0], scenario.name).not.toContain("u2-old-");
+      expect(confirmMessages[0], scenario.name).not.toContain("u2-new-");
+      expect(confirmMessages[0], scenario.name).not.toContain("u2-unchanged-value");
+    }
   });
 
   test("adds a missing API-key provider, saves its shortcut, then generates without relisting", async () => {
@@ -753,8 +1062,8 @@ describe("one-shot application", () => {
         events.push(`validate:${provider}:${value === candidate}`);
         return [{ id: "gpt-5", label: "GPT-5" }];
       },
-      generate: async (provider, model, prompt) => {
-        events.push(`generate:${provider}:${model}:${prompt}`);
+      generate: async (provider, model, prompt, signal, instructions) => {
+        events.push(`generate:${provider}:${model}:${prompt}:${signal !== undefined}:${instructions}`);
         return "credential response";
       },
     });
@@ -775,10 +1084,11 @@ describe("one-shot application", () => {
         passwords: [candidate],
         confirms: [true],
         names: ["fast", "credential prompt"],
+        instructions: [candidate, "future role"],
       }),
       loadAliases: async () => ({ version: 1, aliases: {} }),
       saveAlias: async (_path, name, selection) => {
-        events.push(`shortcut:${name}:${selection.provider}:${selection.model}`);
+        events.push(`shortcut:${name}:${selection.provider}:${selection.model}:${selection.instructions}`);
         return "saved";
       },
     });
@@ -787,12 +1097,13 @@ describe("one-shot application", () => {
     expect(events).toEqual([
       "validate:openai:true",
       "key:openai",
-      "shortcut:fast:openai:gpt-5",
-      "generate:openai:gpt-5:credential prompt",
+      "shortcut:fast:openai:gpt-5:future role",
+      "generate:openai:gpt-5:credential prompt:true:future role",
     ]);
     expect(appRuntime.calls.list).toBe(0);
     expect(appRuntime.calls.generate).toBe(1);
     expect(app.stdout.text()).toBe("credential response");
+    expect(app.stderr.text()).toContain("instructions must not contain an API key");
     expect(`${app.stdout.text()}${app.stderr.text()}`).not.toContain(candidate);
   });
 
@@ -824,6 +1135,34 @@ describe("one-shot application", () => {
     expect(app.runtime.calls.generate).toBe(0);
     expect(app.stderr.text()).toContain("◆ Saved shortcut daily");
     expect(app.stderr.text()).toContain("shortcut was saved");
+  });
+
+  test("cancels available-provider shortcut creation at instruction entry before saving", async () => {
+    let saves = 0;
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "ollama",
+          "qwen",
+        ],
+        names: ["daily"],
+        instructions: [null],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async () => {
+        saves += 1;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(saves).toBe(0);
+    expect(app.runtime.calls.generate).toBe(0);
   });
 
   test("withholds an entire generated response containing a registered sensitive value", async () => {
@@ -1169,6 +1508,53 @@ describe("one-shot application", () => {
     expect(vaultValue === candidate).toBe(true);
     expect(aliasSaves).toBe(0);
     expect(app.runtime.calls.generate).toBe(0);
+    expect(app.stderr.text()).toContain("API key verified");
+    expect(app.stderr.text()).toContain("shortcut creation was cancelled");
+    expect(app.stderr.text()).not.toContain(candidate);
+  });
+
+  test("keeps a saved key when required shortcut instruction entry is cancelled", async () => {
+    const candidate = "u2-instruction-cancel-candidate";
+    let vaultValue: string | null = null;
+    let aliasSaves = 0;
+    const vault: CredentialVault = {
+      get: async () => vaultValue,
+      set: async (_provider, value) => {
+        vaultValue = value;
+      },
+      delete: async () => false,
+    };
+    const app = dependencies({
+      args: [],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      credentialVault: vault,
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:add-api-key",
+          "openai",
+          "gpt-5",
+        ],
+        passwords: [candidate],
+        confirms: [true],
+        names: ["fast"],
+        instructions: [null],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async () => {
+        aliasSaves += 1;
+        return "saved";
+      },
+      runtime: runtime({
+        validateCredential: async () => [{ id: "gpt-5", label: "GPT-5" }],
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(vaultValue === candidate).toBe(true);
+    expect(aliasSaves).toBe(0);
     expect(app.stderr.text()).toContain("API key verified");
     expect(app.stderr.text()).toContain("shortcut creation was cancelled");
     expect(app.stderr.text()).not.toContain(candidate);
@@ -1604,12 +1990,13 @@ describe("one-shot application", () => {
         },
         runtime: runtime({
           providers: ["ollama"],
-          generate: async (provider, model, prompt) => {
+          generate: async (provider, model, prompt, _signal, instructions) => {
             expect({ provider, model, prompt }, scenario.name).toEqual({
               provider: "ollama",
               model: "qwen",
               prompt: "hello",
             });
+            expect(instructions, scenario.name).toBeUndefined();
             return `${scenario.name} response`;
           },
         }),
@@ -1916,17 +2303,22 @@ describe("one-shot application", () => {
         loads += 1;
         expect(path).toBe("/config/aliases.json");
         return {
-          version: 1,
+          version: 2,
           aliases: {
-            fast: { provider: "openai", model: "gpt-5" },
+            fast: {
+              provider: "openai",
+              model: "gpt-5",
+              instructions: "interactive picker role",
+            },
             Daily: { provider: "ollama", model: "llama3" },
             assistant: { provider: "claude-cli", model: null },
           },
         };
       },
       runtime: runtime({
-        generate: async (provider, model) => {
+        generate: async (provider, model, _prompt, _signal, instructions) => {
           expect({ provider, model }).toEqual({ provider: "openai", model: "gpt-5" });
+          expect(instructions).toBe("interactive picker role");
           return "alias-result";
         },
       }),
@@ -2035,6 +2427,46 @@ describe("one-shot application", () => {
     );
   });
 
+  test("does not treat an instructed alias as equivalent to an instruction-free fresh run", async () => {
+    const inputMessages: string[] = [];
+    let saved: AliasRecord | undefined;
+    const app = dependencies({
+      args: ["--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      nativeVaultEnabled: false,
+      prompter: prompts({
+        choices: [false, "ollama", "qwen"],
+        names: ["plain"],
+        instructions: [""],
+        inputMessages,
+      }),
+      loadAliases: async () => ({
+        version: 2,
+        aliases: {
+          instructed: {
+            provider: "ollama",
+            model: "qwen",
+            instructions: "u2-existing-role",
+          },
+        },
+      }),
+      saveAlias: async (_path, _name, selection) => {
+        saved = selection;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(inputMessages).toEqual([
+      "Enter an alias name for Ollama · qwen (Enter to exit)",
+    ]);
+    expect(saved).toEqual({ provider: "ollama", model: "qwen" });
+    expect(app.stderr.text()).not.toContain("is already saved as alias instructed");
+    expect(app.stderr.text()).not.toContain("u2-existing-role");
+  });
+
   test("suggests an existing alias for a provider-default target", async () => {
     const inputMessages: string[] = [];
     let saves = 0;
@@ -2127,6 +2559,12 @@ describe("one-shot application", () => {
       stdin: input("", true),
       stderrTty: true,
       prompter: prompts({ confirms: [false] }),
+      runtime: runtime({
+        generate: async (_provider, _model, _prompt, _signal, instructions) => {
+          expect(instructions).toBeUndefined();
+          return "response";
+        },
+      }),
       loadAliases: async () => {
         throw new Error("explicit selection must not load aliases");
       },
@@ -2181,14 +2619,18 @@ describe("one-shot application", () => {
       const app = dependencies({
         args,
         runtime: runtime({
-          generate: async (provider, model, prompt) => {
-            calls.push(`${provider}:${model}:${prompt}`);
+          generate: async (provider, model, prompt, signal, instructions) => {
+            calls.push(`${provider}:${model}:${prompt}:${signal !== undefined}:${instructions}`);
             return "alias-result";
           },
         }),
         resolveAlias: async (_path, name) => {
           calls.push(`resolve:${name}`);
-          return { provider: "claude-cli", model: null };
+          return {
+            provider: "claude-cli",
+            model: null,
+            instructions: "shared alias role",
+          };
         },
       });
 
@@ -2207,7 +2649,7 @@ describe("one-shot application", () => {
       stdout: "alias-result",
       stderr: "",
       runtimeCalls: { discover: 0, list: 0, generate: 1 },
-      calls: ["resolve:Daily", "claude-cli:null:hello"],
+      calls: ["resolve:Daily", "claude-cli:null:hello:true:shared alias role"],
     });
   });
 
@@ -2439,14 +2881,19 @@ describe("one-shot application", () => {
       args: ["Daily"],
       stdin: input("piped prompt"),
       runtime: runtime({
-        generate: async (_provider, _model, prompt) => {
+        generate: async (_provider, _model, prompt, _signal, instructions) => {
           expect(prompt).toBe("piped prompt");
+          expect(instructions).toBe("piped alias role");
           return "alias-result";
         },
       }),
       resolveAlias: async (_path, name) => {
         expect(name).toBe("Daily");
-        return { provider: "claude-cli", model: null };
+        return {
+          provider: "claude-cli",
+          model: null,
+          instructions: "piped alias role",
+        };
       },
     });
 
@@ -2705,6 +3152,28 @@ describe("one-shot application", () => {
     expect(saves).toBe(0);
   });
 
+  test("cancelling post-generation instruction entry preserves the response without saving", async () => {
+    let saves = 0;
+    const app = dependencies({
+      args: ["--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      prompter: prompts({
+        choices: ["ollama", "qwen"],
+        names: ["daily"],
+        instructions: [null],
+      }),
+      saveAlias: async () => {
+        saves += 1;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("response");
+    expect(saves).toBe(0);
+  });
+
   test("waits for stdout to flush before opening the interactive boundary", async () => {
     const events: string[] = [];
     const app = dependencies({
@@ -2759,9 +3228,10 @@ describe("one-shot application", () => {
       args: ["--input", "hello", "--provider", "openai", "--model", "gpt-5"],
       stdin: input("", true),
       stderrTty: true,
-      prompter: prompts({ names: ["FAST"] }),
-      saveAlias: async (_path, name) => {
+      prompter: prompts({ names: ["FAST"], instructions: ["post generation role"] }),
+      saveAlias: async (_path, name, selection) => {
         savedNames.push(name);
+        expect(selection.instructions).toBe("post generation role");
         return "saved";
       },
     });
@@ -2820,7 +3290,7 @@ describe("one-shot application", () => {
     expect(savedNames).toEqual(["daily"]);
     expect(app.stderr.text()).toContain("config: invalid alias name");
     expect(confirmMessages).toEqual([
-      "Overwrite alias daily?\nOld: Ollama · old\nNew: Ollama · qwen",
+      "Overwrite alias daily?\nOld: Ollama · old\nNew: Ollama · qwen\nInstructions: unchanged",
     ]);
     expect(confirmInitialValues).toEqual([false]);
     expect(app.runtime.calls.generate).toBe(1);
@@ -2928,6 +3398,7 @@ describe("API-key management", () => {
       choices: ["launcher:manage-connections", "setup:manage-api-keys", "openai", true, "gpt-5"],
       passwords: [candidate],
       names: ["FAST"],
+      instructions: ["managed role"],
       confirms: [true],
       seen,
       confirmInitialValues,
@@ -2952,11 +3423,14 @@ describe("API-key management", () => {
           return [{ id: "gpt-5", label: "GPT-5" }];
         },
       }),
-      saveAlias: async (_path, name, selection) => {
-        events.push(`alias:${name}:${selection.provider}:${selection.model}`);
-        expect(Object.keys(selection).sort()).toEqual(["model", "provider"]);
-        expect(JSON.stringify(selection)).not.toContain(candidate);
-        return "saved";
+      saveAlias: async (_path, name, selection, options) => {
+        const persist = async (): Promise<SaveAliasResult> => {
+          events.push(`alias:${name}:${selection.provider}:${selection.model}:${selection.instructions}`);
+          expect(Object.keys(selection).sort()).toEqual(["instructions", "model", "provider"]);
+          expect(JSON.stringify(selection)).not.toContain(candidate);
+          return "saved";
+        };
+        return options?.persistenceGuard?.(persist) ?? persist();
       },
     });
     const invalidations: string[] = [];
@@ -2972,13 +3446,16 @@ describe("API-key management", () => {
     };
 
     expect(await runApplication(app.value)).toBe(0);
-    expect(events).toEqual([
+    expect(events.slice(0, 4)).toEqual([
       "get:openai",
       `validate:${candidate}`,
       "get:openai",
       "set:openai",
-      "alias:fast:openai:gpt-5",
     ]);
+    expect(events.at(-1)).toBe("alias:fast:openai:gpt-5:managed role");
+    expect(events.filter((event) => event.startsWith("get:"))).toHaveLength(
+      11 + CLOUD_CREDENTIAL_PROVIDERS.length,
+    );
     expect(app.events.filter((event) => event === "set:openai")).toHaveLength(1);
     expect(invalidations).toEqual(["openai"]);
     expect(confirmInitialValues).toEqual([false]);
@@ -3439,6 +3916,21 @@ describe("API-key management", () => {
           ],
           passwords: [candidate],
           names: ["fast"],
+          instructions: [null],
+          confirms: [true],
+        }),
+      },
+      {
+        prompter: prompts({
+          choices: [
+            "launcher:manage-connections",
+            "setup:manage-api-keys",
+            "openai",
+            true,
+            "qwen",
+          ],
+          passwords: [candidate],
+          names: ["fast"],
           confirms: [true, null],
         }),
         loadAliases: async () => ({
@@ -3569,6 +4061,10 @@ describe("API-key management", () => {
     const wrapped: ApplicationPrompter = {
       select: async (...args) => { promptEvents.push("select"); return base.select(...args); },
       input: async (...args) => { promptEvents.push("input"); return base.input(...args); },
+      instruction: async (...args) => {
+        promptEvents.push("instruction");
+        return base.instruction(...args);
+      },
       password: async (...args) => { promptEvents.push("password"); return base.password(...args); },
       confirm: async (...args) => { promptEvents.push("confirm"); return base.confirm(...args); },
     };

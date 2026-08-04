@@ -10,12 +10,15 @@ import pc from "picocolors";
 import type { Readable, Writable } from "node:stream";
 import {
   type AliasRecord,
+  type SaveAliasResult,
   AliasStoreError,
+  hasInvalidInstructionCharacters,
   isValidAliasName,
   loadAliases as loadStoredAliases,
   normalizeAliasName,
   resolveAlias as resolveStoredAlias,
   resolveAliasPath,
+  sameAliasRecord,
   saveAlias as saveStoredAlias,
 } from "./aliases.ts";
 import {
@@ -34,11 +37,13 @@ import {
 } from "./io.ts";
 import {
   CredentialVaultError,
+  createPersistenceBlocker,
   resolveCredentialLockDirectory,
   withCredentialMutationLock,
   type CredentialMutationLock,
   type CredentialResolver,
   type CredentialVault,
+  type PersistenceBlocker,
   type SensitiveValueRegistry,
 } from "./credentials.ts";
 import {
@@ -73,6 +78,11 @@ const RUN_ONCE_VALUE = "launcher:run-once";
 const MANAGE_CONNECTIONS_VALUE = "launcher:manage-connections";
 const AVAILABLE_PROVIDER_SOURCE_VALUE = "shortcut-source:available-provider";
 const ADD_API_KEY_SOURCE_VALUE = "shortcut-source:add-api-key";
+const INSTRUCTION_PROMPT_MESSAGE =
+  "Optional instructions for this shortcut (press Enter to skip)";
+const INSTRUCTION_CREDENTIAL_DIAGNOSTIC = "config: instructions must not contain an API key.";
+const INSTRUCTION_VAULT_DIAGNOSTIC =
+  "config: instructions could not be checked against saved API keys; the shortcut was not saved.";
 
 export type ApplicationPrompter = SearchablePrompter;
 
@@ -242,8 +252,120 @@ async function collectOneShotPrompt(
   }
 }
 
-function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
-  return left.provider === right.provider && left.model === right.model;
+type InstructionCaptureResult =
+  | { kind: "ready"; instructions?: string; persistenceBlocker?: PersistenceBlocker }
+  | { kind: "cancelled" }
+  | { kind: "failed" };
+
+class InstructionCredentialBlockedError extends Error {}
+class InstructionCredentialRefreshError extends Error {}
+
+async function captureShortcutInstructions(
+  deps: ApplicationDependencies,
+  diagnostic: (text: string) => void,
+  validatedCredentials: readonly string[] = [],
+): Promise<InstructionCaptureResult> {
+  while (true) {
+    const value = await deps.prompter.instruction(INSTRUCTION_PROMPT_MESSAGE);
+    if (value === null) return { kind: "cancelled" };
+    if (hasInvalidInstructionCharacters(value)) {
+      diagnostic("config: instructions must use ordinary line breaks and contain no other control characters.");
+      continue;
+    }
+    if (value.trim().length === 0) return { kind: "ready" };
+
+    const persistenceBlocker = createPersistenceBlocker(deps.env);
+    for (const credential of validatedCredentials) {
+      persistenceBlocker.register(credential, "validated");
+    }
+    if (deps.nativeVaultEnabled === true) {
+      try {
+        for (const provider of CLOUD_CREDENTIAL_PROVIDERS) {
+          const credential = await deps.credentialVault.get(provider);
+          if (credential !== null) {
+            deps.sensitive.register(credential);
+            persistenceBlocker.register(credential, "vault");
+          }
+        }
+      } catch {
+        diagnostic(INSTRUCTION_VAULT_DIAGNOSTIC);
+        return { kind: "failed" };
+      }
+    }
+    if (persistenceBlocker.blocks(value)) {
+      diagnostic(INSTRUCTION_CREDENTIAL_DIAGNOSTIC);
+      continue;
+    }
+    return { kind: "ready", instructions: value, persistenceBlocker };
+  }
+}
+
+function runWithAllCredentialMutationLocks<T>(
+  deps: ApplicationDependencies,
+  operation: () => Promise<T>,
+  index = 0,
+): Promise<T> {
+  if (index === CLOUD_CREDENTIAL_PROVIDERS.length) return operation();
+  return runWithCredentialMutationLock(
+    deps,
+    CLOUD_CREDENTIAL_PROVIDERS[index]!,
+    () => runWithAllCredentialMutationLocks(deps, operation, index + 1),
+  );
+}
+
+function instructionPersistenceGuard(
+  deps: ApplicationDependencies,
+  instructions: string | undefined,
+  persistenceBlocker: PersistenceBlocker | undefined,
+): (<T>(operation: () => Promise<T>) => Promise<T>) | undefined {
+  if (instructions === undefined || deps.nativeVaultEnabled !== true) {
+    return undefined;
+  }
+
+  const blocker = persistenceBlocker ?? createPersistenceBlocker(deps.env);
+  return (operation) => runWithAllCredentialMutationLocks(deps, async () => {
+    for (const name of BYOK_API_KEY_ENV_VARS) {
+      const value = deps.env[name];
+      if (value !== undefined) blocker.register(value, "environment");
+    }
+    for (const provider of CLOUD_CREDENTIAL_PROVIDERS) {
+      let credential: string | null;
+      try {
+        credential = await deps.credentialVault.get(provider);
+      } catch (error) {
+        throw new InstructionCredentialRefreshError(undefined, { cause: error });
+      }
+      if (credential !== null) {
+        deps.sensitive.register(credential);
+        blocker.register(credential, "vault");
+      }
+    }
+    if (blocker.blocks(instructions)) throw new InstructionCredentialBlockedError();
+    return operation();
+  });
+}
+
+function withInstructions(
+  selection: AliasRecord,
+  instructions: string | undefined,
+): AliasRecord {
+  return {
+    provider: selection.provider,
+    model: selection.model,
+    ...(instructions === undefined ? {} : { instructions }),
+  };
+}
+
+function instructionTransition(
+  current: AliasRecord | undefined,
+  next: AliasRecord,
+): "none → set" | "set → none" | "set → changed" | "unchanged" {
+  const currentValue = current?.instructions;
+  const nextValue = next.instructions;
+  if (currentValue === nextValue) return "unchanged";
+  if (currentValue === undefined) return "none → set";
+  if (nextValue === undefined) return "set → none";
+  return "set → changed";
 }
 
 function selectedCredentialModel(
@@ -271,7 +393,13 @@ interface PendingAlias {
   name: string;
   selection: AliasRecord;
   expectedCurrent?: AliasRecord;
+  persistenceBlocker?: PersistenceBlocker;
 }
+
+type CredentialAliasResult =
+  | { kind: "ready"; alias: PendingAlias }
+  | { kind: "none" }
+  | { kind: "failed" };
 
 async function prepareCredentialAlias(
   deps: ApplicationDependencies,
@@ -279,7 +407,8 @@ async function prepareCredentialAlias(
   provider: ByokCloudProviderId,
   models: readonly ByokModelOption[],
   diagnostic: (text: string) => void,
-): Promise<PendingAlias | null> {
+  validatedCredentials: readonly string[] = [],
+): Promise<CredentialAliasResult> {
   const safeModels = models.filter((model) =>
     sanitizePromptText(model.id) === model.id
     && deps.sensitive.redact(model.id) === model.id
@@ -288,7 +417,7 @@ async function prepareCredentialAlias(
     diagnostic(
       `model-list (${provider}): provider returned ${models.length === 0 ? "no models" : "no alias-safe models"}; the API key was saved without an alias.`,
     );
-    return null;
+    return { kind: "none" };
   }
 
   const createShortcut = selectedShortcutChoice(
@@ -297,7 +426,7 @@ async function prepareCredentialAlias(
       { value: true, label: "Choose a model…" },
     ]),
   );
-  if (createShortcut !== true) return null;
+  if (createShortcut !== true) return { kind: "none" };
 
   const modelOptions = sortPromptOptions(safeModels.map((model) => {
     const id = deps.sensitive.redact(sanitizePromptText(model.id));
@@ -312,7 +441,7 @@ async function prepareCredentialAlias(
     await deps.prompter.select("Choose a model for the shortcut", modelOptions),
     safeModels,
   );
-  if (model === null) return null;
+  if (model === null) return { kind: "none" };
   const selection = { provider, model } satisfies AliasRecord;
 
   while (true) {
@@ -325,8 +454,8 @@ async function prepareCredentialAlias(
           : "Use 1-64 ASCII letters, numbers, hyphens, or underscores.";
       },
     });
-    if (name === null) return null;
-    if (name === "") return null;
+    if (name === null) return { kind: "none" };
+    if (name === "") return { kind: "none" };
     if (deps.sensitive.redact(name) !== name) {
       diagnostic("config: alias names must not contain an API key.");
       continue;
@@ -336,17 +465,30 @@ async function prepareCredentialAlias(
       continue;
     }
 
+    const capture = await captureShortcutInstructions(deps, diagnostic, validatedCredentials);
+    if (capture.kind === "cancelled") return { kind: "none" };
+    if (capture.kind === "failed") return { kind: "failed" };
+    const pendingSelection = withInstructions(selection, capture.instructions);
+
     const canonicalName = normalizeAliasName(name);
     const current = Object.hasOwn(aliases, canonicalName) ? aliases[canonicalName] : undefined;
-    if (current !== undefined && !sameAliasRecord(current, selection)) {
+    if (current !== undefined && !sameAliasRecord(current, pendingSelection)) {
       const overwrite = await deps.prompter.confirm(
-        `Overwrite alias ${canonicalName}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, selection)}`,
+        `Overwrite alias ${canonicalName}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, pendingSelection)}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
         { initialValue: false },
       );
-      if (overwrite === null) return null;
+      if (overwrite === null) return { kind: "none" };
       if (!overwrite) continue;
     }
-    return { name: canonicalName, selection, expectedCurrent: current };
+    return {
+      kind: "ready",
+      alias: {
+        name: canonicalName,
+        selection: pendingSelection,
+        expectedCurrent: current,
+        persistenceBlocker: capture.persistenceBlocker,
+      },
+    };
   }
 }
 
@@ -370,12 +512,13 @@ type RequiredShortcutTarget =
 type RequiredShortcutResult =
   | { kind: "saved"; name: string; selection: AliasRecord }
   | { kind: "cancelled" }
-  | { kind: "failed" };
+  | { kind: "failed"; reason: "models" | "instructions" };
 
 async function prepareRequiredShortcut(
   deps: ApplicationDependencies,
   target: RequiredShortcutTarget,
   diagnostic: (text: string) => void,
+  validatedCredentials: readonly string[] = [],
 ): Promise<RequiredShortcutResult> {
   let selection: AliasRecord;
   if (target.kind === "selected") {
@@ -383,7 +526,7 @@ async function prepareRequiredShortcut(
   } else {
     const models = target.models.filter((model) => isShortcutSafeModel(deps, model));
     if (models.length === 0) {
-      return { kind: "failed" };
+      return { kind: "failed", reason: "models" };
     }
     const options = sortPromptOptions(models.map((model) => {
       const id = sanitizePromptText(model.id);
@@ -404,7 +547,7 @@ async function prepareRequiredShortcut(
 
   const save = deps.saveAlias ?? saveStoredAlias;
   const targetLabel = safeFormatSelection(deps, selection);
-  while (true) {
+  namePrompt: while (true) {
     const name = await deps.prompter.input("Name this shortcut", {
       validate: (value) => {
         if (value === undefined || value === "") return "Enter a shortcut name.";
@@ -430,31 +573,57 @@ async function prepareRequiredShortcut(
       continue;
     }
 
-    let overwriteCancelled = false;
-    const result = await save(applicationAliasPath(deps), name, selection, {
-      confirmOverwrite: async (_name, current) => {
-        const overwrite = await deps.prompter.confirm(
-          `Overwrite shortcut ${name}?\nOld: ${
-            current === undefined ? "(not present)" : safeFormatSelection(deps, current)
-          }\nNew: ${targetLabel}`,
-          { initialValue: false },
-        );
-        overwriteCancelled = overwrite === null;
-        return overwrite === true;
-      },
-    });
-    if (result === "declined") {
-      if (overwriteCancelled) return { kind: "cancelled" };
-      continue;
-    }
+    while (true) {
+      const capture = await captureShortcutInstructions(deps, diagnostic, validatedCredentials);
+      if (capture.kind === "cancelled") return { kind: "cancelled" };
+      if (capture.kind === "failed") return { kind: "failed", reason: "instructions" };
+      const pendingSelection = withInstructions(selection, capture.instructions);
 
-    const colors = createTerminalColors(deps.stderr, deps.env);
-    deps.stderr.write(
-      result === "already-saved"
-        ? `${colors.green(`◆ Shortcut already saved ${name} → ${targetLabel}`)}\n`
-        : `${colors.green(`◆ Saved shortcut ${name} → ${targetLabel}`)}\n`,
-    );
-    return { kind: "saved", name, selection };
+      let overwriteCancelled = false;
+      let result: SaveAliasResult;
+      try {
+        result = await save(applicationAliasPath(deps), name, pendingSelection, {
+          persistenceBlocker: capture.persistenceBlocker,
+          persistenceGuard: instructionPersistenceGuard(
+            deps,
+            capture.instructions,
+            capture.persistenceBlocker,
+          ),
+          confirmOverwrite: async (_name, current) => {
+            const overwrite = await deps.prompter.confirm(
+              `Overwrite shortcut ${name}?\nOld: ${
+                current === undefined ? "(not present)" : safeFormatSelection(deps, current)
+              }\nNew: ${targetLabel}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
+              { initialValue: false },
+            );
+            overwriteCancelled = overwrite === null;
+            return overwrite === true;
+          },
+        });
+      } catch (error) {
+        if (error instanceof InstructionCredentialBlockedError) {
+          diagnostic(INSTRUCTION_CREDENTIAL_DIAGNOSTIC);
+          continue;
+        }
+        if (error instanceof InstructionCredentialRefreshError) {
+          diagnostic(INSTRUCTION_VAULT_DIAGNOSTIC);
+          return { kind: "failed", reason: "instructions" };
+        }
+        throw error;
+      }
+      if (result === "declined") {
+        if (overwriteCancelled) return { kind: "cancelled" };
+        continue namePrompt;
+      }
+
+      const colors = createTerminalColors(deps.stderr, deps.env);
+      deps.stderr.write(
+        result === "already-saved"
+          ? `${colors.green(`◆ Shortcut already saved ${name} → ${targetLabel}`)}\n`
+          : `${colors.green(`◆ Saved shortcut ${name} → ${targetLabel}`)}\n`,
+      );
+      return { kind: "saved", name, selection: pendingSelection };
+    }
   }
 }
 
@@ -483,6 +652,7 @@ async function generateWithTimeout(
   provider: ByokProviderId,
   model: string | null,
   prompt: string,
+  instructions?: string,
 ): Promise<string> {
   const timeoutMs = deps.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS;
   const controller = new AbortController();
@@ -492,7 +662,13 @@ async function generateWithTimeout(
     controller.abort();
   }, timeoutMs);
   try {
-    return await deps.runtime.generate(provider, model, prompt, controller.signal);
+    return await deps.runtime.generate(
+      provider,
+      model,
+      prompt,
+      controller.signal,
+      instructions,
+    );
   } catch (error) {
     if (timedOut) {
       throw new RuntimeStageError("generation", provider, `timed out after ${timeoutMs}ms`);
@@ -591,7 +767,9 @@ async function resolveFreshSelection(
   const resolved = { provider: result.provider, model: result.model };
   const existingAlias = sortPromptOptions(Object.entries(aliases)
     .filter(([, candidate]) =>
-      candidate.provider === resolved.provider && candidate.model === resolved.model
+      candidate.provider === resolved.provider
+      && candidate.model === resolved.model
+      && candidate.instructions === undefined
     )
     .map(([alias]) => ({ value: alias, label: alias })))[0]?.value;
   return {
@@ -624,30 +802,50 @@ async function offerAliasSave(
       diagnostic("config: invalid alias name; use 1-64 ASCII letters, numbers, hyphens, or underscores.");
       continue;
     }
-    const canonicalName = normalizeAliasName(name);
-    try {
-      const result = await save(applicationAliasPath(deps), canonicalName, selection, {
-        confirmOverwrite: async (_alias, current) =>
-          (await deps.prompter.confirm(
-            `Overwrite alias ${canonicalName}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}`,
-            { initialValue: false },
-          )) === true,
-      });
-      if (result === "saved") {
-        deps.stderr.write(
-          colors.green("◆ Saved alias ")
-          + colors.white(canonicalName)
-          + colors.green(` → ${target}\n  Next time, use `)
-          + colors.white(`llm-now ${canonicalName} --input "<prompt>"`)
-          + "\n",
-        );
-      } else if (result === "already-saved") {
-        deps.stderr.write(`${colors.green(`◆ Already saved ${canonicalName} → ${target}`)}\n`);
+    while (true) {
+      const capture = await captureShortcutInstructions(deps, diagnostic);
+      if (capture.kind === "cancelled") return true;
+      if (capture.kind === "failed") return false;
+      const pendingSelection = withInstructions(selection, capture.instructions);
+      const canonicalName = normalizeAliasName(name);
+      try {
+        const result = await save(applicationAliasPath(deps), canonicalName, pendingSelection, {
+          persistenceBlocker: capture.persistenceBlocker,
+          persistenceGuard: instructionPersistenceGuard(
+            deps,
+            capture.instructions,
+            capture.persistenceBlocker,
+          ),
+          confirmOverwrite: async (_alias, current) =>
+            (await deps.prompter.confirm(
+              `Overwrite alias ${canonicalName}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
+              { initialValue: false },
+            )) === true,
+        });
+        if (result === "saved") {
+          deps.stderr.write(
+            colors.green("◆ Saved alias ")
+            + colors.white(canonicalName)
+            + colors.green(` → ${target}\n  Next time, use `)
+            + colors.white(`llm-now ${canonicalName} --input "<prompt>"`)
+            + "\n",
+          );
+        } else if (result === "already-saved") {
+          deps.stderr.write(`${colors.green(`◆ Already saved ${canonicalName} → ${target}`)}\n`);
+        }
+        return true;
+      } catch (error) {
+        if (error instanceof InstructionCredentialBlockedError) {
+          diagnostic(INSTRUCTION_CREDENTIAL_DIAGNOSTIC);
+          continue;
+        }
+        if (error instanceof InstructionCredentialRefreshError) {
+          diagnostic(INSTRUCTION_VAULT_DIAGNOSTIC);
+          return false;
+        }
+        diagnostic(`config: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
       }
-      return true;
-    } catch (error) {
-      diagnostic(`config: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
     }
   }
 }
@@ -662,7 +860,7 @@ function registerResolvedCredential(
 }
 
 type AddCredentialResult =
-  | { kind: "saved"; models: readonly ByokModelOption[] }
+  | { kind: "saved"; models: readonly ByokModelOption[]; validatedCredential: string }
   | { kind: "stopped"; exitCode: number };
 
 type VerifiedCredentialResult =
@@ -733,7 +931,11 @@ async function addCredential(
     colors.green(`◆ ${providerLabel(provider)} · API key verified\n`)
     + "  stored as: saved credential\n",
   );
-  return { kind: "saved", models: verified.models };
+  return {
+    kind: "saved",
+    models: verified.models,
+    validatedCredential: verified.candidate,
+  };
 }
 
 async function runCredentialManagement(
@@ -836,23 +1038,33 @@ async function runCredentialManagement(
     + "  stored as: saved credential\n",
   );
 
-  const pendingAlias = await prepareCredentialAlias(
+  const aliasResult = await prepareCredentialAlias(
     deps,
     aliases,
     provider,
     verified.models,
     diagnostic,
+    [verified.candidate],
   );
-  if (pendingAlias === null) return 0;
+  if (aliasResult.kind === "none") return 0;
+  if (aliasResult.kind === "failed") return 1;
+  const pendingAlias = aliasResult.alias;
   try {
     const saveAlias = deps.saveAlias ?? saveStoredAlias;
+    const persistenceGuard = instructionPersistenceGuard(
+      deps,
+      pendingAlias.selection.instructions,
+      pendingAlias.persistenceBlocker,
+    );
     const result = await saveAlias(
       applicationAliasPath(deps),
       pendingAlias.name,
       pendingAlias.selection,
       pendingAlias.expectedCurrent === undefined
-        ? undefined
+        ? { persistenceBlocker: pendingAlias.persistenceBlocker, persistenceGuard }
         : {
+          persistenceBlocker: pendingAlias.persistenceBlocker,
+          persistenceGuard,
           confirmOverwrite: async (_name, current) =>
             current !== undefined && sameAliasRecord(current, pendingAlias.expectedCurrent!),
         },
@@ -867,6 +1079,14 @@ async function runCredentialManagement(
     );
     return 0;
   } catch (error) {
+    if (error instanceof InstructionCredentialBlockedError) {
+      diagnostic(INSTRUCTION_CREDENTIAL_DIAGNOSTIC);
+      return 1;
+    }
+    if (error instanceof InstructionCredentialRefreshError) {
+      diagnostic(INSTRUCTION_VAULT_DIAGNOSTIC);
+      return 1;
+    }
     diagnostic(
       `API key was saved, but the alias was not saved: ${error instanceof Error ? error.message : String(error)}`,
     );
@@ -996,6 +1216,7 @@ async function createShortcutWithApiKey(
         models: credential.models,
       },
       diagnostic,
+      [credential.validatedCredential],
     );
   } catch (error) {
     diagnostic(
@@ -1010,11 +1231,13 @@ async function createShortcutWithApiKey(
     return 0;
   }
   if (shortcut.kind === "failed") {
-    diagnostic(
-      `model-list (${provider}): provider returned ${
-        credential.models.length === 0 ? "no models" : "no shortcut-safe models"
-      }; the API key was saved without a shortcut.`,
-    );
+    if (shortcut.reason === "models") {
+      diagnostic(
+        `model-list (${provider}): provider returned ${
+          credential.models.length === 0 ? "no models" : "no shortcut-safe models"
+        }; the API key was saved without a shortcut.`,
+      );
+    }
     return 1;
   }
   return finishCreatedShortcut(deps, shortcut, diagnostic);
@@ -1236,6 +1459,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       selection.selection.provider,
       selection.selection.model,
       prompt,
+      selection.selection.instructions,
     );
     const terminalResponse = stripTerminalSequences(response);
     if (

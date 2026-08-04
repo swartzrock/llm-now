@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AliasCollisionError,
@@ -10,6 +10,7 @@ import {
   resolveAliasPath,
   saveAlias,
 } from "../src/aliases.ts";
+import { createPersistenceBlocker } from "../src/credentials.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -67,6 +68,36 @@ describe("global aliases", () => {
     const store = await loadAliases(join(import.meta.dir, "fixtures/aliases/valid.json"));
     expect(store.aliases.daily).toEqual({ provider: "ollama", model: "llama3" });
     expect(store.aliases.claude).toEqual({ provider: "claude-cli", model: null });
+  });
+
+  test("loads version 2 instructions exactly without rewriting the store", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    const text = `${JSON.stringify({
+      version: 2,
+      aliases: {
+        fred: {
+          provider: "codex-cli",
+          model: null,
+          instructions: "You are a realtime voice architect.\nFocus on interruption handling.",
+        },
+        plain: { provider: "ollama", model: "llama3" },
+      },
+    }, null, 2)}\n`;
+    await writeFile(path, text);
+
+    expect(await loadAliases(path)).toEqual({
+      version: 2,
+      aliases: {
+        fred: {
+          provider: "codex-cli",
+          model: null,
+          instructions: "You are a realtime voice architect.\nFocus on interruption handling.",
+        },
+        plain: { provider: "ollama", model: "llama3" },
+      },
+    });
+    expect(await readFile(path, "utf8")).toBe(text);
   });
 
   test("normalizes saved aliases and resolves every ASCII casing", async () => {
@@ -168,6 +199,12 @@ describe("global aliases", () => {
       { version: 1, aliases: { daily: { provider: "ollama", model: null } } },
       { version: 1, aliases: { daily: { provider: "ollama", model: "" } } },
       { version: 1, aliases: { daily: { provider: "ollama", model: "x", apiKey: "secret" } } },
+      { version: 1, aliases: { daily: { provider: "ollama", model: "x", instructions: "legacy" } } },
+      { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: "" } } },
+      { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: "   " } } },
+      { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: "bad\u0000value" } } },
+      { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: 42 } } },
+      { version: 3, aliases: {} },
     ];
 
     for (const document of invalidDocuments) {
@@ -178,6 +215,220 @@ describe("global aliases", () => {
     await expect(resolveAlias(path, "bad name")).rejects.toThrow("invalid alias name: bad name");
     await expect(saveAlias(path, "_bad", { provider: "ollama", model: "x" }))
       .rejects.toThrow("invalid alias name: _bad");
+  });
+
+  test("migrates only when instructions are first stored and never downgrades version 2", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    await writeFile(path, `${JSON.stringify({
+      version: 1,
+      aliases: { existing: { provider: "ollama", model: "existing" } },
+    }, null, 2)}\n`);
+
+    expect(await saveAlias(path, "plain", { provider: "ollama", model: "plain" })).toBe("saved");
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      version: 1,
+      aliases: {
+        existing: { provider: "ollama", model: "existing" },
+        plain: { provider: "ollama", model: "plain" },
+      },
+    });
+
+    expect(await saveAlias(path, "fred", {
+      provider: "codex-cli",
+      model: null,
+      instructions: "Architect realtime voice systems.\nFocus on interruptions.",
+    })).toBe("saved");
+    const instructed = await loadAliases(path);
+    expect(instructed.version).toBe(2);
+    expect(instructed.aliases.fred?.instructions).toBe(
+      "Architect realtime voice systems.\nFocus on interruptions.",
+    );
+    expect(instructed.aliases.existing).toEqual({
+      provider: "ollama",
+      model: "existing",
+    });
+
+    expect(await saveAlias(path, "fred", { provider: "codex-cli", model: null }, {
+      confirmOverwrite: async () => true,
+    })).toBe("saved");
+    expect(await loadAliases(path)).toEqual({
+      version: 2,
+      aliases: {
+        existing: { provider: "ollama", model: "existing" },
+        fred: { provider: "codex-cli", model: null },
+        plain: { provider: "ollama", model: "plain" },
+      },
+    });
+  });
+
+  test("uses complete records for equality and case-insensitive overwrite identity", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    const original = {
+      provider: "ollama" as const,
+      model: "model",
+      instructions: "First role",
+    };
+    await saveAlias(path, "Fred", original);
+
+    await expect(saveAlias(path, "FRED", original)).resolves.toBe("already-saved");
+    await expect(saveAlias(path, "fred", { ...original, instructions: "Second role" }))
+      .rejects.toBeInstanceOf(AliasCollisionError);
+    await expect(saveAlias(path, "fReD", { ...original, instructions: "Second role" }, {
+      confirmOverwrite: async (_name, current) => {
+        expect(current).toEqual(original);
+        return true;
+      },
+    })).resolves.toBe("saved");
+    await expect(resolveAlias(path, "FRED")).resolves.toEqual({
+      ...original,
+      instructions: "Second role",
+    });
+  });
+
+  test("rejects invalid instruction save input without creating storage artifacts", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "nested/aliases.json");
+    const invalid = [
+      "",
+      "   ",
+      "bad\tvalue",
+      "bad\u007fvalue",
+      "bad\u009fvalue",
+      "bad\u2028value",
+      "bad\u2029value",
+    ];
+
+    for (const instructions of invalid) {
+      await expect(saveAlias(path, "fred", {
+        provider: "ollama",
+        model: "model",
+        instructions,
+      })).rejects.toThrow("invalid alias instructions");
+    }
+    expect(await readdir(directory)).toEqual([]);
+  });
+
+  test("blocks qualifying credentials before serialization or temporary-file creation", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    await saveAlias(path, "plain", { provider: "ollama", model: "plain" });
+    const before = await readFile(path, "utf8");
+    const beforeMode = (await stat(path)).mode;
+    const blocker = createPersistenceBlocker({
+      OPENAI_API_KEY: "x",
+      ANTHROPIC_API_KEY: "qualifying-key",
+    });
+
+    expect(await saveAlias(path, "short", {
+      provider: "ollama",
+      model: "short",
+      instructions: "Explain x clearly",
+    }, { persistenceBlocker: blocker })).toBe("saved");
+    const accepted = await readFile(path, "utf8");
+    const acceptedMode = (await stat(path)).mode;
+    const entriesBeforeRejection = await readdir(directory);
+
+    await expect(saveAlias(path, "blocked", {
+      provider: "ollama",
+      model: "blocked",
+      instructions: "Do not print qualifying-key",
+    }, { persistenceBlocker: blocker })).rejects.toThrow(
+      "instructions must not contain an API key",
+    );
+    expect(await readFile(path, "utf8")).toBe(accepted);
+    expect((await stat(path)).mode).toBe(acceptedMode);
+    expect(await readdir(directory)).toEqual(entriesBeforeRejection);
+    expect(accepted).not.toBe(before);
+    expect(beforeMode & 0o777).toBe(acceptedMode & 0o777);
+
+    blocker.register("verified-short", "validated");
+    await expect(saveAlias(path, "verified", {
+      provider: "ollama",
+      model: "verified",
+      instructions: "Contains verified-short here",
+    }, { persistenceBlocker: blocker })).rejects.toThrow(
+      "instructions must not contain an API key",
+    );
+  });
+
+  test("creates migration temporary files with restrictive permissions", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    await writeFile(path, `${JSON.stringify({ version: 1, aliases: {} })}\n`);
+    let temporaryMode: number | undefined;
+
+    await saveAlias(path, "fred", {
+      provider: "ollama",
+      model: "model",
+      instructions: "Be concise",
+    }, {}, {
+      rename: async (from, to) => {
+        temporaryMode = (await stat(from)).mode & 0o777;
+        await rename(from, to);
+      },
+    });
+
+    if (process.platform !== "win32") expect(temporaryMode).toBe(0o600);
+    expect((await loadAliases(path)).version).toBe(2);
+  });
+
+  test("rereads under the lock while concurrent saves migrate version 1", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    await writeFile(path, `${JSON.stringify({
+      version: 1,
+      aliases: { existing: { provider: "ollama", model: "existing" } },
+    })}\n`);
+
+    await Promise.all([
+      saveAlias(path, "instructed", {
+        provider: "ollama",
+        model: "first",
+        instructions: "Be concise",
+      }),
+      saveAlias(path, "plain", { provider: "ollama", model: "second" }),
+    ]);
+
+    expect(await loadAliases(path)).toEqual({
+      version: 2,
+      aliases: {
+        existing: { provider: "ollama", model: "existing" },
+        instructed: {
+          provider: "ollama",
+          model: "first",
+          instructions: "Be concise",
+        },
+        plain: { provider: "ollama", model: "second" },
+      },
+    });
+  });
+
+  test("keeps a committed migration valid when rename acknowledgement is lost", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    await writeFile(path, `${JSON.stringify({ version: 1, aliases: {} })}\n`);
+    let renamed = false;
+
+    await expect(saveAlias(path, "fred", {
+      provider: "ollama",
+      model: "model",
+      instructions: "Be concise",
+    }, {}, {
+      rename: async (from, to) => {
+        await rename(from, to);
+        renamed = true;
+        throw new Error("lost acknowledgement");
+      },
+    })).rejects.toThrow("lost acknowledgement");
+    expect(renamed).toBe(true);
+    expect((await loadAliases(path)).version).toBe(2);
+    await expect(saveAlias(path, "fred", {
+      provider: "ollama",
+      model: "model",
+      instructions: "Be concise",
+    })).resolves.toBe("already-saved");
   });
 
   test("writes only version, alias names, provider, and nullable model", async () => {
@@ -242,6 +493,7 @@ describe("global aliases", () => {
       version: 1,
       aliases: { old: { provider: "ollama", model: "old" } },
     });
+    expect((await readdir(directory)).filter((entry) => entry !== "aliases.json")).toEqual([]);
   });
 
   test("distinguishes same-target, declined, and saved collision outcomes", async () => {

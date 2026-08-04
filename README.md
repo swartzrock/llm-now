@@ -53,7 +53,7 @@ llm-now
 
 The launcher separates reusable setup, one-off work, and connection management. With saved shortcuts it offers “Run with a saved shortcut…”, “Create a new shortcut…”, “Run once with another provider and model…”, and “Manage connections…” in that order. Without saved shortcuts it omits the unusable saved-shortcut action and offers “Create a new shortcut…”, “Run once with a provider and model…”, and “Manage connections…”. Merely opening either root performs no provider discovery or credential access.
 
-“Create a new shortcut…” asks “How should this shortcut connect?” and offers “Use an available provider…” followed by “Add a provider with an API key…”. The first route discovers providers only after it is selected. The second can validate and securely save a missing cloud-provider key before model selection. Both routes require a shortcut name and durably save only the provider/model target before asking `Prompt for <shortcut> · <provider> · <model>`. A nonblank prompt then runs the new shortcut exactly once in the same invocation. Cancelling after a key or shortcut is saved preserves that completed work; cancelling before any durable write leaves the store unchanged.
+“Create a new shortcut…” asks “How should this shortcut connect?” and offers “Use an available provider…” followed by “Add a provider with an API key…”. The first route discovers providers only after it is selected. The second can validate and securely save a missing cloud-provider key before model selection. Both routes require a shortcut name, then show a visible multiline `Optional instructions for this shortcut (press Enter to skip)` field. The editor keeps `Press Tab to select [ save ], then Enter to save` visible beneath the text and changes it to `[ save ] selected — press Enter to save` after Tab. Press Enter on a blank field for no instructions. Type or paste reusable guidance, then follow that save callout to preserve its line breaks. The shortcut is saved before `Prompt for <shortcut> · <provider> · <model>` appears, and a nonblank prompt runs it exactly once in the same invocation. Cancelling after a key or shortcut is saved preserves that completed work; cancelling before any durable write leaves the store unchanged.
 
 “Run once…” discovers an available provider and model, asks `Prompt for <provider> · <model>`, generates once, and exits without saving or offering a shortcut. Shortcut, provider, and model lists are sorted and filter as you type.
 
@@ -79,7 +79,8 @@ Inventory output has one uncolored, unpadded `alias → Provider Label · model`
 row per canonical lowercase alias, sorted by canonical alias, with no header. A
 null model is shown as `provider default`. A missing or empty alias store exits
 `0` with zero stdout bytes. Successful inventory writes only to stdout and
-leaves stderr empty.
+leaves stderr empty. Inventory intentionally reveals neither instruction text
+nor whether a shortcut has instructions.
 
 `--aliases` is standalone and ignores stdin. Combining it with any other option
 or positional value exits `2`, leaves stdout empty, and writes a `usage:`
@@ -111,12 +112,14 @@ Arguments, `--input`, piped input, and noninteractive execution bypass the launc
 
 ## Aliases and configuration
 
-The launcher’s creation route saves a required shortcut before its first run. Existing direct interactive provider/model selection retains its established optional alias follow-up: after a successful unnamed call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`. Type a name to save that exact provider/model pair, or press Enter to exit. If the selected provider/model is already saved, it reports the existing alias and suggests an executable command such as `llm-now daily --input "<prompt>"` for next time instead of asking for a duplicate. A launcher run-once call and a call that selected an existing alias never offer this follow-up. Aliases contain no credentials and are available from every working directory.
+The launcher’s creation route saves a required shortcut before its first run. Existing direct interactive provider/model selection retains its established optional alias follow-up: after a successful unnamed call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`. Type a name, then optionally enter visible multiline instructions and use its `[ save ]` action, to save that provider/model pair; press Enter at the name field to exit. If the selected provider/model is already saved, it reports the existing alias and suggests an executable command such as `llm-now daily --input "<prompt>"` for next time instead of asking for a duplicate. A launcher run-once call and a call that selected an existing alias never offer this follow-up. Aliases contain no credentials and are available from every working directory.
 
 - macOS/Linux: `~/.config/llm-now/aliases.json`
 - Windows: `%APPDATA%\\llm-now\\aliases.json`, otherwise `%USERPROFILE%\\AppData\\Roaming\\llm-now\\aliases.json`
 
-Saving the same name and target, in any capitalization, reports that it is already saved. Reusing a name for a different target requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.
+Saving the same name, target, and instructions, in any capitalization, reports that it is already saved. Recreate a shortcut with the same name to add, change, or remove its instructions; any change to its target or instructions requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.
+
+Instructions are stored as plaintext in `aliases.json`. Each shortcut invocation passes its saved instructions to the provider separately from that invocation’s prompt. Explicit provider/model calls and launcher “Run once…” calls do not inherit shortcut instructions. Provider behavior, retention, and precedence remain subject to the selected provider’s policies. For CLI-backed providers, instructions may be transmitted in child-process arguments and therefore may be visible to local process inspection or audit tools. Do not store secrets, credentials, or data you are not permitted to disclose as shortcut instructions. `llm-now` screens recognized credentials before saving and avoids echoing instruction-bearing child arguments in its own diagnostics and maintained fixtures, but those protections do not turn the plaintext field into a secret store.
 
 Existing version 1 alias files need no eager migration. Case-only legacy entries
 that point to the same provider and model collapse to one lowercase alias in
@@ -125,11 +128,21 @@ keys in lowercase. If case-only entries point to different targets, `llm-now`
 fails closed with a diagnostic naming the entries and alias-file path so you can
 keep the intended target. It never chooses between conflicting targets.
 
+A version 1 file stays version 1 until an instruction-bearing shortcut is
+saved. That write upgrades the document to version 2, and later removing the
+last instruction does not automatically downgrade it. Before returning to a
+binary that predates version 2, prefer installing a compatible version. For
+manual recovery, first copy the version 2 file and preserve its original file
+mode; then create a restrictive-permission version 1 copy containing only each
+alias’s `provider` and `model`, intentionally dropping all instructions. Older
+binaries may reject alias operations while the version 2 file is active;
+explicit provider/model calls that do not depend on aliases remain available.
+
 ## Secure API-key storage
 
 Recognized environment variables are always authoritative. They are the recommended credential source for scripts, automation, and headless systems. When no recognized environment credential is set, an enabled release target may use one provider-specific key from the operating system's native credential store.
 
-Use bare `llm-now`, choose “Manage connections…”, then “Add or manage API keys…” to add, replace, or delete a stored fallback. Shortcut creation can add only a currently missing eligible provider; replacement and deletion remain management operations. Replacement verifies the new key before changing the existing record, and save/delete confirmations default to No. Deleting a stored fallback does not remove an active environment credential. Aliases remain version 1 provider/model records and never contain keys or credential identifiers.
+Use bare `llm-now`, choose “Manage connections…”, then “Add or manage API keys…” to add, replace, or delete a stored fallback. Shortcut creation can add only a currently missing eligible provider; replacement and deletion remain management operations. Replacement verifies the new key before changing the existing record, and save/delete confirmations default to No. Deleting a stored fallback does not remove an active environment credential. Alias records never contain keys or credential identifiers; optional shortcut instructions are plaintext configuration, not credential storage.
 
 ### How secure storage works
 

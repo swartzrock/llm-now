@@ -1,5 +1,5 @@
-# A short, credential-free shortcut-creation demo:
-# hook → create from available provider → first run → saved reuse → install CTA.
+# A short, credential-free instructed-shortcut demo:
+# hook → create with instructions → first run → saved reuse → install CTA.
 #
 # Render from the repository root with:
 #   mkdir -p .tmp-llm-now-demo
@@ -85,11 +85,18 @@ Enter
 Wait+Screen@10 s /Name this shortcut/
 Type "explain"
 Enter
+Wait+Screen@10 s /Optional instructions for this shortcut/
+Wait+Screen@10 s /Press Tab to select \[ save \], then Enter to save/
+Type `Use "quoted" runtime smoke \ transport.`
+Enter
+Type "Keep each answer concise."
+Tab
+Enter
 Wait+Screen@10 s /Saved shortcut explain → Codex CLI · fake-model/
 Sleep 1500 ms
-Type "Explain ECONNREFUSED in one sentence."
+Type "smoke"
 Enter
-Wait+Screen@30 s /fake:Explain ECONNREFUSED in one sentence\./
+Wait+Screen@30 s /fake:instruction-present/
 Sleep 3 s
 
 # Reuse the configured shortcut through the exact configured root action.
@@ -106,9 +113,9 @@ Wait+Screen@10 s /Choose a saved shortcut/
 Type "explain"
 Enter
 Sleep 1500 ms
-Type "Explain a 404 in one sentence."
+Type "smoke"
 Enter
-Wait+Screen@30 s /fake:Explain a 404 in one sentence\./
+Wait+Screen@30 s /fake:instruction-present/
 Sleep 3 s
 
 # Finish on a low-friction call to action. Do not execute the install command.
