@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 const args = Bun.argv.slice(2);
-const expectedInstructions = 'Use "quoted" runtime smoke \\ transport.';
+const expectedInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
 const expectedInstructionConfig = `developer_instructions=${JSON.stringify(expectedInstructions)}`;
 
 if (args[0] === "debug" && args[1] === "models") {

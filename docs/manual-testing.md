@@ -125,7 +125,7 @@ It must not show a saved-shortcut row. Merely rendering the root must perform no
 
 ### SC-02: Create from an available provider and run it once
 
-From the empty root, choose `Create a new shortcut…`. Confirm `How should this shortcut connect?` offers exactly `Use an available provider…` followed by `Add a provider with an API key…`, with no discovery before a source is chosen. Select the available-provider route, then the fake Codex provider and its safe model. At `Name this shortcut`, enter `daily`. Confirm the visible `Optional instructions for this shortcut (leave blank for none)` field appears next, enter `Use "quoted" runtime smoke \ transport.`, and submit it.
+From the empty root, choose `Create a new shortcut…`. Confirm `How should this shortcut connect?` offers exactly `Use an available provider…` followed by `Add a provider with an API key…`, with no discovery before a source is chosen. Select the available-provider route, then the fake Codex provider and its safe model. At `Name this shortcut`, enter `daily`. Confirm the visible `Optional instructions for this shortcut (blank for none; Tab then Enter to save text)` field and `[ save ]` action appear next. Paste `Use "quoted" runtime smoke \ transport.` followed by a newline and `Keep each answer concise.`, press Tab to focus `[ save ]`, then press Enter to submit it.
 
 When `Prompt for daily · Codex CLI · MODEL` appears, inspect the isolated alias file from a second terminal before entering a prompt. It must be a version 2 document whose `daily` record contains only `provider`, `model`, and the exact `instructions` string; no prompt, response, or credential may be present. Enter `smoke`. The command must generate exactly once, exit `0`, and write only `fake:instruction-present` to `stdout.bin`. The shortcut-save receipt must precede the work prompt on stderr.
 
@@ -345,7 +345,7 @@ Opening either root and opening the creation-source menu must not display discov
 - arrow keys and Enter select the highlighted option;
 - the final response appears only in `stdout.txt`;
 - the response is followed by a clean terminal boundary on stderr even when it has no trailing newline or leaves SGR styling active;
-- shortcut creation visibly requests optional single-line instructions after naming, saves before its contextual first prompt, and generates exactly once;
+- shortcut creation visibly requests optional multiline instructions after naming, preserves pasted line breaks, saves before its contextual first prompt, and generates exactly once;
 - each saved-shortcut call transmits its instructions separately from the prompt, subject to the selected provider's policies;
 - run once generates without an instruction, shortcut naming, or save offer;
 - connection management retains only discovery and API-key management; and
@@ -373,7 +373,7 @@ Run an interactive direct fresh selection such as `"$BIN" --input "Save this tar
 
 Submit a blank value at the visible optional-instructions field for this first save. The model value is `null` when a supported CLI provider uses its default. Confirm that no key, token, endpoint credential, prompt, generated text, or `instructions` key is stored and that the file remains version 1.
 
-Next recreate `daily` and enter `You are a Realtime Voice Agent Architect` as its visible single-line instructions. Accept the default-No overwrite only after confirming the transition is `none → set`. The alias file must become version 2 and preserve the exact instruction text:
+Next recreate `daily` and paste two visible instruction lines: `You are a Realtime Voice Agent Architect` and `Focus on interruption handling.` Accept the default-No overwrite only after confirming the transition is `none → set`. The alias file must become version 2 and preserve the exact line break:
 
 ```json
 {
@@ -382,13 +382,13 @@ Next recreate `daily` and enter `You are a Realtime Voice Agent Architect` as it
     "daily": {
       "provider": "PROVIDER_ID",
       "model": "MODEL_ID",
-      "instructions": "You are a Realtime Voice Agent Architect"
+      "instructions": "You are a Realtime Voice Agent Architect\nFocus on interruption handling."
     }
   }
 }
 ```
 
-Confirm that multiline input or control characters are rejected. Do not enter a secret or data that cannot be disclosed to the provider: instructions are plaintext configuration. On Unix, the directory must have mode `700` and the file mode `600`. No lock or temporary file should remain.
+Confirm that ordinary multiline input is accepted, while tabs, non-newline control characters, and Unicode line separators are rejected. Do not enter a secret or data that cannot be disclosed to the provider: instructions are plaintext configuration. On Unix, the directory must have mode `700` and the file mode `600`. No lock or temporary file should remain.
 
 ### MT-12: Use an alias from another directory
 
@@ -619,8 +619,8 @@ Use a temporary `HOME` or `USERPROFILE` for fallback tests.
 
 ### MT-23A: Verify safe instruction transport boundaries
 
-Use only the maintained fake Codex fixture and the non-secret instruction
-`Use "quoted" runtime smoke \ transport.`. The packaged smoke must pass that
+Use only the maintained fake Codex fixture and the non-secret multiline instruction
+`Use "quoted" runtime smoke \ transport.\nKeep each answer concise.`. The packaged smoke must pass that
 instruction per invocation for an alias call and receive
 `fake:instruction-present`; the otherwise identical explicit call must receive
 `fake:instruction-absent`. The fixture `PATH` must contain only the temporary

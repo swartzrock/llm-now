@@ -12,6 +12,7 @@ import {
   type AliasRecord,
   type SaveAliasResult,
   AliasStoreError,
+  hasInvalidInstructionCharacters,
   isValidAliasName,
   loadAliases as loadStoredAliases,
   normalizeAliasName,
@@ -77,7 +78,8 @@ const RUN_ONCE_VALUE = "launcher:run-once";
 const MANAGE_CONNECTIONS_VALUE = "launcher:manage-connections";
 const AVAILABLE_PROVIDER_SOURCE_VALUE = "shortcut-source:available-provider";
 const ADD_API_KEY_SOURCE_VALUE = "shortcut-source:add-api-key";
-const INSTRUCTION_PROMPT_MESSAGE = "Optional instructions for this shortcut (leave blank for none)";
+const INSTRUCTION_PROMPT_MESSAGE =
+  "Optional instructions for this shortcut (blank for none; Tab then Enter to save text)";
 const INSTRUCTION_CREDENTIAL_DIAGNOSTIC = "config: instructions must not contain an API key.";
 const INSTRUCTION_VAULT_DIAGNOSTIC =
   "config: instructions could not be checked against saved API keys; the shortcut was not saved.";
@@ -266,8 +268,8 @@ async function captureShortcutInstructions(
   while (true) {
     const value = await deps.prompter.instruction(INSTRUCTION_PROMPT_MESSAGE);
     if (value === null) return { kind: "cancelled" };
-    if (/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/.test(value)) {
-      diagnostic("config: instructions must be a single line without control characters.");
+    if (hasInvalidInstructionCharacters(value)) {
+      diagnostic("config: instructions must use ordinary line breaks and contain no other control characters.");
       continue;
     }
     if (value.trim().length === 0) return { kind: "ready" };

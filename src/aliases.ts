@@ -104,10 +104,14 @@ function validateAliasTarget(value: Record<string, unknown>): boolean {
   return typeof value.model === "string" && value.model.length > 0;
 }
 
+export function hasInvalidInstructionCharacters(value: string): boolean {
+  return /[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u2028\u2029]/.test(value);
+}
+
 function isValidInstructions(value: unknown): value is string {
   return typeof value === "string"
     && value.trim().length > 0
-    && !/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/.test(value);
+    && !hasInvalidInstructionCharacters(value);
 }
 
 function validateVersion1AliasRecord(value: unknown): value is AliasRecord {

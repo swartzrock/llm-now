@@ -4,7 +4,7 @@ import {
   type ByokModelOption,
   type ByokProviderId,
 } from "@swartzrock/byok-runtime";
-import { isCancel as isCoreCancel, TextPrompt } from "@clack/core";
+import { isCancel as isCoreCancel, MultiLinePrompt } from "@clack/core";
 import {
   autocomplete,
   confirm as clackConfirm,
@@ -13,6 +13,7 @@ import {
   text as clackText,
 } from "@clack/prompts";
 import pc from "picocolors";
+import type { Key } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { AliasRecord } from "./aliases.ts";
 import type { RuntimeGateway } from "./runtime.ts";
@@ -73,6 +74,13 @@ export interface SearchablePrompter {
   instruction(message: string): Promise<string | null>;
   password(message: string, options?: TextPromptOptions): Promise<string | null>;
   confirm(message: string, options?: ConfirmPromptOptions): Promise<boolean | null>;
+}
+
+class OptionalInstructionPrompt extends MultiLinePrompt {
+  protected override _shouldSubmit(character: string | undefined, key: Key): boolean {
+    if (key.name === "return" && this.userInput.length === 0) return true;
+    return super._shouldSubmit(character, key);
+  }
 }
 
 export function validateCredentialCandidate(value: string | undefined): string | undefined {
@@ -385,9 +393,10 @@ export function createSearchablePrompter(
     },
     async instruction(message) {
       let resolved = "";
-      const prompt = new TextPrompt({
+      const prompt = new OptionalInstructionPrompt({
         input,
         output,
+        showSubmit: true,
         render() {
           switch (this.state) {
             case "submit":
@@ -397,7 +406,7 @@ export function createSearchablePrompter(
             case "error":
               return `▲  ${message}\n│  ${this.error}\n│`;
             default:
-              return `◆  ${message}\n│  ${this.userInputWithCursor}\n│`;
+              return `◆  ${message}\n│  ${this.userInputWithCursor.replaceAll("\n", "\n│  ")}\n│  ${this.focused === "submit" ? pc.cyan("[ save ]") : pc.dim("[ save ]")}\n│`;
           }
         },
       });

@@ -467,23 +467,35 @@ describe("terminal provider and model selection", () => {
     expect(stripTerminalSequences(rendered)).toContain("prompt must not be blank.");
   });
 
-  test("real instruction input is visible only while active and retains its exact value", async () => {
+  test("real instruction input preserves pasted blank lines and a trailing newline", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
     let rendered = "";
     let submitOffset = 0;
     output.on("data", (chunk) => rendered += chunk.toString());
-    const candidate = "  u2-visible-instruction  ";
+    const candidate = "First instruction paragraph\n\nSecond instruction paragraph\n";
     const entered = createSearchablePrompter(input, output).instruction("Optional instructions");
-    setTimeout(() => input.write(candidate), 1);
     setTimeout(() => {
+      input.write(candidate.replaceAll("\n", "\r"));
       submitOffset = rendered.length;
-      input.write("\r");
-    }, 20);
+      input.write("\t\r");
+    }, 1);
 
     expect(await entered).toBe(candidate);
-    expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain(candidate);
-    expect(stripTerminalSequences(rendered.slice(submitOffset))).not.toContain(candidate);
+    expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain("[ save ]");
+    expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain("First instruction paragraph");
+    expect(stripTerminalSequences(rendered.slice(0, submitOffset))).toContain("Second instruction paragraph");
+    expect(stripTerminalSequences(rendered.slice(submitOffset))).not.toContain("First instruction paragraph");
+    expect(stripTerminalSequences(rendered.slice(submitOffset))).not.toContain("Second instruction paragraph");
+  });
+
+  test("real instruction input submits blank with one Enter", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const entered = createSearchablePrompter(input, output).instruction("Optional instructions");
+    setTimeout(() => input.write("\r"), 1);
+
+    expect(await entered).toBe("");
   });
 
   test("real instruction input clears the active value before cancellation renders", async () => {

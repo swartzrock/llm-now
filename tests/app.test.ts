@@ -729,7 +729,7 @@ describe("one-shot application", () => {
           "qwen",
         ],
         names: ["daily", "first prompt"],
-        instructions: ["  You are an architect  "],
+        instructions: ["You are an architect.\nFocus on realtime voice systems."],
         instructionMessages,
         seen,
       }),
@@ -744,11 +744,11 @@ describe("one-shot application", () => {
     expect(await runApplication(app.value)).toBe(0);
     expect(events).toEqual([
       "models",
-      "save:daily:ollama:qwen:  You are an architect  ",
-      "generate:ollama:qwen:first prompt:true:  You are an architect  ",
+      "save:daily:ollama:qwen:You are an architect.\nFocus on realtime voice systems.",
+      "generate:ollama:qwen:first prompt:true:You are an architect.\nFocus on realtime voice systems.",
     ]);
     expect(instructionMessages).toEqual([
-      "Optional instructions for this shortcut (leave blank for none)",
+      "Optional instructions for this shortcut (blank for none; Tab then Enter to save text)",
     ]);
     expect(app.stdout.text()).toBe("first response");
     expect(appRuntime.calls.generate).toBe(1);
@@ -792,7 +792,7 @@ describe("one-shot application", () => {
     expect(await runApplication(app.value)).toBe(0);
     expect(savedInstructions).toBe("safe role");
     expect(app.stderr.text()).toContain(
-      "config: instructions must be a single line without control characters.",
+      "config: instructions must use ordinary line breaks and contain no other control characters.",
     );
     expect(app.stderr.text()).not.toContain("first\u2028second");
   });

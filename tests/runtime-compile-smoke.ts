@@ -13,7 +13,7 @@ const runtimeSmoke = join(
   directory,
   process.platform === "win32" ? "runtime-smoke.exe" : "runtime-smoke",
 );
-const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.';
+const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
 
 try {
   const configHome = join(directory, "config");

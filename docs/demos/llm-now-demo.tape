@@ -88,6 +88,9 @@ Enter
 Wait+Screen@10 s /Optional instructions for this shortcut/
 Type `Use "quoted" runtime smoke \ transport.`
 Enter
+Type "Keep each answer concise."
+Tab
+Enter
 Wait+Screen@10 s /Saved shortcut explain → Codex CLI · fake-model/
 Sleep 1500 ms
 Type "smoke"

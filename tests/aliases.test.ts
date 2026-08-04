@@ -79,7 +79,7 @@ describe("global aliases", () => {
         fred: {
           provider: "codex-cli",
           model: null,
-          instructions: "  You are a realtime voice architect.  ",
+          instructions: "You are a realtime voice architect.\nFocus on interruption handling.",
         },
         plain: { provider: "ollama", model: "llama3" },
       },
@@ -92,7 +92,7 @@ describe("global aliases", () => {
         fred: {
           provider: "codex-cli",
           model: null,
-          instructions: "  You are a realtime voice architect.  ",
+          instructions: "You are a realtime voice architect.\nFocus on interruption handling.",
         },
         plain: { provider: "ollama", model: "llama3" },
       },
@@ -202,7 +202,6 @@ describe("global aliases", () => {
       { version: 1, aliases: { daily: { provider: "ollama", model: "x", instructions: "legacy" } } },
       { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: "" } } },
       { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: "   " } } },
-      { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: "two\nlines" } } },
       { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: "bad\u0000value" } } },
       { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: 42 } } },
       { version: 3, aliases: {} },
@@ -238,10 +237,14 @@ describe("global aliases", () => {
     expect(await saveAlias(path, "fred", {
       provider: "codex-cli",
       model: null,
-      instructions: "Architect realtime voice systems.",
+      instructions: "Architect realtime voice systems.\nFocus on interruptions.",
     })).toBe("saved");
-    expect((await loadAliases(path)).version).toBe(2);
-    expect((await loadAliases(path)).aliases.existing).toEqual({
+    const instructed = await loadAliases(path);
+    expect(instructed.version).toBe(2);
+    expect(instructed.aliases.fred?.instructions).toBe(
+      "Architect realtime voice systems.\nFocus on interruptions.",
+    );
+    expect(instructed.aliases.existing).toEqual({
       provider: "ollama",
       model: "existing",
     });
@@ -290,7 +293,6 @@ describe("global aliases", () => {
     const invalid = [
       "",
       "   ",
-      "two\nlines",
       "bad\tvalue",
       "bad\u007fvalue",
       "bad\u009fvalue",

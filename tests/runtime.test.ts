@@ -205,7 +205,7 @@ describe("runtime gateway", () => {
   });
 
   test("redacts raw and JSON-escaped instructions only from generation failures", async () => {
-    const instructions = '  Use "quotes" and \\slashes.  ';
+    const instructions = 'First instruction line.\n  Use "quotes" and \\slashes.  ';
     const jsonEscaped = JSON.stringify(instructions).slice(1, -1);
     const transportEscaped = JSON.stringify(jsonEscaped).slice(1, -1);
     const failing = createTestGateway({
