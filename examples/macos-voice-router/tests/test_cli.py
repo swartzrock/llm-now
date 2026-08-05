@@ -4,6 +4,7 @@ import unittest
 import signal
 import subprocess
 from io import StringIO
+from unittest.mock import patch
 
 from llm_now_voice.cli import (
     ProcessCancelled,
@@ -11,6 +12,7 @@ from llm_now_voice.cli import (
     ProcessTimedOut,
     SubprocessRunner,
     VoiceRouterError,
+    main,
     parse_config,
     parse_inventory,
     parse_voice_inventory,
@@ -472,6 +474,24 @@ class OrchestrationTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertNotIn(("llm-now", "--aliases"), [call[0] for call in runner.calls])
                 self.assertIn(missing, stderr.getvalue())
+
+
+class MainTests(unittest.TestCase):
+    def test_non_macos_fails_before_starting_the_router(self) -> None:
+        stderr = StringIO()
+
+        with (
+            patch("llm_now_voice.cli.sys.platform", "linux"),
+            patch("llm_now_voice.cli.sys.stderr", stderr),
+            patch("llm_now_voice.cli.SubprocessRunner") as runner,
+        ):
+            code = main()
+
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            stderr.getvalue(), "llm-now-voice currently supports macOS only.\n"
+        )
+        runner.assert_not_called()
 
 
 class FakeProcess:

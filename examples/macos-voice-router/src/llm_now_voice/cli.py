@@ -778,6 +778,10 @@ def _command_available(command: str) -> bool:
 
 
 def main() -> int:
+    if sys.platform != "darwin":
+        _write_diagnostic(sys.stderr, "llm-now-voice currently supports macOS only.")
+        return 1
+
     runner = SubprocessRunner()
 
     def cancel(_signum: int, _frame: object) -> None:
