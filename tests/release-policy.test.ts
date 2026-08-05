@@ -396,6 +396,7 @@ describe("release workflow policy", () => {
     expect(homebrewJob).toContain(".prerelease == false");
     expect(homebrewJob).toContain('gh release download "$TAG"');
     expect(homebrewJob).toContain('manifest_assets="$(sed -nE');
+    expect(homebrewJob).toContain("expected_archives() {");
     expect(homebrewJob).toContain('test "$manifest_assets" = "$(expected_archives)"');
     expect(homebrewJob).toContain("sha256sum --check --strict --status SHA256SUMS");
     expect(homebrewJob).toContain('gh attestation verify "$archive"');

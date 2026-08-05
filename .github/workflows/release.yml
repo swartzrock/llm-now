@@ -530,7 +530,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.validate-ref.outputs.release-sha }}
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -571,14 +571,17 @@ jobs:
               exit 1
             }
 
-          expected_assets() {
+          expected_archives() {
             printf '%s\n' \
-              "SHA256SUMS" \
               "llm-now-v${VERSION}-linux-arm64.zip" \
               "llm-now-v${VERSION}-linux-x64.zip" \
               "llm-now-v${VERSION}-macos-arm64.zip" \
               "llm-now-v${VERSION}-macos-x64.zip" \
               "llm-now-v${VERSION}-windows-x64.zip"
+          }
+          expected_assets() {
+            printf '%s\n' "SHA256SUMS"
+            expected_archives
           }
           actual_assets="$(jq -r '.assets[].name' "$RUNNER_TEMP/homebrew-release.json" | sort)"
           test "$actual_assets" = "$(expected_assets)" || {
