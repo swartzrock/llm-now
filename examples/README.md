@@ -215,8 +215,10 @@ batman tar
 
 The sourceable [`batman.sh`](batman.sh) script includes its own `bat`-with-`cat`
 fallback. If `tldr` is installed and `tldr <command>` succeeds, its quick
-reference appears in a fenced Markdown section above the generated lesson. A
-missing or failing `tldr` does not prevent the lesson from being generated.
+reference appears above the generated lesson. Clients supporting `tldr --raw`
+provide the original Markdown for `bat` to color; other clients fall back to a
+plain-text code block. A missing or failing `tldr` does not prevent the lesson
+from being generated.
 
 The local manual grounds the lesson, but confirm any flag you plan to use against
 the original man page.

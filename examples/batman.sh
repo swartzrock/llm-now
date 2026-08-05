@@ -14,7 +14,7 @@ batman() {
     return 2
   fi
 
-  local command_name page lesson requested tldr_output
+  local command_name page lesson requested tldr_format tldr_output
   requested="$*"
 
   # The final argument is the page name in both `batman tar` and
@@ -27,8 +27,13 @@ batman() {
   fi
 
   tldr_output=
+  tldr_format=
   if command -v tldr >/dev/null 2>&1; then
-    if ! tldr_output=$(NO_COLOR=1 tldr "$command_name" 2>/dev/null); then
+    if tldr_output=$(tldr --raw "$command_name" 2>/dev/null); then
+      tldr_format=markdown
+    elif tldr_output=$(NO_COLOR=1 tldr "$command_name" 2>/dev/null); then
+      tldr_format=text
+    else
       tldr_output=
     fi
   fi
@@ -53,7 +58,9 @@ If the page does not define five command-line flags, explain five useful concept
   fi
 
   {
-    if [ -n "$tldr_output" ]; then
+    if [ "$tldr_format" = markdown ] && [ -n "$tldr_output" ]; then
+      printf '## TL;DR\n\n%s\n\n---\n\n' "$tldr_output"
+    elif [ -n "$tldr_output" ]; then
       printf '## TL;DR\n\n```text\n%s\n```\n\n---\n\n' "$tldr_output"
     fi
     printf '%s\n' "$lesson"
