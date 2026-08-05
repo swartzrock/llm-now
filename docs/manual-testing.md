@@ -27,7 +27,7 @@ Homebrew and Chocolatey are intentionally outside the current release scope. Do 
 | Linux ARM64 glibc | Native smoke |
 | Windows x64 baseline | Full functional pass |
 
-A native smoke consists of checksum verification, extraction, `--help`, `--version`, invalid-usage behavior, one real generation, and operation without Bun or Node.js.
+A native smoke consists of checksum verification, extraction, `--help`, `--version`, alias inventory, invalid-usage behavior, one real generation, and operation without Bun or Node.js.
 
 Native credential storage is additionally gated on each explicitly enabled target for Bun 1.3.14. macOS uses Keychain, Windows uses Credential Manager, and Linux uses Secret Service. Linux coverage requires a real isolated D-Bus user session and unlocked test collection; a platform name without that session is not evidence of availability. macOS x64 remains buildable but environment-only because its Bun 1.3.14 lifecycle gate failed.
 
@@ -273,29 +273,143 @@ printf 'Summarize the idea of gravity.' |
 
 Repeat as `"$BIN" daily --input 'Summarize the idea of gravity.'` and with the
 long form `"$BIN" --alias daily --input 'Summarize the idea of gravity.'`. The commands
-must exit `0`, resolve the exact case-sensitive alias independently of option order and the
-working directory, write only the response to stdout, and skip the alias-save prompt. Also
+must exit `0`, resolve the spelling-exact alias independently of option order and the
+working directory, write only the response to stdout, and skip the alias-save prompt. Repeat
+with `Daily` and `DAILY`; both must resolve the same lowercase `daily` record. A misspelling
+such as `dailly` must fail instead of selecting `daily`. Also
 verify that aliases named `help`, `version`, and `run` work when supplied as bare positional
 names; only `--help` and `--version` select those standalone modes.
 
-### MT-13: Decline alias saving
+### MT-13: List configured aliases
+
+Write this document to the isolated alias path (`$XDG_CONFIG_HOME/llm-now/aliases.json`
+on macOS/Linux or `$env:APPDATA\llm-now\aliases.json` on Windows), preserving
+the deliberately unsorted source order:
+
+```json
+{
+  "version": 1,
+  "aliases": {
+    "zeta": { "provider": "openai", "model": "gpt-5" },
+    "aliases": { "provider": "codex-cli", "model": null }
+  }
+}
+```
+
+Run the standalone inventory with piped input to prove stdin is ignored:
+
+```bash
+printf 'ignored prompt' | "$BIN" --aliases >stdout.txt 2>stderr.txt
+status=$?
+```
+
+The command must exit `0`, leave stderr empty, and write exactly these sorted,
+uncolored rows plus the final newline to stdout, with no header or alignment
+padding:
+
+```text
+aliases → Codex CLI · provider default
+zeta → OpenAI · gpt-5
+```
+
+It must not prompt, discover providers, list models, access credentials,
+generate text, or mutate the alias file.
+
+### MT-14: List an empty inventory
+
+Remove the alias file from the isolated config directory and run:
+
+```bash
+"$BIN" --aliases >stdout.bin 2>stderr.txt
+status=$?
+test "$status" -eq 0
+test ! -s stdout.bin
+test ! -s stderr.txt
+```
+
+A missing store and a valid store with an empty `aliases` object must both exit
+`0` with zero stdout and stderr bytes and no prompt, provider, runtime,
+credential, or mutation work.
+
+### MT-15: Reject alias-inventory combinations
+
+Run `--aliases` separately with `--input`, a positional alias, `--alias`,
+`--provider`, `--model`, `--help`, `-h`, and `--version`. Representative cases:
+
+```bash
+"$BIN" --aliases --input hello >stdout.txt 2>stderr.txt
+"$BIN" --aliases daily >stdout.txt 2>stderr.txt
+```
+
+Every combination must exit `2`, leave stdout empty, write a `usage:`
+diagnostic to stderr, and perform no alias load, prompt, provider, runtime,
+credential, or mutation work.
+
+### MT-16: Reject invalid alias stores during inventory
+
+Replace the isolated alias file with malformed JSON and run `"$BIN" --aliases`.
+Then repeat with case-only entries that point to different targets:
+
+```json
+{
+  "version": 1,
+  "aliases": {
+    "Fred": { "provider": "claude-cli", "model": null },
+    "FRED": { "provider": "openai", "model": "gpt-5" }
+  }
+}
+```
+
+Where the operating system supports a reliable permission-denied fixture,
+repeat once with an unreadable alias file. Every invalid, unreadable, or
+case-conflicting store must exit `1`, leave stdout empty, write the existing
+actionable `config:` diagnostic to stderr, preserve the store, and perform no
+prompt, provider, runtime, credential, or mutation work.
+
+### MT-17: Preserve a positional alias named aliases
+
+Restore the MT-13 alias document, make the configured Codex CLI available, and
+run:
+
+```bash
+"$BIN" aliases --input "Reply briefly that positional alias generation succeeded." \
+  >stdout.txt 2>stderr.txt
+```
+
+The command must exit `0`, invoke generation through the saved `aliases`
+record, write only the generated response to stdout, and leave stderr empty. It
+must not print the inventory; only the standalone `--aliases` option selects
+inventory mode.
+
+### MT-18: Decline alias saving
 
 Complete an unnamed interactive generation and press Enter without typing a name. Repeat and cancel the field with Ctrl-C. Both commands must exit `0` without creating or modifying the alias file.
 
-### MT-14: Validate alias names
+### MT-19: Validate alias names
 
-Try these names through the save prompt:
+Try these names through the save prompt, using a fresh isolated store when
+needed:
 
 - valid: `daily`, `Daily`, and `work_model-2`;
 - invalid: ` bad`, `with space`, `a/b`, and a name longer than 64 characters.
 
-Invalid names must show Clack's alias-name validation guidance and reprompt. An empty field exits without saving. Names are case-sensitive, so `daily` and `Daily` may coexist.
+Invalid names must show Clack's alias-name validation guidance and reprompt. An
+empty field exits without saving. Valid mixed-case input is accepted but stored
+and displayed in lowercase. `daily` and `Daily` are one logical alias and cannot
+coexist as separate targets.
 
-### MT-15: Handle alias collisions
+### MT-20: Handle alias collisions
 
-Save `daily`, then complete another unnamed call with the same provider/model and enter `daily`. The CLI must report that the target is already saved without asking to overwrite it. Next complete a call with another provider/model and enter `daily`. Confirm the prompt shows the old and new targets and defaults to No. First decline the overwrite: the command must exit `0` and leave the record unchanged. Repeat and accept the overwrite: only `daily` should change, with every other alias preserved.
+Save `Daily` and confirm the file contains the canonical key `daily`. Complete
+another unnamed call with the same provider/model and enter `DAILY`. The CLI
+must report that the target is already saved without asking to overwrite it.
+Next complete a call with another provider/model and enter `dAiLy`. Confirm the
+prompt identifies the canonical alias `daily`, shows the old and new targets,
+and defaults to No. First decline the overwrite: the command must exit `0` and
+leave the record unchanged. Repeat and accept the overwrite: only `daily` should
+change, with every other alias preserved.
 
-### MT-16: Fail closed on missing or stale aliases
+### MT-21: Fail closed on missing or stale aliases
 
 ```bash
 printf 'hello' | "$BIN" --alias missing
@@ -303,11 +417,26 @@ printf 'hello' | "$BIN" --alias missing
 
 Then edit an isolated alias to reference a nonexistent model and run it. A missing alias must exit `1` with a `config:` diagnostic. A stale model must exit `1` with a `generation (provider):` diagnostic. Neither case may select or invoke a replacement provider.
 
-### MT-17: Reject corrupt alias files
+### MT-22: Reject corrupt alias files
 
-Replace the isolated alias file first with malformed JSON, then with a structurally invalid record containing an extra `apiKey` field. Both calls must exit `1`, identify a configuration load failure, preserve the corrupt content for diagnosis, and avoid generation.
+Replace the isolated alias file first with malformed JSON, then with a
+structurally invalid record containing an extra `apiKey` field. Both calls must
+exit `1`, identify a configuration load failure, preserve the corrupt content
+for diagnosis, and avoid generation.
 
-### MT-18: Resolve platform config paths
+Next write a valid legacy file containing `fred` and `Fred` with identical
+provider/model records. Loading or invoking either capitalization must succeed
+without rewriting the file. Save an unrelated alias, then confirm that the
+successful write persists `fred` and the new alias as lowercase keys with only
+one `fred` record.
+
+Finally, give `fred` and `Fred` different provider/model records. Any command
+that loads aliases must exit `1` before generation, preserve the file, and
+report a configuration diagnostic that identifies both conflicting entries,
+their targets, the canonical name `fred`, and the alias-file path with repair
+guidance. It must never select either target.
+
+### MT-23: Resolve platform config paths
 
 Verify that:
 
@@ -320,7 +449,7 @@ Use a temporary `HOME` or `USERPROFILE` for fallback tests.
 
 ## Discovery and failure behavior
 
-### MT-19: Report no available providers
+### MT-24: Report no available providers
 
 In a clean VM or profile, ensure there is no Ollama server on port 11434, no LM Studio server on port 1234, no authenticated `codex` or `claude` command on `PATH`, and no recognized cloud-provider key variable. Run:
 
@@ -330,19 +459,19 @@ In a clean VM or profile, ensure there is no Ollama server on port 11434, no LM 
 
 The command must exit `1`, leave stdout empty, list every checked provider category and manual setup guidance on stderr, and avoid starting software, downloading models, creating credentials, or creating aliases.
 
-### MT-20: Cancel provider or model selection
+### MT-25: Cancel provider or model selection
 
 Press Ctrl-C at the alias picker. The command must exit `130`, leave stdout empty, and perform no generation or alias save. Repeat at the provider picker, then again at the model picker after choosing a provider. If the isolated store has no aliases, skip the alias-picker case.
 
-### MT-21: Recover from a model-list failure
+### MT-26: Recover from a model-list failure
 
 Make two providers discoverable, with the first unable to list models. Selecting the failing provider must produce a `model-list (provider):` diagnostic, remove that provider from the current selection set, and offer the remaining provider. If no provider remains, the command must exit `1`.
 
-### MT-22: Do not fall back after explicit generation failure
+### MT-27: Do not fall back after explicit generation failure
 
 Call a valid provider with a deliberately nonexistent model. The command must exit `1`, leave stdout empty, identify `generation (provider):` on stderr, and avoid calling another available provider.
 
-### MT-23: Redact credentials
+### MT-28: Redact credentials
 
 Use a fake sentinel credential in an isolated shell, never a real secret:
 
@@ -356,7 +485,7 @@ Force an OpenAI failure and capture stderr. The sentinel must not appear in stdo
 
 These tests are maintainer-only. Run them in order while commissioning the reviewed release train, and do not merge another `chore: release` pull request until the previous promotion finishes.
 
-### MT-24: Unsigned release candidate
+### MT-29: Unsigned release candidate
 
 1. Fetch protected `main` and select any full commit SHA reachable from it. No tag is needed.
 2. Dispatch `release.yml` with that SHA and `publish: false`:
@@ -377,7 +506,7 @@ The workflow must validate the SHA and protected-`main` ancestry, build all five
 
 The macOS executable must have a valid ad-hoc signature, but it is not trusted by Gatekeeper as a public download. After checksum verification, use the quarantine-removal step in the preparation section for this unsigned test artifact.
 
-### MT-25: First generated release PR CI
+### MT-30: First generated release PR CI
 
 1. In repository Actions settings, allow GitHub Actions to create pull requests with the repository token.
 2. Merge a feature pull request containing a non-empty `.changeset/*.md` file.
@@ -386,9 +515,9 @@ The macOS executable must have a valid ad-hoc signature, but it is not trusted b
 5. Confirm the repository-token-created pull request checks appear as approval-required. Have a maintainer explicitly approve the workflow runs.
 6. Wait for the normal source checks, all five native target checks, and exact-asset assembly to pass. Confirm branch protection treats them like the checks on an ordinary pull request.
 
-Leave the reviewed release pull request open until MT-26 is ready. If its checks do not appear, cannot be approved, or do not satisfy branch protection, stop and correct repository settings before merging it.
+Leave the reviewed release pull request open until MT-31 is ready. If its checks do not appear, cannot be approved, or do not satisfy branch protection, stop and correct repository settings before merging it.
 
-### MT-26: First tag-last public release
+### MT-31: First tag-last public release
 
 Run only when publication is explicitly authorized. Before dispatch:
 
@@ -396,7 +525,7 @@ Run only when publication is explicitly authorized. Before dispatch:
 2. Confirm the `release-signing` and `release-publication` environments have the intended required reviewers and only the signing environment contains Apple credentials.
 3. Commission the `v*` tag rule: the protected publication actor may create a new tag, while other actors cannot move or delete release tags.
 4. Confirm the intended `vX.Y.Z` tag and Release do not exist and no higher stable Release is public.
-5. Merge the approved `chore: release` pull request from MT-25. Record its exact merge SHA and version:
+5. Merge the approved `chore: release` pull request from MT-30. Record its exact merge SHA and version:
 
    ```bash
    git fetch origin main
@@ -462,9 +591,9 @@ Finally, record:
 
 The Linux artifacts do not claim Alpine or other musl compatibility. Windows signing, Homebrew, and Chocolatey remain deferred.
 
-### MT-27: Completed release no-op
+### MT-32: Completed release no-op
 
-After MT-26 succeeds, dispatch the same exact tag and peeled commit again with `publish: true`:
+After MT-31 succeeds, dispatch the same exact tag and peeled commit again with `publish: true`:
 
 ```bash
 RELEASE_SHA="$(git rev-parse "${TAG}^{commit}")"
@@ -475,7 +604,7 @@ gh workflow run release.yml --ref "$TAG" \
 
 The preflight must download exactly the five ZIPs and `SHA256SUMS`, validate all checksums, and verify every archive attestation against this repository, `.github/workflows/release.yml`, and `RELEASE_SHA`. It must then report a completed no-op: no native build, signing, publication approval, tag mutation, asset replacement, or duplicate Release.
 
-### MT-28: Exact-tag/no-Release resume
+### MT-33: Exact-tag/no-Release resume
 
 Exercise this state only after a real interrupted publication leaves an exact tag without a Release, or in a disposable repository that mirrors the production environments and tag rules. Do not manufacture it by deleting a production Release.
 
@@ -490,11 +619,11 @@ Exercise this state only after a real interrupted publication leaves an exact ta
      -f publish=true
    ```
 
-3. Complete the protected approvals and verify the workflow rebuilds, signs, checksums, and attests the same source, leaves the tag unmoved, and creates the Release with exactly the six public assets from MT-26.
+3. Complete the protected approvals and verify the workflow rebuilds, signs, checksums, and attests the same source, leaves the tag unmoved, and creates the Release with exactly the six public assets from MT-31.
 
 The selected tag ref and `release-sha` must both resolve to the same exact commit. An older tag that points elsewhere is not a recovery mechanism.
 
-### MT-29: Conflict refusal
+### MT-34: Conflict refusal
 
 Use a disposable repository with the same workflow and protection settings; never create conflicting public state in production. Exercise each of these cases:
 
@@ -512,7 +641,7 @@ Each run must fail before public mutation with a diagnostic that identifies the 
 
 Use disposable OS accounts or VMs for these tests. Never test lifecycle mutations in a developer's normal account, and never put an API key in arguments, generation stdin, shell history, screenshots, reports, or workflow output.
 
-### MT-26: Run the compiled production-adapter gate
+### MT-35: Run the compiled production-adapter gate
 
 On each matching native runner, from the exact candidate commit, run:
 
@@ -522,23 +651,45 @@ bun scripts/release-validate.ts secrets TARGET_ID
 
 Replace `TARGET_ID` with the exact candidate target, such as `macos-arm64` or `linux-x64`. The gate must use Bun 1.3.14, reject a host/target mismatch, compile the production adapter with the same Bun target as the archive, and pass missing, set/get, replace/get, delete, and final-missing checks. It may print lifecycle stage names but no value. Confirm cleanup runs after success and after a deliberately injected intermediate failure. Linux must run inside the same isolated D-Bus/Secret Service session used by CI. A skip, warning-only failure, target mismatch, Bun mismatch, or leftover probe record is a release blocker.
 
-### MT-27: Add, replace, and delete a provider fallback
+### MT-36: Add, replace, and delete a provider fallback
 
 In a disposable logged-in user account, obtain a temporary revocable provider credential and keep it out of the shell environment. Run bare `"$BIN"`, choose “Add or manage API keys…”, select the provider, and paste the value only into the hidden field.
 
 Confirm that invalid input and failed authentication write nothing; final save defaults to No; acceptance creates one provider record; and stdout, stderr, terminal capture, aliases, and config files contain no credential. Repeat with a second temporary credential. Declining or failing replacement must preserve the old record; accepting a verified replacement must change it once. Finally delete the record, confirming deletion defaults to No and a concurrent/already-absent delete remains successful. Revoke both temporary credentials after testing.
 
-### MT-28: Verify environment precedence and fallback behavior
+### MT-37: Verify environment precedence and fallback behavior
 
 With both a stored fallback and a recognized environment credential present, make the two credentials distinguishable through provider-side test-account evidence without printing either value. Generation must use the environment credential and make no vault read. Remove the environment variable and repeat; generation must use the stored fallback. Restore the environment variable, delete the stored fallback through setup, and confirm the CLI explains that the provider remains available through the environment source.
 
 An authentication failure from the selected source must fail closed. The CLI must not retry the other source, switch provider, or overwrite/delete a stored record.
 
-### MT-29: Verify unavailable-store behavior and cleanup
+### MT-38: Verify unavailable-store behavior and cleanup
 
 On Linux, repeat setup in a session without Secret Service. On other platforms, use a disposable test session where access to the native store is unavailable or denied. The operation must exit `1`, identify the credential-store operation as unavailable without exposing backend detail, create no plaintext/self-encrypted fallback, and preserve existing aliases and provider records. A recognized environment credential must remain usable.
 
 After every session, verify that the probe identity and every `llm-now` test-provider record are absent, the temporary credentials are revoked, the isolated alias/config directory is removed, and the disposable OS session is destroyed.
+
+## macOS voice router example
+
+### MT-39: Complete the two-action voice Shortcut matrix
+
+On a Mac with Dictation enabled, follow the authoritative
+[macOS voice shortcut guide](../examples/macos-voice-shortcut.md) from its Text
+smoke test through the global keyboard shortcut. Start with `uv`, `llm-now`, the
+repository checkout, and one working alias already available; record the time
+from opening the setup section to the first spoken answer. Under ordinary network
+conditions, it must take less than three minutes.
+
+Complete the guide's routing, wake-word, rejection, local/hosted provider,
+per-alias voice/rate/pitch, clean clipboard, audible pitch A/B, provider failure,
+cancellation, permission, privacy, and recovery checks. A successful process
+exit alone is not evidence that an installed voice honored the pitch setting.
+The finished Shortcut must contain only
+`Dictate Text` followed by `Run Shell Script`; no marker parser, clipboard action,
+or separate `Speak Text` action may remain. Record the macOS version, Dictation
+mode, shortcut key, aliases/providers used, installed voices, elapsed setup time,
+pitch values and audible comparison, clean-clipboard result, clipboard sentinel
+result, cancellation result, and any permission prompts in the test report below.
 
 ## Automation-backed coverage
 

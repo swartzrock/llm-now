@@ -15,6 +15,7 @@ const APPROVED_HELP_TEXT = `A tiny CLI to send text-generation prompts to the mo
 
 Usage:
   llm-now
+  llm-now --aliases
   llm-now --input <text>
   llm-now <alias> --input <text>
   llm-now --provider <id> --model <id|default> --input <text>
@@ -26,6 +27,7 @@ Rules:
   Model "default" is available only for codex-cli and claude-cli.
 
 Options:
+  --aliases            List saved aliases
   --input <text>       Prompt text
   --alias <name>       Saved provider/model selection
   --provider <id>      Explicit provider
@@ -243,6 +245,15 @@ describe("arguments and input", () => {
     expect(() => parseArguments(["daily", "--help"])).toThrow(UsageError);
     expect(() => parseArguments(["--version", "daily"])).toThrow(UsageError);
     expect(() => parseArguments(["daily", "--version"])).toThrow(UsageError);
+  });
+
+  test("aliases is a standalone option while the bare word remains an alias", () => {
+    expect(parseArguments(["--aliases"])).toEqual({ kind: "aliases" });
+    expect(parseArguments(["aliases"])).toEqual({
+      kind: "run",
+      selection: { kind: "alias", alias: "aliases" },
+    });
+    expect(() => parseArguments(["--aliases", "--input", "hello"])).toThrow(UsageError);
   });
 
   test("renders the exact approved compact plain help", () => {

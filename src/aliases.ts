@@ -4,10 +4,16 @@ import { dirname, join, posix, win32 } from "node:path";
 import { randomUUID } from "node:crypto";
 
 const ALIAS_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH = 128;
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
 
 export function isValidAliasName(name: string): boolean {
   return ALIAS_NAME.test(name);
+}
+
+export function normalizeAliasName(name: string): string {
+  if (!isValidAliasName(name)) throw new AliasStoreError(`invalid alias name: ${name}`);
+  return name.toLowerCase();
 }
 
 export interface AliasRecord {
@@ -101,31 +107,83 @@ function emptyDocument(): AliasDocument {
   return { version: 1, aliases: {} };
 }
 
+function canonicalizeDocument(document: AliasDocument, path: string): AliasDocument {
+  const aliases: Record<string, AliasRecord> = {};
+  const seenAliases = new Map<string, { originalName: string; record: AliasRecord }>();
+  const entries = Object.entries(document.aliases)
+    .map(([originalName, record]) => ({
+      originalName,
+      canonicalName: normalizeAliasName(originalName),
+      record,
+    }))
+    .sort((left, right) => {
+      if (left.canonicalName !== right.canonicalName) {
+        return left.canonicalName < right.canonicalName ? -1 : 1;
+      }
+      if (left.originalName < right.originalName) return -1;
+      if (left.originalName > right.originalName) return 1;
+      return 0;
+    });
+
+  for (const { originalName, canonicalName, record } of entries) {
+    const current = seenAliases.get(canonicalName);
+    if (current === undefined) {
+      aliases[canonicalName] = record;
+      seenAliases.set(canonicalName, { originalName, record });
+      continue;
+    }
+    if (sameAliasRecord(current.record, record)) continue;
+
+    const displayPath = summarizeDiagnosticValue(path);
+    throw new AliasStoreError(
+      `conflicting case-insensitive alias "${canonicalName}" in ${displayPath}: `
+      + `"${current.originalName}" -> ${formatAliasTarget(current.record)}; `
+      + `"${originalName}" -> ${formatAliasTarget(record)}. `
+      + `Edit the alias store manually at ${displayPath} and keep only one target for "${canonicalName}".`,
+    );
+  }
+
+  return { version: 1, aliases };
+}
+
+function formatAliasTarget(record: AliasRecord): string {
+  return summarizeDiagnosticValue(`${record.provider}/${record.model ?? "(default)"}`);
+}
+
+function summarizeDiagnosticValue(value: string): string {
+  if (value.length <= MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH) return value;
+  const startLength = Math.floor((MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH - 1) / 2);
+  const endLength = MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH - startLength - 1;
+  return `${value.slice(0, startLength)}…${value.slice(-endLength)}`;
+}
+
 export async function loadAliases(path: string): Promise<AliasDocument> {
   try {
     const parsed: unknown = JSON.parse(await Bun.file(path).text());
     if (!validateDocument(parsed)) throw new Error("invalid alias document schema");
-    return parsed;
+    return canonicalizeDocument(parsed, path);
   } catch (error) {
     if (hasErrorCode(error, "ENOENT")) return emptyDocument();
+    if (error instanceof AliasStoreError) throw error;
     throw new AliasStoreError(`failed to load alias store: ${path}`, { cause: error });
   }
 }
 
 export async function resolveAlias(path: string, name: string): Promise<AliasRecord> {
-  if (!isValidAliasName(name)) throw new AliasStoreError(`invalid alias name: ${name}`);
+  const canonicalName = normalizeAliasName(name);
   const aliases = (await loadAliases(path)).aliases;
-  if (!Object.hasOwn(aliases, name)) throw new AliasStoreError(`alias not found: ${name}`);
-  const record = aliases[name];
+  if (!Object.hasOwn(aliases, canonicalName)) throw new AliasStoreError(`alias not found: ${name}`);
+  const record = aliases[canonicalName];
   if (record === undefined) throw new AliasStoreError(`alias not found: ${name}`);
   return record;
 }
 
-function validateSaveInput(name: string, record: AliasRecord): void {
-  if (!isValidAliasName(name)) throw new AliasStoreError(`invalid alias name: ${name}`);
+function validateSaveInput(name: string, record: AliasRecord): string {
+  const canonicalName = normalizeAliasName(name);
   if (!validateAliasRecord({ provider: record.provider, model: record.model })) {
     throw new AliasStoreError(`invalid alias selection: ${name}`);
   }
+  return canonicalName;
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -185,7 +243,7 @@ export async function saveAlias(
   options: SaveAliasOptions = {},
   dependencies: AliasStoreDependencies = {},
 ): Promise<SaveAliasResult> {
-  validateSaveInput(name, record);
+  const canonicalName = validateSaveInput(name, record);
   const directory = dirname(path);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") await chmod(directory, 0o700);
@@ -202,8 +260,8 @@ export async function saveAlias(
   while (true) {
     const result = await attemptSave(hasExpectedCurrent, expectedCurrent);
     if (result === "saved" || result === "already-saved") return result;
-    if (options.confirmOverwrite === undefined) throw new AliasCollisionError(name);
-    if (!(await options.confirmOverwrite(name, result.current))) return "declined";
+    if (options.confirmOverwrite === undefined) throw new AliasCollisionError(canonicalName);
+    if (!(await options.confirmOverwrite(canonicalName, result.current))) return "declined";
     hasExpectedCurrent = true;
     expectedCurrent = result.current;
   }
@@ -216,7 +274,9 @@ export async function saveAlias(
     let temporaryPath: string | undefined;
     try {
       const document = await loadAliases(path);
-      const current = Object.hasOwn(document.aliases, name) ? document.aliases[name] : undefined;
+      const current = Object.hasOwn(document.aliases, canonicalName)
+        ? document.aliases[canonicalName]
+        : undefined;
       if (current !== undefined && sameAliasRecord(current, record)) return "already-saved";
       const matchesExpected = expected === undefined
         ? current === undefined
@@ -230,7 +290,7 @@ export async function saveAlias(
         version: 1,
         aliases: {
           ...document.aliases,
-          [name]: { provider: record.provider, model: record.model },
+          [canonicalName]: { provider: record.provider, model: record.model },
         },
       };
       temporaryPath = join(directory, `.aliases-${process.pid}-${randomUUID()}.tmp`);

@@ -58,6 +58,7 @@ Keep three rules in mind:
 | 6 | [A quiz made from your notes](#6-make-your-own-notes-quiz-you) | New to LLMs | — |
 | 7 | [A skeptical diff preflight](#7-ask-a-skeptical-maintainer-to-preflight-your-diff) | Developer | Git |
 | 8 | [A spoken focus reset](#8-let-the-terminal-talk-you-through-a-reset) | Power user | macOS |
+| Guide | [Talk to an alias from a global macOS shortcut](macos-voice-shortcut.md) | Power user | macOS, uv |
 | 9 | [A decision pre-mortem](#9-run-a-pre-mortem-before-you-make-the-decision) | New to LLMs | — |
 | 10 | [Release notes from Git history](#10-turn-the-commit-trail-into-release-notes) | Developer | Git |
 | 11 | [Action items from meeting notes](#11-turn-meeting-notes-into-commitments) | Power user | — |
@@ -397,6 +398,10 @@ llm_focus_reset | say
 
 Run `llm_focus_reset` without `say` first if you want to preview the script. This
 is a focus prompt, not mental-health or medical advice.
+
+For a global keyboard shortcut that safely recognizes dictated alias variants,
+copies the answer, and speaks it with optional per-alias voice, rate, and pitch
+settings, follow the [macOS voice shortcut guide](macos-voice-shortcut.md).
 
 ## 9. Run a pre-mortem before you make the decision
 
