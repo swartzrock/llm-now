@@ -400,8 +400,8 @@ Run `llm_focus_reset` without `say` first if you want to preview the script. Thi
 is a focus prompt, not mental-health or medical advice.
 
 For a global keyboard shortcut that safely recognizes dictated alias variants,
-copies the answer, and speaks that same answer with an optional per-alias voice, follow the
-[macOS voice shortcut guide](macos-voice-shortcut.md).
+copies the answer, and speaks it with optional per-alias voice, rate, and pitch
+settings, follow the [macOS voice shortcut guide](macos-voice-shortcut.md).
 
 ## 9. Run a pre-mortem before you make the decision
 

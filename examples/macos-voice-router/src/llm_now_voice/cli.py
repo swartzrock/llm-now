@@ -156,6 +156,7 @@ class AliasProfile:
     match_phrases: tuple[str, ...] = ()
     voice: str | None = None
     rate: int | None = None
+    pitch: int | float | None = None
 
 
 @dataclass(frozen=True)
@@ -263,7 +264,7 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
     _validate_phrases(wake_words, "wake_words")
 
     profiles: dict[str, AliasProfile] = {}
-    allowed_profile_fields = {"match_phrases", "voice", "rate"}
+    allowed_profile_fields = {"match_phrases", "voice", "rate", "pitch"}
     for alias, raw_profile in document.items():
         if not ALIAS_PATTERN.fullmatch(alias):
             raise VoiceRouterError(f'invalid profile alias: "{alias}"')
@@ -296,10 +297,20 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
         ):
             raise VoiceRouterError(f'{alias}.rate must be an integer from 80 through 500')
 
+        pitch_value = raw_profile.get("pitch")
+        if pitch_value is not None and (
+            isinstance(pitch_value, bool)
+            or not isinstance(pitch_value, (int, float))
+            or (isinstance(pitch_value, float) and not math.isfinite(pitch_value))
+            or not 1 <= pitch_value <= 127
+        ):
+            raise VoiceRouterError(f'{alias}.pitch must be a number from 1 through 127')
+
         profiles[alias] = AliasProfile(
             match_phrases=phrases,
             voice=voice_value.strip() if isinstance(voice_value, str) else None,
             rate=rate_value,
+            pitch=pitch_value,
         )
 
     _validate_active_phrases(profiles, active_aliases)
@@ -711,8 +722,12 @@ def run_voice_router(
             speech_args.extend(("-v", installed_voice))
         if profile.rate is not None:
             speech_args.extend(("-r", str(profile.rate)))
+        speech = answer
+        if profile.pitch is not None:
+            pitch_command = f"[[pbas {_format_pitch(profile.pitch)}]]".encode("ascii")
+            speech = pitch_command + answer
         try:
-            speech_result = runner.run(tuple(speech_args), answer, SPEECH_TIMEOUT)
+            speech_result = runner.run(tuple(speech_args), speech, SPEECH_TIMEOUT)
         except (FileNotFoundError, ProcessTimedOut, OSError) as error:
             _write_diagnostic(stderr, f"answer speech failed: {error}")
             return 1
@@ -735,6 +750,12 @@ def _unsafe_for_speech(value: str) -> bool:
         unicodedata.category(character) == "Cc" and character not in "\t\n\r"
         for character in value
     )
+
+
+def _format_pitch(value: int | float) -> str:
+    if isinstance(value, int) or value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def _speak_notice(

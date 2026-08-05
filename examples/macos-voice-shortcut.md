@@ -157,7 +157,7 @@ follows:
 
 `Tara` and `Kwen` work only when no competing alias makes the result ambiguous.
 
-## Optional names and voices
+## Optional names and speech
 
 The zero-configuration path is usually enough. To customize it, create:
 
@@ -181,9 +181,10 @@ rate = 205
 [opus47]
 match_phrases = ["op 47"]
 
-[haiku]
+[slug]
 voice = "Eddy (English (US))"
 rate = 180
+pitch = 50
 ```
 
 Every field is optional:
@@ -191,8 +192,18 @@ Every field is optional:
 - omit `wake_words` to use `["hey"]`;
 - use `wake_words = []` to disable wake-word stripping;
 - omit `match_phrases` to rely on canonical and fuzzy matching;
-- omit `voice` and `rate` to inherit the current macOS defaults; and
-- keep `rate` between 80 and 500.
+- omit `voice` and `rate` to inherit the current macOS defaults;
+- omit `pitch` to use the voice's normal baseline pitch;
+- keep `rate` between 80 and 500; and
+- keep `pitch` between 1 and 127, inclusive. Integers and fractional values such
+  as `50.5` are accepted.
+
+`pitch` uses Apple's legacy unsigned, absolute baseline-pitch (`pbas`) scale; it
+is not a percentage or a relative adjustment. The router turns `pitch = 50`
+into a trusted `[[pbas 50]]` command for `/usr/bin/say` only. The original model
+answer is still copied to the clipboard without that command. Raw embedded
+speech commands are not configurable, and model output containing `[[...]]` is
+rejected before copying or speaking.
 
 List the exact voices installed on this Mac:
 
@@ -220,12 +231,29 @@ that apply to your alias inventory.
 2. Try the five phrases in the table for aliases that exist on your machine.
 3. Try the same request with `Hey`, without a wake word, and with a configured
    wake word in different capitalization.
-4. Configure different voices or rates for two aliases that point to the same
-   model. Confirm the profile follows the alias, not the model.
+4. Configure different voices, rates, or pitches for two aliases that point to
+   the same model. Confirm the profile follows the alias, not the model.
 5. Ask one local Ollama alias and one hosted API- or CLI-backed alias. Ordinary
    unmarked text from both must follow the same clipboard-and-speech path.
-6. After each success, paste the clipboard and confirm it exactly matches what
-   was spoken.
+6. After each success, paste the clipboard and confirm it contains the original
+   answer text with no `[[pbas ...]]` command.
+
+### Pitch A/B check
+
+Pitch support can vary by installed voice, so a successful Shortcut run does
+not prove that the selected voice changed audibly.
+
+1. Choose an exact name from `/usr/bin/say -v '?'`, configure it for `slug` (or
+   substitute one of your aliases), omit `pitch`, and ask for a short repeatable
+   sentence. Treat that listening pass as the control.
+2. Add one legal pitch such as `pitch = 40`, repeat the same request, and compare
+   it with the control. Paste the clipboard and confirm that it contains only
+   the model answer, with no speech command.
+3. Repeat with a substantially different legal value such as `pitch = 80`.
+   Record the voice, values, and whether the difference was audible.
+4. If the two legal values sound unchanged, repeat with another installed
+   voice. Treat the result as voice-dependent rather than assuming process
+   success guarantees modulation.
 
 ### Rejection and failure safety
 
@@ -303,18 +331,20 @@ action may otherwise show no useful result. Configuration, missing-command,
 clipboard, and speech failures return nonzero so Shortcuts exposes the action
 error.
 
-### A custom voice fails
+### A custom speech profile fails
 
 Run `/usr/bin/say -v '?'` again and copy the voice name exactly. Check that the
 profile section uses the canonical lowercase alias printed by
 `llm-now --aliases`, that TOML strings are quoted, and that `rate` is an integer
-from 80 through 500.
+from 80 through 500. `pitch` must be an integer or fractional number from 1
+through 127; do not put `[[...]]` commands in the profile.
 
 ### A local model returns plain text without markers
 
 That is supported. The router never asks a model for control markers, JSON, or a
-separate summary. It makes one generation request and sends the same safe UTF-8
-response to both clipboard and speech.
+separate summary. It makes one generation request and copies the safe UTF-8
+response unchanged. If `pitch` is configured, the router adds its validated
+command only to the separate speech input.
 
 ## Privacy and state
 

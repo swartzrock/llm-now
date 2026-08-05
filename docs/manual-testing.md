@@ -681,13 +681,15 @@ from opening the setup section to the first spoken answer. Under ordinary networ
 conditions, it must take less than three minutes.
 
 Complete the guide's routing, wake-word, rejection, local/hosted provider,
-per-alias voice, clipboard equality, provider failure, cancellation, permission,
-privacy, and recovery checks. The finished Shortcut must contain only
+per-alias voice/rate/pitch, clean clipboard, audible pitch A/B, provider failure,
+cancellation, permission, privacy, and recovery checks. A successful process
+exit alone is not evidence that an installed voice honored the pitch setting.
+The finished Shortcut must contain only
 `Dictate Text` followed by `Run Shell Script`; no marker parser, clipboard action,
 or separate `Speak Text` action may remain. Record the macOS version, Dictation
 mode, shortcut key, aliases/providers used, installed voices, elapsed setup time,
-clipboard sentinel result, cancellation result, and any permission prompts in the
-test report below.
+pitch values and audible comparison, clean-clipboard result, clipboard sentinel
+result, cancellation result, and any permission prompts in the test report below.
 
 ## Automation-backed coverage
 
