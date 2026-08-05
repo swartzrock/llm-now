@@ -37,6 +37,7 @@ interface CapturedRequest {
   method: string;
   headers: Headers;
   body: string;
+  signal: AbortSignal;
 }
 
 type FetchStep = Response | Error | ((request: CapturedRequest) => Response | Promise<Response>);
@@ -55,6 +56,7 @@ function fakeFetch(...steps: FetchStep[]): {
       method: request.method,
       headers: request.headers,
       body: await request.text(),
+      signal: request.signal,
     };
     requests.push(captured);
     const step = steps.shift();
@@ -230,6 +232,34 @@ describe("Homebrew tap reconciliation", () => {
     }
   });
 
+  test("rejects oversized declared and streamed Contents responses without writing", async () => {
+    for (const contentLength of [String(256 * 1024 + 1), "invalid"]) {
+      const declared = fakeFetch(new Response("{}", {
+        status: 200,
+        headers: { "content-length": contentLength },
+      }));
+      const declaredReceipt = await reconcileHomebrewFormula(options(declared.fetch));
+      expect(declaredReceipt).toMatchObject({
+        disposition: "failed-before-write",
+        reason: "invalid-live-response",
+      });
+      expect(declared.requests.map((request) => request.method)).toEqual(["GET"]);
+    }
+
+    const streamed = fakeFetch(new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(256 * 1024 + 1));
+        controller.close();
+      },
+    }), { status: 200 }));
+    const streamedReceipt = await reconcileHomebrewFormula(options(streamed.fetch));
+    expect(streamedReceipt).toMatchObject({
+      disposition: "failed-before-write",
+      reason: "invalid-live-response",
+    });
+    expect(streamed.requests.map((request) => request.method)).toEqual(["GET"]);
+  });
+
   test("accepts exact read-back after success, conflict, server ambiguity, or transport ambiguity", async () => {
     const desired = formula("2.3.0", "3");
     const writeSteps: Array<{ step: FetchStep; disposition: ReconciliationReceipt["disposition"] }> = [
@@ -277,6 +307,75 @@ describe("Homebrew tap reconciliation", () => {
     }
   });
 
+  test("bounds stalled reads and preserves one read-back after a stalled write", async () => {
+    const stallUntilAbort = ({ signal }: CapturedRequest) => new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+
+    const initialStall = fakeFetch(stallUntilAbort);
+    const initialReceipt = await reconcileHomebrewFormula(options(initialStall.fetch, {
+      requestTimeoutMs: 5,
+    }));
+    expect(initialReceipt).toMatchObject({
+      disposition: "failed-before-write",
+      phase: "read-live",
+      reason: "live-read-transport-failed",
+    });
+    expect(initialStall.requests.map((request) => request.method)).toEqual(["GET"]);
+
+    const desired = formula("2.3.0", "3");
+    const writeStall = fakeFetch(
+      contentResponse(formula("2.2.0", "2")),
+      stallUntilAbort,
+      contentResponse(desired),
+    );
+    const writeReceipt = await reconcileHomebrewFormula(options(writeStall.fetch, {
+      desiredFormula: desired,
+      requestTimeoutMs: 5,
+    }));
+    expect(writeReceipt).toMatchObject({
+      disposition: "already-current",
+      phase: "read-back",
+      reason: "exact-after-ambiguous-update",
+      httpStatus: null,
+      requestId: null,
+    });
+    expect(writeStall.requests.map((request) => request.method)).toEqual(["GET", "PUT", "GET"]);
+
+    const readBackStall = fakeFetch(
+      contentResponse(formula("2.2.0", "2")),
+      jsonResponse({}, 200, "write-id"),
+      stallUntilAbort,
+    );
+    const readBackReceipt = await reconcileHomebrewFormula(options(readBackStall.fetch, {
+      requestTimeoutMs: 5,
+    }));
+    expect(readBackReceipt).toMatchObject({
+      disposition: "write-outcome-unconfirmed",
+      phase: "read-back",
+      reason: "read-back-unavailable",
+      httpStatus: 200,
+      requestId: "write-id",
+    });
+    expect(readBackStall.requests.map((request) => request.method)).toEqual(["GET", "PUT", "GET"]);
+  });
+
+  test("bounds stalled Contents response bodies", async () => {
+    const api = fakeFetch(({ signal }) => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("{"));
+        signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      },
+    }), { status: 200 }));
+    const receipt = await reconcileHomebrewFormula(options(api.fetch, { requestTimeoutMs: 5 }));
+    expect(receipt).toMatchObject({
+      disposition: "failed-before-write",
+      phase: "read-live",
+      reason: "invalid-live-response",
+    });
+    expect(api.requests.map((request) => request.method)).toEqual(["GET"]);
+  });
+
   test("fails auth, rate-limit, validation, malformed, and transport reads before PUT", async () => {
     const failures: FetchStep[] = [
       jsonResponse({ message: "bad credentials" }, 401, "auth"),
@@ -319,6 +418,28 @@ describe("Homebrew tap reconciliation", () => {
       reason: "invalid-desired-formula",
     });
     expect(invalidDesiredApi.requests).toHaveLength(0);
+
+    const invalidShaApi = fakeFetch();
+    const invalidSha = await reconcileHomebrewFormula(options(invalidShaApi.fetch, {
+      releaseSha: "A".repeat(40),
+    }));
+    expect(invalidSha).toMatchObject({
+      disposition: "failed-before-write",
+      phase: "input-validation",
+      reason: "invalid-release-sha",
+    });
+    expect(invalidShaApi.requests).toHaveLength(0);
+
+    const invalidTagApi = fakeFetch();
+    const invalidTag = await reconcileHomebrewFormula(options(invalidTagApi.fetch, {
+      tag: "v02.3.0",
+    }));
+    expect(invalidTag).toMatchObject({
+      disposition: "failed-before-write",
+      phase: "input-validation",
+      reason: "invalid-desired-formula",
+    });
+    expect(invalidTagApi.requests).toHaveLength(0);
   });
 
   test("never places hostile external text, API bodies, or tokens in receipts", async () => {

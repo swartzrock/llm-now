@@ -11,6 +11,7 @@ export const HOMEBREW_TAP = {
 
 export const MAX_FORMULA_BYTES = 64 * 1024;
 const MAX_API_RESPONSE_BYTES = 256 * 1024;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const API_VERSION = "2026-03-10";
 const stableTagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const blobShaPattern = /^[a-f0-9]{40}$/;
@@ -61,6 +62,7 @@ interface ReconcileOptions {
   token?: string;
   fetchImpl?: typeof fetch;
   apiUrl?: string;
+  requestTimeoutMs?: number;
 }
 
 interface LiveFormula {
@@ -244,10 +246,12 @@ async function readLiveFormula(
   fetchImpl: typeof fetch,
   endpoint: string,
   token: string,
+  requestTimeoutMs: number,
 ): Promise<ReadResult> {
   let response: Response;
   try {
     response = await fetchImpl(`${endpoint}?ref=${HOMEBREW_TAP.branch}`, {
+      signal: AbortSignal.timeout(requestTimeoutMs),
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${token}`,
@@ -299,6 +303,7 @@ export async function reconcileHomebrewFormula(
 ): Promise<ReconciliationReceipt> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiUrl = (options.apiUrl ?? "https://api.github.com").replace(/\/$/, "");
+  const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const endpoint = `${apiUrl}/repos/${HOMEBREW_TAP.owner}/${HOMEBREW_TAP.repository}/contents/${HOMEBREW_TAP.path}`;
   const tagMatch = stableTagPattern.exec(options.tag);
 
@@ -315,7 +320,7 @@ export async function reconcileHomebrewFormula(
     return receipt(options, "failed-before-write", "input-validation", "invalid-desired-formula", null, null);
   }
 
-  const initial = await readLiveFormula(fetchImpl, endpoint, options.token);
+  const initial = await readLiveFormula(fetchImpl, endpoint, options.token, requestTimeoutMs);
   if (!initial.live) {
     return receipt(
       options,
@@ -347,6 +352,7 @@ export async function reconcileHomebrewFormula(
   try {
     const response = await fetchImpl(endpoint, {
       method: "PUT",
+      signal: AbortSignal.timeout(requestTimeoutMs),
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${options.token}`,
@@ -367,7 +373,7 @@ export async function reconcileHomebrewFormula(
     // The write may have committed before the transport failed. Read back once.
   }
 
-  const readBack = await readLiveFormula(fetchImpl, endpoint, options.token);
+  const readBack = await readLiveFormula(fetchImpl, endpoint, options.token, requestTimeoutMs);
   if (readBack.live?.formula === options.desiredFormula) {
     const writeConfirmed = writeStatus === 200 || writeStatus === 201;
     return receipt(
