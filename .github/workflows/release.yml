@@ -121,14 +121,17 @@ jobs:
             exit 0
           fi
 
-          expected_assets() {
+          expected_archives() {
             printf '%s\n' \
-              "SHA256SUMS" \
               "llm-now-v${VERSION}-linux-arm64.zip" \
               "llm-now-v${VERSION}-linux-x64.zip" \
               "llm-now-v${VERSION}-macos-arm64.zip" \
               "llm-now-v${VERSION}-macos-x64.zip" \
               "llm-now-v${VERSION}-windows-x64.zip"
+          }
+          expected_assets() {
+            printf '%s\n' "SHA256SUMS"
+            expected_archives
           }
           verify_complete_release() {
             test "$(jq -r '.draft' release.json)" = "false"
@@ -505,3 +508,193 @@ jobs:
             --verify-tag \
             --notes-file dist/RELEASE_NOTES.md \
             --title "$TAG"
+
+  homebrew-sync:
+    needs: [validate-ref, publish]
+    if: >-
+      ${{
+        always() &&
+        needs.validate-ref.result == 'success' &&
+        needs.validate-ref.outputs.publish == 'true' &&
+        (
+          (needs.validate-ref.outputs.should-build == 'true' && needs.publish.result == 'success') ||
+          (needs.validate-ref.outputs.should-build == 'false' && needs.publish.result == 'skipped')
+        )
+      }}
+    runs-on: ubuntu-24.04
+    environment: homebrew-publication
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - id: verify-public
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
+          VERSION: ${{ needs.validate-ref.outputs.version }}
+          TAG: ${{ needs.validate-ref.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          remote_sha="$(git ls-remote --exit-code --refs origin "refs/tags/$TAG" | awk 'NR == 1 { print $1 }')"
+          test "$remote_sha" = "$RELEASE_SHA" || {
+            echo "The public release tag does not resolve to the validated release commit" >&2
+            exit 1
+          }
+
+          release_dir="$RUNNER_TEMP/homebrew-release"
+          rm -rf "$release_dir"
+          mkdir -p "$release_dir"
+          release_status="$(curl --silent --show-error --connect-timeout 10 --max-time 30 --retry 2 --retry-all-errors \
+            --output "$RUNNER_TEMP/homebrew-release.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+          test "$release_status" = "200" || {
+            echo "Could not verify the public release metadata (HTTP $release_status)" >&2
+            exit 1
+          }
+          jq -e --arg tag "$TAG" \
+            '.tag_name == $tag and .draft == false and .prerelease == false' \
+            "$RUNNER_TEMP/homebrew-release.json" >/dev/null || {
+              echo "The public release is not the expected published stable release" >&2
+              exit 1
+            }
+
+          expected_assets() {
+            printf '%s\n' \
+              "SHA256SUMS" \
+              "llm-now-v${VERSION}-linux-arm64.zip" \
+              "llm-now-v${VERSION}-linux-x64.zip" \
+              "llm-now-v${VERSION}-macos-arm64.zip" \
+              "llm-now-v${VERSION}-macos-x64.zip" \
+              "llm-now-v${VERSION}-windows-x64.zip"
+          }
+          actual_assets="$(jq -r '.assets[].name' "$RUNNER_TEMP/homebrew-release.json" | sort)"
+          test "$actual_assets" = "$(expected_assets)" || {
+            echo "The public release asset set is not exact" >&2
+            exit 1
+          }
+
+          gh release download "$TAG" --dir "$release_dir"
+          manifest_assets="$(sed -nE 's/^[a-f0-9]{64}  (llm-now-v[^/\\]+\.zip)$/\1/p' "$release_dir/SHA256SUMS" | sort)"
+          test "$manifest_assets" = "$(expected_archives)" || {
+            echo "The checksum manifest does not cover the exact archive set" >&2
+            exit 1
+          }
+          (cd "$release_dir" && sha256sum --check --strict --status SHA256SUMS) || {
+            echo "The public release checksums did not verify" >&2
+            exit 1
+          }
+          for archive in "$release_dir"/*.zip; do
+            gh attestation verify "$archive" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$RELEASE_SHA" >/dev/null || {
+                echo "A public release archive attestation did not verify" >&2
+                exit 1
+              }
+          done
+      - id: render-formula
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate-ref.outputs.version }}
+          TAG: ${{ needs.validate-ref.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! bun scripts/package-render.ts homebrew \
+            "$RUNNER_TEMP/homebrew-release/SHA256SUMS" \
+            "$RUNNER_TEMP/llm-now.rb" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG" \
+            "$VERSION" >"$RUNNER_TEMP/homebrew-render.log" 2>&1; then
+            echo "The Homebrew formula could not be rendered from verified release evidence" >&2
+            exit 1
+          fi
+          test -s "$RUNNER_TEMP/llm-now.rb"
+      - id: reconcile-tap
+        shell: bash
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
+          TAG: ${{ needs.validate-ref.outputs.tag }}
+        run: |
+          bun scripts/homebrew-reconcile.ts \
+            "$RUNNER_TEMP/llm-now.rb" \
+            "$TAG" \
+            "$RELEASE_SHA" \
+            "$RUNNER_TEMP/homebrew-receipt.json"
+      - id: summarize-homebrew
+        if: always()
+        shell: bash
+        env:
+          TAG: ${{ needs.validate-ref.outputs.tag }}
+          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
+          VERIFY_OUTCOME: ${{ steps.verify-public.outcome }}
+          RENDER_OUTCOME: ${{ steps.render-formula.outcome }}
+          RECONCILE_OUTCOME: ${{ steps.reconcile-tap.outcome }}
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/homebrew-receipt.json"
+          disposition=""
+          phase=""
+          reason=""
+          http_status="null"
+          request_id="null"
+
+          if [[ -f "$receipt" ]] && jq -e --arg tag "$TAG" --arg sha "$RELEASE_SHA" '
+            type == "object" and
+            (.disposition | IN("updated", "already-current", "failed-before-write", "write-outcome-unconfirmed")) and
+            (.phase | IN("input-validation", "read-live", "write", "read-back")) and
+            (.reason | type == "string" and test("^[a-z0-9-]{1,64}$")) and
+            .tag == $tag and .releaseSha == $sha and
+            .tap.owner == "swartzrock" and .tap.repository == "homebrew-tap" and
+            .tap.branch == "main" and .tap.path == "Formula/llm-now.rb" and
+            (.httpStatus == null or (.httpStatus | type == "number")) and
+            (.requestId == null or (.requestId | type == "string" and test("^[A-Za-z0-9._:-]{1,128}$")))
+          ' "$receipt" >/dev/null; then
+            disposition="$(jq -r '.disposition' "$receipt")"
+            phase="$(jq -r '.phase' "$receipt")"
+            reason="$(jq -r '.reason' "$receipt")"
+            http_status="$(jq -r '.httpStatus // "null"' "$receipt")"
+            request_id="$(jq -r '.requestId // "null"' "$receipt")"
+          elif [[ "$VERIFY_OUTCOME" != "success" ]]; then
+            disposition="failed-before-write"
+            phase="public-verification"
+            reason="public-verification-failed"
+          elif [[ "$RENDER_OUTCOME" != "success" ]]; then
+            disposition="failed-before-write"
+            phase="formula-rendering"
+            reason="formula-rendering-failed"
+          else
+            disposition="write-outcome-unconfirmed"
+            phase="tap-mutation"
+            reason="mutation-receipt-unavailable"
+          fi
+
+          {
+            echo "### Homebrew publication"
+            echo "- Disposition: $disposition"
+            echo "- Phase: $phase"
+            echo "- Reason: $reason"
+            echo "- Tag: $TAG"
+            echo "- Release commit: $RELEASE_SHA"
+            echo "- Tap target: swartzrock/homebrew-tap main Formula/llm-now.rb"
+            echo "- HTTP status: $http_status"
+            echo "- Request ID: $request_id"
+            echo "- Recovery: rerun this exact release commit with publication enabled"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          case "$disposition" in
+            updated|already-current) ;;
+            *) exit 1 ;;
+          esac

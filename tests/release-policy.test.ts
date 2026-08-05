@@ -71,7 +71,7 @@ describe("release workflow policy", () => {
     expect(refs).toEqual([
       "${{ github.sha }}",
       "${{ needs.classify.outputs.release-sha }}",
-      ...Array(5).fill("${{ needs.validate-ref.outputs.release-sha }}"),
+      ...Array(6).fill("${{ needs.validate-ref.outputs.release-sha }}"),
     ]);
     expect(releaseWorkflow).toContain('git rev-parse "refs/tags/${TAG}^{commit}"');
     expect(releaseWorkflow).toContain('gh release create "$TAG"');
@@ -125,9 +125,11 @@ describe("release workflow policy", () => {
     expect(releaseWorkflow).not.toContain("uses: ./.github/workflows/release.yml");
   });
 
-  test("does not run repository scripts in steps holding signing secrets", () => {
+  test("does not run repository scripts in steps holding Apple signing secrets", () => {
     const steps = releaseWorkflow.split(/^\s{6}- /m);
-    for (const step of steps.filter((candidate) => candidate.includes("secrets."))) {
+    for (const step of steps.filter((candidate) =>
+      candidate.includes("secrets.") && candidate.includes("APPLE_")
+    )) {
       expect(step).not.toContain("bun scripts/");
     }
   });
@@ -135,6 +137,7 @@ describe("release workflow policy", () => {
   test("uses current release tags for GitHub actions and pins third-party actions", () => {
     const githubActions = new Set([
       "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6",
+      "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
       "actions/checkout@v7.0.0",
       "actions/download-artifact@v8.0.1",
       "actions/upload-artifact@v7.0.1",
@@ -260,7 +263,10 @@ describe("release workflow policy", () => {
   });
 
   test("authenticates the publication tag refresh without persisting checkout credentials", () => {
-    const publishJob = releaseWorkflow.slice(releaseWorkflow.indexOf("\n  publish:"));
+    const publishJob = releaseWorkflow.slice(
+      releaseWorkflow.indexOf("\n  publish:"),
+      releaseWorkflow.indexOf("\n  homebrew-sync:"),
+    );
     expect(publishJob).toContain("persist-credentials: false");
     expect(publishJob).toContain("GH_TOKEN: ${{ github.token }}");
     expect(publishJob).toContain(
@@ -276,7 +282,10 @@ describe("release workflow policy", () => {
   });
 
   test("verifies and attests final checksums with publish-only permissions", () => {
-    const publishJob = releaseWorkflow.slice(releaseWorkflow.indexOf("\n  publish:"));
+    const publishJob = releaseWorkflow.slice(
+      releaseWorkflow.indexOf("\n  publish:"),
+      releaseWorkflow.indexOf("\n  homebrew-sync:"),
+    );
     expect(publishJob).toContain(`permissions:
       contents: write
       id-token: write
@@ -312,7 +321,10 @@ describe("release workflow policy", () => {
       releaseWorkflow.indexOf("\n  final-assets:"),
       releaseWorkflow.indexOf("\n  publish:"),
     );
-    const publishJob = releaseWorkflow.slice(releaseWorkflow.indexOf("\n  publish:"));
+    const publishJob = releaseWorkflow.slice(
+      releaseWorkflow.indexOf("\n  publish:"),
+      releaseWorkflow.indexOf("\n  homebrew-sync:"),
+    );
     expect(finalAssetsJob).toContain(
       'bun scripts/release-notes.ts "$VERSION" "$RELEASE_SHA" CHANGELOG.md dist/RELEASE_NOTES.md',
     );
@@ -336,7 +348,8 @@ describe("release workflow policy", () => {
     expect(releaseWorkflow).toContain("$TAG already points to another commit");
     expect(releaseWorkflow).toContain("higher stable Release $published_tag is already public");
     expect(releaseWorkflow.match(/elif \[\[ "\$tag_probe_status" -ne 2 \]\]/g)).toHaveLength(2);
-    expect(releaseWorkflow.match(/--connect-timeout 10 --max-time 30/g)).toHaveLength(2);
+    const releaseCore = releaseWorkflow.slice(0, releaseWorkflow.indexOf("\n  homebrew-sync:"));
+    expect(releaseCore.match(/--connect-timeout 10 --max-time 30/g)).toHaveLength(2);
     expect(releaseWorkflow.match(/published_tags="\$\(gh api --paginate/g)).toHaveLength(2);
     expect(releaseWorkflow).not.toContain("done < <(gh api --paginate");
     const preflight = releaseWorkflow.slice(
@@ -350,12 +363,88 @@ describe("release workflow policy", () => {
   cancel-in-progress: false`);
   });
 
-  test("defers package-manager integration outside GitHub Actions", () => {
-    for (const workflow of [ciWorkflow, releaseWorkflow]) {
-      expect(workflow.toLowerCase()).not.toContain("homebrew");
-      expect(workflow.toLowerCase()).not.toContain("chocolatey");
-      expect(workflow).not.toContain("scripts/package-render.ts");
+  test("admits Homebrew sync only after fresh or verified-existing publication", () => {
+    const start = releaseWorkflow.indexOf("\n  homebrew-sync:");
+    expect(start).toBeGreaterThan(-1);
+    const homebrewJob = releaseWorkflow.slice(start);
+    expect(homebrewJob).toContain("needs: [validate-ref, publish]");
+    expect(homebrewJob).toContain("always()");
+    expect(homebrewJob).toContain("needs.validate-ref.result == 'success'");
+    expect(homebrewJob).toContain("needs.validate-ref.outputs.publish == 'true'");
+    expect(homebrewJob).toContain(
+      "needs.validate-ref.outputs.should-build == 'true' && needs.publish.result == 'success'",
+    );
+    expect(homebrewJob).toContain(
+      "needs.validate-ref.outputs.should-build == 'false' && needs.publish.result == 'skipped'",
+    );
+    expect(homebrewJob).not.toContain("needs.publish.result == 'failure'");
+    expect(homebrewJob).not.toContain("needs.publish.result == 'cancelled'");
+  });
+
+  test("reverifies public Release evidence before Homebrew rendering", () => {
+    const homebrewJob = releaseWorkflow.slice(releaseWorkflow.indexOf("\n  homebrew-sync:"));
+    for (const asset of [
+      "SHA256SUMS",
+      "linux-arm64.zip",
+      "linux-x64.zip",
+      "macos-arm64.zip",
+      "macos-x64.zip",
+      "windows-x64.zip",
+    ]) expect(homebrewJob).toContain(asset);
+    expect(homebrewJob).toContain('git ls-remote --exit-code --refs origin "refs/tags/$TAG"');
+    expect(homebrewJob).toContain(".draft == false");
+    expect(homebrewJob).toContain(".prerelease == false");
+    expect(homebrewJob).toContain('gh release download "$TAG"');
+    expect(homebrewJob).toContain('manifest_assets="$(sed -nE');
+    expect(homebrewJob).toContain('test "$manifest_assets" = "$(expected_archives)"');
+    expect(homebrewJob).toContain("sha256sum --check --strict --status SHA256SUMS");
+    expect(homebrewJob).toContain('gh attestation verify "$archive"');
+    expect(homebrewJob).toContain('--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"');
+    expect(homebrewJob).toContain('--source-digest "$RELEASE_SHA"');
+    expect(homebrewJob.indexOf("bun scripts/package-render.ts"))
+      .toBeGreaterThan(homebrewJob.indexOf('gh attestation verify "$archive"'));
+  });
+
+  test("confines the tap token to one pinned mutation step", () => {
+    const homebrewJob = releaseWorkflow.slice(releaseWorkflow.indexOf("\n  homebrew-sync:"));
+    expect(homebrewJob).toContain("environment: homebrew-publication");
+    expect(homebrewJob).toContain(`permissions:
+      contents: read
+      attestations: read`);
+    const secretSteps = homebrewJob.split(/^\s{6}- /m)
+      .filter((step) => step.includes("HOMEBREW_TAP_TOKEN"));
+    expect(secretSteps).toHaveLength(1);
+    expect(secretSteps[0]).toContain("bun scripts/homebrew-reconcile.ts");
+    expect(secretSteps[0]).not.toContain("uses:");
+    const actions = [...homebrewJob.matchAll(/^\s+- uses:\s+([^\s#]+)/gm)]
+      .map((match) => match[1]!);
+    expect(actions.length).toBeGreaterThan(0);
+    expect(actions.every((action) => /@[a-f0-9]{40}$/.test(action))).toBe(true);
+    expect(homebrewJob).toContain("persist-credentials: false");
+    expect(homebrewJob).not.toContain("contents: write");
+    expect(homebrewJob).not.toContain("gh release create");
+    expect(homebrewJob).not.toContain('git tag "$TAG"');
+  });
+
+  test("summarizes trusted Homebrew outcomes after every stage", () => {
+    const homebrewJob = releaseWorkflow.slice(releaseWorkflow.indexOf("\n  homebrew-sync:"));
+    for (const id of ["verify-public", "render-formula", "reconcile-tap", "summarize-homebrew"]) {
+      expect(homebrewJob).toContain(`id: ${id}`);
     }
-    expect(releaseWorkflow).toContain("needs: [final-assets, validate-ref]");
+    const summary = homebrewJob.slice(homebrewJob.indexOf("id: summarize-homebrew"));
+    expect(summary).toContain("if: always()");
+    expect(summary).toContain("steps.verify-public.outcome");
+    expect(summary).toContain("steps.render-formula.outcome");
+    expect(summary).toContain("steps.reconcile-tap.outcome");
+    expect(summary).toContain("failed-before-write");
+    expect(summary).toContain("write-outcome-unconfirmed");
+    expect(summary).not.toContain("release.json");
+    expect(summary).not.toContain("SHA256SUMS");
+  });
+
+  test("keeps Chocolatey outside the release workflow", () => {
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      expect(workflow.toLowerCase()).not.toContain("chocolatey");
+    }
   });
 });
