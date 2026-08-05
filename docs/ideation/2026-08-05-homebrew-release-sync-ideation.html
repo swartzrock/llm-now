@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: Homebrew release synchronization</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f4ee;
+      --surface: #fffdf8;
+      --surface-2: #eeeae0;
+      --ink: #20231f;
+      --muted: #5e655f;
+      --line: #d8d3c8;
+      --accent: #0e6b57;
+      --accent-soft: #dceee7;
+      --accent-text: #084c3e;
+      --blue-soft: #dfeaf4;
+      --blue-text: #244d6b;
+      --amber-soft: #f5e9c8;
+      --amber-text: #654a0a;
+      --red-soft: #f2dddd;
+      --red-text: #762e2e;
+      --shadow: 0 18px 44px rgb(32 35 31 / 8%);
+      --radius: 16px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171b19;
+        --surface: #202622;
+        --surface-2: #2a302c;
+        --ink: #edf1ed;
+        --muted: #b2bbb4;
+        --line: #3d4741;
+        --accent: #66d3af;
+        --accent-soft: #183e33;
+        --accent-text: #a5efd3;
+        --blue-soft: #243746;
+        --blue-text: #bddcf2;
+        --amber-soft: #443817;
+        --amber-text: #f3d98d;
+        --red-soft: #482828;
+        --red-text: #ffc0c0;
+        --shadow: 0 20px 50px rgb(0 0 0 / 28%);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.65;
+    }
+    a { color: var(--accent); text-underline-offset: 0.16em; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--surface-2);
+      border-radius: 5px;
+      padding: 0.08rem 0.3rem;
+    }
+    strong { color: inherit; }
+    main { max-width: 960px; margin: 0 auto; padding: 44px 28px 72px; }
+    header {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 40px;
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 0.76rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.18; letter-spacing: -0.025em; }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.5rem); max-width: 16ch; }
+    h2 { margin: 0 0 20px; font-size: 1.65rem; }
+    h3 { margin: 0; font-size: 1.28rem; }
+    p { max-width: 72ch; }
+    .lede { margin: 18px 0 0; max-width: 68ch; color: var(--muted); font-size: 1.08rem; }
+    .metadata {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 28px 0 0;
+    }
+    .metadata div, .stats div {
+      background: var(--surface-2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px 13px;
+    }
+    dt {
+      color: var(--muted);
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+    dd { margin: 3px 0 0; font-weight: 650; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .stats strong { display: block; font-size: 1.45rem; line-height: 1.1; }
+    .stats span { color: var(--muted); font-size: 0.78rem; }
+    nav {
+      margin: 22px 0 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    nav a, .idea-jumps a, .pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      padding: 6px 11px;
+      color: var(--ink);
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    section { margin-top: 56px; scroll-margin-top: 20px; }
+    .prose-card, .idea-card, .callout, .diagram, .table-wrap, .source-list {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .prose-card, .callout, .source-list { padding: 24px; }
+    .prose-card p:first-child, .callout p:first-child { margin-top: 0; }
+    .prose-card p:last-child, .callout p:last-child { margin-bottom: 0; }
+    .context-grid, .repo-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .context-grid article, .repo-grid article {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .context-grid h3, .repo-grid h4 { margin: 0 0 8px; }
+    .context-grid p, .repo-grid p { margin: 0; color: var(--muted); }
+    .axis-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      counter-reset: axes;
+    }
+    .axis-list li {
+      counter-increment: axes;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 17px;
+    }
+    .axis-list li::first-line { font-weight: 800; }
+    .axis-list li span { color: var(--muted); }
+    .idea-jumps {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 18px;
+    }
+    .idea-card { padding: 26px; margin-top: 18px; scroll-margin-top: 20px; }
+    .idea-card.recommended { background: var(--accent-soft); border-color: var(--accent); }
+    .idea-head {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+    .idea-title { display: flex; gap: 12px; align-items: flex-start; }
+    .rank {
+      flex: 0 0 auto;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      background: var(--ink);
+      color: var(--surface);
+      font-weight: 850;
+    }
+    .recommended .rank { background: var(--accent-text); color: var(--accent-soft); }
+    .chip-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+    .pill { background: var(--surface-2); }
+    .pill.accent { background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent); }
+    .pill.blue { background: var(--blue-soft); color: var(--blue-text); }
+    .pill.amber { background: var(--amber-soft); color: var(--amber-text); }
+    .idea-card > p { margin: 18px 0 0; }
+    .idea-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 18px 0 0;
+    }
+    .idea-fields div {
+      background: color-mix(in srgb, var(--surface) 76%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 13px 14px;
+    }
+    .idea-fields dd { font-weight: 450; }
+    .diagram { margin: 20px 0 0; padding: 16px; overflow-x: auto; }
+    .diagram svg { width: 100%; min-width: 680px; height: auto; display: block; }
+    .diagram figcaption { color: var(--muted); font-size: 0.82rem; margin: 10px 4px 0; }
+    .callout { margin-top: 20px; background: var(--blue-soft); color: var(--blue-text); }
+    .callout.warning { background: var(--amber-soft); color: var(--amber-text); }
+    .callout .eyebrow { color: inherit; }
+    .repo-grid { margin-top: 18px; }
+    .repo-grid article { background: color-mix(in srgb, var(--surface) 82%, transparent); }
+    .repo-grid ul { margin-bottom: 0; padding-left: 1.2rem; }
+    .table-wrap { overflow-x: auto; margin-top: 18px; }
+    table { width: 100%; border-collapse: collapse; min-width: 700px; }
+    th, td { padding: 13px 15px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+    th { background: var(--surface-2); font-size: 0.74rem; letter-spacing: 0.07em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .outcome { font-weight: 750; }
+    .good { color: var(--accent); }
+    .stop { color: var(--red-text); }
+    .source-list ol { margin: 0; padding-left: 1.3rem; }
+    .source-list li + li { margin-top: 8px; }
+    footer {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 28px 40px;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    @media (max-width: 720px) {
+      main { padding: 22px 16px 54px; }
+      header { padding: 26px 22px; }
+      .metadata, .stats, .context-grid, .repo-grid, .axis-list, .idea-fields { grid-template-columns: 1fr; }
+      .idea-head { display: block; }
+      .chip-row { justify-content: flex-start; margin-top: 14px; }
+      footer { padding-inline: 16px; }
+    }
+    @media print {
+      body { background: white; color: black; }
+      header, .prose-card, .idea-card, .callout, .diagram, .table-wrap, .source-list { box-shadow: none; }
+      a { color: black; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Ideation · release engineering</p>
+      <h1>Homebrew release synchronization</h1>
+      <p class="lede">How should an exact, signed <code>llm-now</code> GitHub Release become a correct four-platform formula in <code>swartzrock/homebrew-tap</code>—automatically, idempotently, and without weakening the release train?</p>
+
+      <dl class="metadata" aria-label="Artifact metadata">
+        <div><dt>Date</dt><dd><time datetime="2026-08-05">2026-08-05</time></dd></div>
+        <div><dt>Topic</dt><dd>homebrew-release-sync</dd></div>
+        <div><dt>Focus</dt><dd>Exact-release tap automation</dd></div>
+        <div><dt>Mode</dt><dd>repo-grounded</dd></div>
+      </dl>
+
+      <div class="stats" aria-label="Ideation counts">
+        <div><strong>38</strong><span>frame outputs</span></div>
+        <div><strong>15</strong><span>consolidated candidates</span></div>
+        <div><strong>6</strong><span>surviving directions</span></div>
+        <div><strong>4</strong><span>evidence axes covered</span></div>
+      </div>
+
+      <nav aria-label="Document sections">
+        <a href="#codebase-context">Codebase Context</a>
+        <a href="#topic-axes">Topic Axes</a>
+        <a href="#ranked-ideas">Ranked Ideas</a>
+        <a href="#rejection-summary">Rejection Summary</a>
+        <a href="#sources">Sources</a>
+      </nav>
+    </header>
+
+    <section id="codebase-context">
+      <p class="eyebrow">Grounding Context</p>
+      <h2>Codebase Context</h2>
+      <div class="prose-card">
+        <p><code>llm-now</code> already has the hard part: an exact-SHA, fail-closed release workflow that builds five targets, signs and notarizes macOS artifacts, creates an authoritative <code>SHA256SUMS</code>, publishes attestations, and safely recognizes an already-complete release on rerun. Homebrew should consume that verified public release; it should not become another publisher of release assets or another authority for checksums.</p>
+        <p>The source repository also already renders the four Homebrew-native combinations—macOS and Linux on ARM64 and AMD64—from a formula template. The problem is ownership drift: the template and the live tap formula differ in headers, description, architecture DSL, and test command. Before automation can own the whole file, those two representations need to converge intentionally.</p>
+        <p><code>swartzrock/homebrew-tap</code> is deliberately small and currently has no tap-side CI. Its public default branch already carries <code>llm-now</code> 2.2.0, while the supplied local checkout has stale tracking state. Any implementation must synchronize that checkout first and treat the public branch—not the local ref—as current truth.</p>
+      </div>
+
+      <div class="context-grid">
+        <article>
+          <h3>Why not simply install Homebrew Releaser?</h3>
+          <p>The action does support Darwin/Linux and AMD64/ARM64 targets, which validates the multi-platform formula shape. But it assumes fixed archive URL patterns, generates and uploads its own checksum file, always selects the latest release, clones and pushes the tap, and asks for a PAT with access to both repositories. Those choices duplicate <code>llm-now</code>'s exact-release invariants instead of preserving them.</p>
+        </article>
+        <article>
+          <h3>Non-negotiable boundary</h3>
+          <p>A tap write is a post-publication projection. Its failure may fail the workflow run and demand recovery, but it must never delete, recreate, move, or otherwise invalidate a correct immutable GitHub Release. Rerunning the exact commit reconciles only the missing projection.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="topic-axes">
+      <p class="eyebrow">Decision surface</p>
+      <h2>Topic Axes</h2>
+      <ol class="axis-list">
+        <li>Exact-release handoff and recovery<br><span>When the sync runs, what it trusts, and how an interrupted update safely resumes.</span></li>
+        <li>Formula source of truth and template convergence<br><span>How four platform bindings remain byte-for-byte reproducible without two hand-maintained formulas.</span></li>
+        <li>Cross-repository authentication and secret boundary<br><span>Which identity can write the tap and how narrowly that authority can be scoped.</span></li>
+        <li>Tap mutation and verification path<br><span>Whether updates land as a direct commit or PR, and how stale, conflicting, or newer state is handled.</span></li>
+      </ol>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">Ranked candidate set</p>
+      <h2>Ranked Ideas</h2>
+      <div class="idea-jumps" aria-label="Ranked idea jump list">
+        <a href="#idea-1">1. Verified-release reconciler</a>
+        <a href="#idea-2">2. Canonical formula compiler</a>
+        <a href="#idea-3">3. Compare-and-swap protocol</a>
+        <a href="#idea-4">4. Tap-only writer identity</a>
+        <a href="#idea-5">5. Tap pull reconciler</a>
+        <a href="#idea-6">6. Reviewed promotion lane</a>
+      </div>
+
+      <article class="idea-card recommended" id="idea-1">
+        <div class="idea-head">
+          <div class="idea-title">
+            <span class="rank">1</span>
+            <div>
+              <p class="eyebrow">Idea 1 · recommended</p>
+              <h3>Verified-release materialized-view reconciler</h3>
+            </div>
+          </div>
+          <div class="chip-row">
+            <span class="pill accent">Confidence 91%</span>
+            <span class="pill blue">Complexity Medium</span>
+          </div>
+        </div>
+
+        <p><strong>Description:</strong> Extend the source-owned release train with a post-publication Homebrew reconciliation step. Whether the run just published the exact release or proved that the exact release already exists and is complete, the reconciler downloads the public release manifest and four Homebrew artifacts, re-verifies them, renders the canonical formula, reads the live tap formula, applies an explicit state transition, and updates only <code>Formula/llm-now.rb</code> with an optimistic GitHub Contents API write.</p>
+
+        <dl class="idea-fields">
+          <div><dt>Axis</dt><dd>Exact-release handoff and recovery</dd></div>
+          <div><dt>Basis</dt><dd><strong>direct:</strong> the existing workflow already models fresh publication and verified-existing-release paths at one exact commit; the renderer already binds all four platform URLs and checksums.</dd></div>
+          <div><dt>Rationale</dt><dd>The source release knows exactly which immutable assets are authoritative. Reusing its existing recovery path gives immediate updates without inventing a second “latest release” control plane.</dd></div>
+          <div><dt>Downsides</dt><dd>Adds a cross-repository credential and a narrow amount of custom reconciliation logic. Direct commits also require tap branch policy to permit the automation identity.</dd></div>
+        </dl>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 980 170" role="img" aria-labelledby="flow-title flow-desc">
+            <title id="flow-title">Release-to-tap projection</title>
+            <desc id="flow-desc">An exact public release is verified and rendered, then compared with the tap before one formula file is updated.</desc>
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+              </marker>
+            </defs>
+            <rect x="18" y="35" width="250" height="100" rx="14" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"></rect>
+            <text x="143" y="69" text-anchor="middle" fill="var(--ink)" font-size="15" font-weight="750">Exact public GitHub Release</text>
+            <text x="143" y="96" text-anchor="middle" fill="var(--muted)" font-size="13">SHA256SUMS · 4 archives</text>
+            <text x="143" y="118" text-anchor="middle" fill="var(--muted)" font-size="13">signatures · attestations</text>
+
+            <path d="M 280 85 L 346 85" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow)"></path>
+            <text x="313" y="68" text-anchor="middle" fill="var(--accent-text)" font-size="12" font-weight="700" paint-order="stroke fill" stroke="var(--accent-soft)" stroke-width="3">reverify</text>
+
+            <rect x="360" y="35" width="260" height="100" rx="14" fill="var(--surface)" stroke="var(--line)" stroke-width="2"></rect>
+            <text x="490" y="69" text-anchor="middle" fill="var(--ink)" font-size="15" font-weight="750">Canonical formula render</text>
+            <text x="490" y="96" text-anchor="middle" fill="var(--muted)" font-size="13">4 URL + checksum bindings</text>
+            <text x="490" y="118" text-anchor="middle" fill="var(--muted)" font-size="13">state-aware reconciliation</text>
+
+            <path d="M 632 85 L 698 85" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow)"></path>
+            <text x="665" y="68" text-anchor="middle" fill="var(--accent-text)" font-size="12" font-weight="700" paint-order="stroke fill" stroke="var(--accent-soft)" stroke-width="3">compare + write</text>
+
+            <rect x="712" y="35" width="250" height="100" rx="14" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"></rect>
+            <text x="837" y="69" text-anchor="middle" fill="var(--ink)" font-size="15" font-weight="750">Tap formula on main</text>
+            <text x="837" y="96" text-anchor="middle" fill="var(--muted)" font-size="13">exact, auditable projection</text>
+            <text x="837" y="118" text-anchor="middle" fill="var(--muted)" font-size="13">one optimistic commit</text>
+          </svg>
+          <figcaption>Directional shape: publication remains authoritative; Homebrew is a recoverable projection of the exact public release.</figcaption>
+        </figure>
+
+        <div class="callout">
+          <p class="eyebrow">State transition contract</p>
+          <p>The reconciler is not “write whatever was rendered.” It compares the requested exact release with the tap’s parsed state and refuses ambiguity or regression.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Observed tap state</th><th>Interpretation</th><th>Allowed result</th></tr></thead>
+            <tbody>
+              <tr><td>Exact generated bytes</td><td>Projection already complete</td><td class="outcome good">No-op success</td></tr>
+              <tr><td>Older valid version</td><td>Normal forward publication</td><td class="outcome good">Advance with current blob SHA</td></tr>
+              <tr><td>Same version, different bytes</td><td>Manual drift, corruption, or changed generator</td><td class="outcome stop">Fail closed; require review</td></tr>
+              <tr><td>Newer version</td><td>Rerun of an older release or out-of-order job</td><td class="outcome stop">Refuse downgrade</td></tr>
+              <tr><td>Concurrent modification</td><td>Contents API blob SHA no longer matches</td><td class="outcome">Re-read once, reclassify, then no-op or fail</td></tr>
+              <tr><td>Missing or unparseable formula</td><td>Unexpected tap shape</td><td class="outcome stop">Fail closed; never synthesize over ambiguity</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="repo-grid">
+          <article>
+            <h4>Direction for <code>llm-now</code></h4>
+            <ul>
+              <li>Converge the source formula template with the current tap formula before declaring it canonical.</li>
+              <li>Strengthen renderer tests with golden, byte-level coverage of all four OS/architecture bindings.</li>
+              <li>Run reconciliation after a fresh publish and after the existing exact-release verifier succeeds.</li>
+              <li>Re-download and verify public assets and <code>SHA256SUMS</code>; do not reuse unchecked workspace artifacts.</li>
+              <li>Add the explicit tap state machine, exact-file Contents API update, and manual recovery entry point.</li>
+              <li>Update release-policy tests and releasing documentation to reflect the new post-publication projection.</li>
+              <li>Document setup and rotation for a tap-only secret such as <code>HOMEBREW_TAP_TOKEN</code>.</li>
+            </ul>
+          </article>
+          <article>
+            <h4>Direction for <code>homebrew-tap</code></h4>
+            <ul>
+              <li>Synchronize the supplied local checkout with public <code>main</code> before implementation.</li>
+              <li>Make <code>Formula/llm-now.rb</code> the exact generated output of the canonical source template.</li>
+              <li>Keep the first convergence semantically equivalent to the current 2.2.0 formula so automation does not smuggle a formula redesign into setup.</li>
+              <li>Add only a concise generated-ownership and recovery note if it materially helps future maintainers.</li>
+              <li>Do not add tap-side CI for this direct-commit direction; validate before the write in the source workflow.</li>
+              <li>If branch rules reject the automation identity, switch deliberately to Idea 6 instead of weakening protection ad hoc.</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="callout warning">
+          <p class="eyebrow">Failure semantics</p>
+          <p>A failed tap update leaves a valid GitHub Release and a failed workflow run. The operator reruns the workflow for the same exact commit or invokes its recovery entry point. The release is never recreated, and the tag is never moved.</p>
+        </div>
+      </article>
+
+      <article class="idea-card" id="idea-2">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">2</span><div><p class="eyebrow">Idea 2</p><h3>Canonical formula compiler contract</h3></div></div>
+          <div class="chip-row"><span class="pill accent">Confidence 95%</span><span class="pill blue">Complexity Low</span></div>
+        </div>
+        <p><strong>Description:</strong> Treat the source repository’s formula template plus exact manifest as a tiny compiler: one canonical, fully styled formula enters; one deterministic tap file leaves. Converge headers, description, Homebrew DSL, install stanza, and test block up front, then prohibit partial substitution or tap-local edits to generated regions.</p>
+        <dl class="idea-fields">
+          <div><dt>Axis</dt><dd>Formula source of truth and template convergence</dd></div>
+          <div><dt>Basis</dt><dd><strong>direct:</strong> the existing renderer already performs strict manifest parsing and four target substitutions, while the source and live formula currently drift outside those substitutions.</dd></div>
+          <div><dt>Rationale</dt><dd>Whole-file determinism makes idempotency, review, recovery, and provenance obvious. It removes the most likely long-term failure: two humans editing two almost-identical formulas.</dd></div>
+          <div><dt>Downsides</dt><dd>Requires a deliberate one-time convergence decision. Formula copy or style changes thereafter originate in <code>llm-now</code>, not directly in the tap.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea-card" id="idea-3">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">3</span><div><p class="eyebrow">Idea 3</p><h3>Exact-state compare-and-swap tap protocol</h3></div></div>
+          <div class="chip-row"><span class="pill accent">Confidence 94%</span><span class="pill blue">Complexity Low</span></div>
+        </div>
+        <p><strong>Description:</strong> Define tap mutation as a compare-and-swap operation over the live file’s blob SHA and semantic version, not as a blind clone/edit/push. Exact bytes no-op; older advances; same-version drift, newer state, or malformed state fails; a single concurrent-update reread decides the final result.</p>
+        <dl class="idea-fields">
+          <div><dt>Axis</dt><dd>Tap mutation and verification path</dd></div>
+          <div><dt>Basis</dt><dd><strong>external:</strong> GitHub’s Contents API accepts the current file SHA when updating a file, giving the operation an optimistic concurrency guard.</dd></div>
+          <div><dt>Rationale</dt><dd>A one-file materialized view does not need a checkout and push race. The protocol makes out-of-order reruns and human edits observable instead of silently overwriting them.</dd></div>
+          <div><dt>Downsides</dt><dd>API diagnostics must be good enough for maintainers to understand refusals. More complex future tap changes would outgrow the one-file mutation model.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea-card" id="idea-4">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">4</span><div><p class="eyebrow">Idea 4</p><h3>Tap-only fine-grained writer identity</h3></div></div>
+          <div class="chip-row"><span class="pill accent">Confidence 90%</span><span class="pill blue">Complexity Low</span></div>
+        </div>
+        <p><strong>Description:</strong> Store a fine-grained personal access token in the source repository, selected only for <code>swartzrock/homebrew-tap</code> with repository Contents write access and the shortest practical lifetime. Use the source workflow’s ordinary <code>GITHUB_TOKEN</code> for all source-repository work and expose the tap token only to the final reconciliation step.</p>
+        <dl class="idea-fields">
+          <div><dt>Axis</dt><dd>Cross-repository authentication and secret boundary</dd></div>
+          <div><dt>Basis</dt><dd><strong>direct + external:</strong> GitHub’s workflow token is repository-scoped; Homebrew Releaser itself requires a PAT for cross-repository tap writes, but recommends broader access to both repos than this design needs.</dd></div>
+          <div><dt>Rationale</dt><dd>For a personal two-repository setup, a tap-only token is the smallest operational mechanism. A GitHub App becomes attractive only if organizational policy, identity lifecycle, or repository count justifies the extra machinery.</dd></div>
+          <div><dt>Downsides</dt><dd>The credential is tied to a user account and needs expiration/rotation discipline. Protected-branch rules may require explicit bypass permission or a PR-based variant.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea-card" id="idea-5">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">5</span><div><p class="eyebrow">Idea 5 · best no-shared-secret alternative</p><h3>Zero-shared-secret tap pull reconciler</h3></div></div>
+          <div class="chip-row"><span class="pill amber">Confidence 86%</span><span class="pill blue">Complexity Medium</span></div>
+        </div>
+        <p><strong>Description:</strong> Put a scheduled and manually dispatchable workflow in the tap. It queries the public <code>llm-now</code> release, verifies the exact tag and assets, renders the same canonical formula, applies the same state machine, and commits with the tap repository’s own workflow token.</p>
+        <dl class="idea-fields">
+          <div><dt>Axis</dt><dd>Cross-repository authentication and secret boundary</dd></div>
+          <div><dt>Basis</dt><dd><strong>reasoned:</strong> public release data needs no source credential, while a workflow running inside the tap naturally receives write authority scoped to that tap.</dd></div>
+          <div><dt>Rationale</dt><dd>It eliminates the only shared secret and cleanly assigns ownership to the repository being mutated. This is the strongest alternative when credential policy outweighs immediate publication.</dd></div>
+          <div><dt>Downsides</dt><dd>Scheduled runs introduce lag, and the renderer or formula contract must be copied, fetched, or packaged across repositories. A manual source-to-tap dispatch restores immediacy but reintroduces cross-repository authentication.</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea-card" id="idea-6">
+        <div class="idea-head">
+          <div class="idea-title"><span class="rank">6</span><div><p class="eyebrow">Idea 6 · protected-branch variant</p><h3>Reviewed generated-formula promotion lane</h3></div></div>
+          <div class="chip-row"><span class="pill amber">Confidence 82%</span><span class="pill blue">Complexity Medium</span></div>
+        </div>
+        <p><strong>Description:</strong> Have the source reconciler create or refresh a deterministic tap pull request instead of committing directly. Tap checks verify the generated formula and installation behavior; maintainers merge manually at first, with auto-merge as a separate policy decision later.</p>
+        <dl class="idea-fields">
+          <div><dt>Axis</dt><dd>Tap mutation and verification path</dd></div>
+          <div><dt>Basis</dt><dd><strong>external:</strong> tools such as GoReleaser’s Homebrew publisher use pull requests as a supported tap-promotion model when direct writes are undesirable.</dd></div>
+          <div><dt>Rationale</dt><dd>It aligns with strict branch protection and gives formula changes a human-readable audit surface. Deterministic branch and PR identity can keep reruns idempotent.</dd></div>
+          <div><dt>Downsides</dt><dd>A PR is another lifecycle to reconcile and delays “updated whenever released” unless auto-merge is enabled. Auto-merge adds check design and branch-policy work that the current minimal tap does not otherwise need.</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <p class="eyebrow">What did not survive</p>
+      <h2>Rejection Summary</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Idea</th><th>Reason rejected or merged</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>Tap workflow triggered by explicit repository dispatch</td><td>Weaker middle ground: still needs cross-repository auth while also duplicating a dispatch protocol.</td></tr>
+            <tr><td>2</td><td>Tap-owned formula skeleton with generated binding island</td><td>Creates marker grammar and two authorities; whole-file canonical generation is simpler.</td></tr>
+            <tr><td>3</td><td>Release metadata capsule</td><td>Redundant with the authoritative checksum manifest and immutable release assets already present.</td></tr>
+            <tr><td>4</td><td>GitHub App writer immediately</td><td>Sound credential variant, but unjustified setup and lifecycle cost for one personal tap today.</td></tr>
+            <tr><td>5</td><td>Post-write contract validation</td><td>Detects damage after mutation; validation belongs before an optimistic write.</td></tr>
+            <tr><td>6</td><td>Release-bound provenance trailer in formula</td><td>Exact URLs, checksums, commit history, and attestations already provide the useful provenance.</td></tr>
+            <tr><td>7</td><td>Two-phase PR staged before release</td><td>Couples a mutable pre-release proposal to assets that are not yet authoritative and adds unsafe coordination.</td></tr>
+            <tr><td>8</td><td>Standalone distribution projection runbook</td><td>Necessary documentation, but not a separate design; merged into the recommended reconciler.</td></tr>
+            <tr><td>9</td><td>Homebrew Releaser as the control plane</td><td>Good multi-target prior art, but its latest-release selection, fixed URL pattern, checksum generation, and broad cross-repo token assumptions conflict with this release train.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="sources">
+      <p class="eyebrow">Grounding material</p>
+      <h2>Sources &amp; References</h2>
+      <div class="source-list">
+        <ol>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/.github/workflows/release.yml"><code>llm-now/.github/workflows/release.yml</code></a> — exact-SHA build, signing, manifest, attestation, publication, and existing-release verification.</li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/scripts/package-render.ts"><code>llm-now/scripts/package-render.ts</code></a> and <a href="https://github.com/swartzrock/llm-now/blob/main/packaging/homebrew/llm-now.rb"><code>packaging/homebrew/llm-now.rb</code></a> — current strict renderer and source template.</li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/tests/packaging.test.ts"><code>tests/packaging.test.ts</code></a> and <a href="https://github.com/swartzrock/llm-now/blob/main/tests/release-policy.test.ts"><code>tests/release-policy.test.ts</code></a> — renderer coverage and current policy boundary.</li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/docs/RELEASING.md"><code>docs/RELEASING.md</code></a> — present manual Homebrew release policy.</li>
+          <li><a href="https://github.com/swartzrock/homebrew-tap/blob/main/Formula/llm-now.rb"><code>homebrew-tap/Formula/llm-now.rb</code></a> — current public four-platform formula.</li>
+          <li><a href="https://github.com/marketplace/actions/homebrew-releaser">Homebrew Releaser</a> — multi-platform action prior art and operational assumptions.</li>
+          <li><a href="https://docs.brew.sh/Formula-Cookbook">Homebrew Formula Cookbook</a>, <a href="https://docs.brew.sh/Adding-Software-to-Homebrew">Adding Software to Homebrew</a>, and <a href="https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap">tap maintenance guidance</a>.</li>
+          <li><a href="https://docs.github.com/en/actions/concepts/security/github_token">GitHub Actions token model</a> and <a href="https://docs.github.com/en/rest/repos/contents">Repository Contents API</a>.</li>
+          <li><a href="https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/making-authenticated-api-requests-with-a-github-app-in-a-github-actions-workflow">GitHub App authentication in Actions</a> — future identity option if the tap outgrows a fine-grained PAT.</li>
+          <li><a href="https://goreleaser.com/customization/publish/homebrew_formulas/">GoReleaser Homebrew formula publisher</a> and <a href="https://probot.github.io/apps/tap-release/">Tap Release</a> — alternative tap-promotion patterns.</li>
+        </ol>
+      </div>
+    </section>
+  </main>
+
+  <footer class="composition-signal">Composed <time datetime="2026-08-05T18:37Z">2026-08-05T18:37Z</time> by <code>ce-ideate</code> from the user’s Homebrew release-synchronization prompt and the two repository states.</footer>
+</body>
+</html>

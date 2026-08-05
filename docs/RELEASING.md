@@ -43,6 +43,7 @@ The same top-level workflow handles automatic promotion and manual recovery, so 
 3. Assembles the final archives, verifies `SHA256SUMS`, and prepares release notes from the matching changelog section.
 4. Uses the protected `release-publication` environment to attest the five final archives.
 5. Creates and verifies `vX.Y.Z` at the exact release SHA only after the final bytes and attestations are ready, then creates the GitHub Release.
+6. Enters the `homebrew-publication` environment, downloads and reverifies that public Release, and reconciles its four-platform formula into `swartzrock/homebrew-tap/main`.
 
 `RELEASE_NOTES.md` travels inside the private `release-assets` workflow artifact and is passed to GitHub as release text. It is not a public downloadable release asset.
 
@@ -54,7 +55,7 @@ The release engine probes public state before building and again inside protecte
 | --- | --- |
 | No tag and no Release | Start new work only when no higher stable Release is already public. An untagged public run must also be a release-shaped first-parent transition. |
 | Tag peels to the exact release SHA; no Release | Resume from that exact tag and create the Release after rebuilding and verifying the final assets. |
-| Exact tag and complete non-draft, non-prerelease Release | Download all six assets, verify every checksum and archive attestation against the release workflow and exact source SHA, then return a no-op without mutation. |
+| Exact tag and complete non-draft, non-prerelease Release | Download all six assets, verify every checksum and archive attestation against the release workflow and exact source SHA, skip build and GitHub publication mutation, then reconcile the Homebrew projection. |
 | Tag points elsewhere, Release exists without its tag, assets are missing or extra, checksums fail, or provenance cannot be verified | Fail closed with no public mutation. Repair requires maintainer investigation; automation will not replace the conflicting state. |
 
 For an unsigned candidate, manually dispatch `release.yml` with `publish: false` and a full lowercase `release-sha` that is any ancestor of protected `main`. The workflow builds all five native archives and `SHA256SUMS` without signing, attesting, tagging, or creating a Release. The selected workflow ref does not need to equal the candidate SHA.
@@ -70,6 +71,29 @@ gh workflow run release.yml --ref "$TAG" \
 ```
 
 Before the first release train run, confirm that Actions may create pull requests with the repository token, commission approval-required CI on the generated pull request, verify both protected environments and their reviewers, and ensure the publication actor may create `v*` tags while unauthorized actors cannot move or delete them. Complete [MT-25 through MT-29](manual-testing.md#mt-25-first-generated-release-pr-ci) before treating the train as commissioned.
+
+## Homebrew projection setup and recovery
+
+The GitHub Release remains authoritative. Homebrew synchronization is a post-publication projection: it downloads the exact six public assets, verifies the manifest and all five archive attestations against the validated release SHA, renders the complete four-platform formula, and reads the live tap formula before any write. A Homebrew failure may fail the workflow run, but it never deletes, recreates, edits, or moves the tag, Release, assets, checksum manifest, or attestations.
+
+Create a fine-grained personal access token that selects only `swartzrock/homebrew-tap`. Grant repository **Contents: Read and write** and no Workflow, Administration, Actions, organization, or `swartzrock/llm-now` access. GitHub may display its mandatory Metadata read permission. Contents write cannot be restricted to one path, so the token retains authority over every non-workflow file in the tap even though the workflow targets only `Formula/llm-now.rb`.
+
+Create the `homebrew-publication` environment in `swartzrock/llm-now` and store the token as `HOMEBREW_TAP_TOKEN`. Restrict environment deployments to protected `main` and trusted stable `v*` tags; feature branches and pull-request refs must not receive its secrets. Keep the environment reviewer-free by default so release projection remains automatic. Maintainers may add a reviewer later as a stricter operational policy, accepting that every fresh projection and exact-tag recovery will then wait for approval.
+
+Before commissioning, inspect `swartzrock/homebrew-tap/main` branch protection and repository rules while authenticated. The fine-grained identity must be allowed to update `Formula/llm-now.rb` directly. If the tap requires pull requests or otherwise rejects that identity, stop; do not broaden the token or bypass the rule ad hoc.
+
+The Homebrew job reports one of four dispositions:
+
+- `updated`: one blob-SHA-guarded write was read back as the exact desired bytes.
+- `already-current`: the first read or the single post-write read already equals the desired formula.
+- `failed-before-write`: public verification, formula validation, tap classification, credential validation, or authorization failed before an update request.
+- `write-outcome-unconfirmed`: a write was attempted but the single read-back did not prove exact desired bytes.
+
+Same-version drift, a newer tap version, or missing or invalid tap content is never overwritten. After an attempted write, the job always reads once and never issues a second write in that run. Receipts include validated tag and source SHA plus the constant tap identity; HTTP status and GitHub request ID are nullable because a transport failure may provide neither. Diagnostics must not contain formulas, manifests, response bodies, headers, or credentials.
+
+After a Homebrew failure, first use the normal workflow rerun window. Later, recover by dispatching the exact stable tag whose peeled commit produced the Release, using the command in [Publication state and recovery](#publication-state-and-recovery). The run reverifies the existing public Release, skips build and GitHub publication mutation, and retries only the Homebrew projection. This recovery exists only for tags whose committed `.github/workflows/release.yml` already contains the Homebrew job. Historical tags such as `v2.2.0` predate that job and cannot live-commission or recover it.
+
+Complete [MT-39 through MT-41](manual-testing.md#mt-39-static-public-v220-formula-baseline) to commission the baseline, first write, credential boundary, and exact-tag recovery.
 
 ## Distribution status
 
@@ -114,4 +138,4 @@ If a native backend regresses, set that target's explicit compatibility entry to
 | Windows x64 baseline | Credential Manager | Enabled behind the compiled lifecycle gate |
 
 
-The Homebrew formula is maintained separately in [swartzrock/homebrew-tap](https://github.com/swartzrock/homebrew-tap); it is not published by this repository's release workflow. Chocolatey integration remains deferred.
+The source release workflow projects each verified public Release into the four-platform formula in [swartzrock/homebrew-tap](https://github.com/swartzrock/homebrew-tap). Chocolatey integration remains deferred.
