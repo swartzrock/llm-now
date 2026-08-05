@@ -52,7 +52,7 @@ Keep three rules in mind:
 | 1 | [A commit message from the staged diff](#1-let-the-staged-diff-write-its-own-commit-message) | Developer | Git |
 | 1b | [The same commit-message feature in lazygit](#1b-add-the-same-feature-to-lazygit) | Developer | Git, lazygit |
 | 2 | [A tone dial for the clipboard](#2-add-a-tone-dial-to-the-clipboard) | Power user | macOS |
-| 3 | [A patient man-page tutor](#3-turn-any-man-page-into-a-patient-tutor) | New to LLMs | `man`, `col` |
+| 3 | [A patient man-page tutor](#3-turn-any-man-page-into-a-patient-tutor) | New to LLMs | `man`, `col`, optional `tldr` |
 | 4 | [A test-failure doctor](#4-make-a-red-test-run-explain-itself) | Developer | Your test runner |
 | 5 | [A pep talk in Stickies](#5-leave-future-you-a-pep-talk-in-stickies) | Power user | macOS |
 | 6 | [A quiz made from your notes](#6-make-your-own-notes-quiz-you) | New to LLMs | — |
@@ -203,50 +203,20 @@ Use a local alias when the copied text is sensitive.
 
 **Audience:** People learning shell tools
 
-**Platform:** Unix-like systems with `man` and `col`
+**Platform:** Unix-like systems with `man` and `col`; optional `tldr`
 
 `batman tar` turns the installed `tar` manual into a short beginner lesson.
 Section-qualified pages work too, for example `batman 5 passwd`.
 
 ```bash
-batman() {
-  if [ "$#" -eq 0 ]; then
-    printf 'usage: batman [section] page\n' >&2
-    return 2
-  fi
-
-  local page lesson requested
-  requested="$*"
-
-  # Capture the man page without opening a pager; stop if `man` fails.
-  if ! page=$(MANPAGER=cat PAGER=cat man "$@"); then
-    return 1
-  fi
-
-  if ! lesson=$(
-    {
-      printf '%s\n\n' \
-        "Teach the '$requested' man page to a beginner.
-
-Return Markdown only. Include:
-- a concise mental model
-- five useful flags or concepts
-- two safe, practical examples
-- one common mistake
-
-Use only facts supported by the supplied man page.
-If the page does not define five command-line flags, explain five useful concepts instead."
-      printf '%s\n' "$page" | col -b
-    } | llm-now haiku
-  ); then
-    return 1
-  fi
-
-  printf '%s\n' "$lesson" | llm_markdown
-}
-
+source ./examples/batman.sh
 batman tar
 ```
+
+The sourceable [`batman.sh`](batman.sh) script includes its own `bat`-with-`cat`
+fallback. If `tldr` is installed and `tldr <command>` succeeds, its quick
+reference appears in a fenced Markdown section above the generated lesson. A
+missing or failing `tldr` does not prevent the lesson from being generated.
 
 The local manual grounds the lesson, but confirm any flag you plan to use against
 the original man page.
