@@ -145,3 +145,5 @@ vite.config.ts.timestamp-*
 
 .DS_Store
 
+# Ignore Python cache
+__pycache__/
