@@ -117,10 +117,7 @@ function instructionArgument(value: string | undefined): string | undefined {
       "--instruction must use ordinary line breaks and contain no other control characters.",
     );
   }
-  if (value.trim().length === 0) {
-    throw new UsageError("--instruction must not be blank.");
-  }
-  return value;
+  return nonBlankArgument("--instruction", value);
 }
 
 export function parseArguments(args: string[]): ParsedArguments {
