@@ -126,12 +126,18 @@ describe("native release build", () => {
     ).text();
     const expectedInstructions =
       'Use "quoted" runtime smoke \\\\ transport.\\nKeep each answer concise.';
+    const expectedOverrideInstructions =
+      "  Replace saved smoke instructions.\\nUse the one-run override.  ";
 
     expect(releaseValidation).toContain("version: 2");
     expect(releaseValidation).toContain(expectedInstructions);
     expect(fakeCli).toContain(expectedInstructions);
+    expect(releaseValidation).toContain(expectedOverrideInstructions);
+    expect(fakeCli).toContain(expectedOverrideInstructions);
     expect(releaseValidation).toContain("fake:instruction-present");
     expect(releaseValidation).toContain("fake:instruction-absent");
+    expect(releaseValidation).toContain("fake:instruction-override");
+    expect(fakeCli).toContain("fake:instruction-override");
     expect(releaseValidation).toContain("PATH: temporary");
     expect(releaseValidation).toContain('name.toUpperCase() !== "PATH"');
     expect(releaseValidation).toContain("missing-login-shell");

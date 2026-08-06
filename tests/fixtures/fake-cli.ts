@@ -3,6 +3,8 @@
 const args = Bun.argv.slice(2);
 const expectedInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
 const expectedInstructionConfig = `developer_instructions=${JSON.stringify(expectedInstructions)}`;
+const expectedOverrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
+const expectedOverrideConfig = `developer_instructions=${JSON.stringify(expectedOverrideInstructions)}`;
 
 if (args[0] === "debug" && args[1] === "models") {
   console.log(JSON.stringify({ models: ["fake-model"] }));
@@ -19,12 +21,17 @@ if (args[0] === "exec") {
   const instructionIndexes = args.flatMap((arg, index) =>
     arg.startsWith("developer_instructions=") ? [index] : []
   );
-  const hasInstructions = configIndexes.length === 1
+  const hasInstructionConfig = configIndexes.length === 1
     && instructionIndexes.length === 1
-    && instructionIndexes[0] === configIndexes[0]! + 1
-    && args[instructionIndexes[0]!] === expectedInstructionConfig;
+    && instructionIndexes[0] === configIndexes[0]! + 1;
+  const instructionConfig = hasInstructionConfig ? args[instructionIndexes[0]!] : undefined;
+  const instructionMarker = instructionConfig === expectedInstructionConfig
+    ? "fake:instruction-present"
+    : instructionConfig === expectedOverrideConfig
+      ? "fake:instruction-override"
+      : undefined;
   const hasNoInstructions = configIndexes.length === 0 && instructionIndexes.length === 0;
-  if (!hasInstructions && !hasNoInstructions) {
+  if (instructionMarker === undefined && !hasNoInstructions) {
     console.error("unexpected fake CLI instruction configuration");
     process.exit(2);
   }
@@ -34,7 +41,7 @@ if (args[0] === "exec") {
     process.exit(2);
   }
   console.log(JSON.stringify({
-    text: hasInstructions ? "fake:instruction-present" : "fake:instruction-absent",
+    text: instructionMarker ?? "fake:instruction-absent",
   }));
   process.exit(0);
 }

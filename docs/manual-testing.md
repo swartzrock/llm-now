@@ -189,6 +189,25 @@ printf 'smoke' | "$BRANCH_BIN" daily >stdout.bin 2>stderr.txt
 
 Arguments, `--input`, piped stdin, and noninteractive execution must bypass the launcher deterministically. The three alias calls must each write only `fake:instruction-present`; the explicit call must write only `fake:instruction-absent`. Existing alias/direct terminology, diagnostics, exit codes, and redaction remain unchanged. Fail one fixture call deliberately and confirm the fixed diagnostic does not echo child-process arguments or saved instructions. Also run bare `"$BRANCH_BIN" >stdout.bin` with stderr attached to the PTY and complete one launcher action; menus and prompts must remain on stderr while only the model response reaches the redirected file.
 
+### SC-11: Request-scoped instruction isolation
+
+Keep the instructed `daily` shortcut from SC-02 and record its alias file byte-for-byte. The maintained fixture accepts this second, distinct multiline sentinel:
+
+```bash
+OVERRIDE=$'  Replace saved smoke instructions.\nUse the one-run override.  '
+"$BRANCH_BIN" daily --instruction "$OVERRIDE" --input "smoke" >stdout.bin 2>stderr.txt
+"$BRANCH_BIN" --alias daily --instruction "$OVERRIDE" --input "smoke" >stdout.bin 2>stderr.txt
+"$BRANCH_BIN" --provider codex-cli --model default --instruction "$OVERRIDE" --input "smoke" >stdout.bin 2>stderr.txt
+```
+
+Each call must exit `0`, leave stderr empty, and write only `fake:instruction-override`. This proves the exact leading/trailing spaces and line feed survive argv and remain separate from the `smoke` prompt. The two alias calls must replace the different saved sentinel for one request, not append to it. The alias file must remain byte-for-byte unchanged, and a later `daily` call without the option must again write `fake:instruction-present`. Also verify `--instruction=-brief` is accepted with a real provider; a separated dash-leading value is standard option syntax and is not accepted.
+
+Run representative parser failures with a blank-after-trimming value, a tab-bearing value, and a Unicode line-separator-bearing value. Each must exit `2`, leave stdout empty, emit a fixed `usage:` diagnostic without either the raw or JSON-serialized submitted value, and perform no prompt, alias, provider, or generation work. Separately confirm that `--instruction` alone does not supply a prompt, simultaneous `--input` and piped stdin remains invalid, and a selectorless noninteractive call remains nondeterministic.
+
+With stderr attached to the PTY, run `"$BRANCH_BIN" --instruction "$OVERRIDE" --input "smoke"`, select the fake Codex target already used by `daily`, and confirm the request produces `fake:instruction-override`. The command-line value must prevent a provider/model-only match from being reported as equivalent to `daily`; the normal post-generation alias-save offer must remain available. Its instruction field must start empty. Save a new alias with the original saved sentinel entered separately, then inspect the store: `daily` is unchanged, the new alias contains only the independently entered value, and neither record contains the command-line override.
+
+Finally, repeat an override call with a prompt other than the fixture's exact `smoke` value to force its fixed failure. The runtime diagnostic must contain neither the raw override nor its JSON-serialized form, and it must not print instruction-bearing child arguments. This boundary does not make the option secret: the value remains visible to shell history, local process inspection, CLI-provider child arguments, provider handling or retention, and potentially successful model output, which `llm-now` intentionally does not filter.
+
 ### User-owned visual gate
 
 The implementation may open as a draft pull request with only the updated VHS source. Before that draft is marked ready, merged, or released, the user must render `docs/demos/demo.gif` from the committed tape against the explicit branch-built executable, review the animation for exact copy and credential-free behavior, and commit the refreshed GIF. Agents must not render or modify the GIF or other binary media for this change.
@@ -619,14 +638,16 @@ Use a temporary `HOME` or `USERPROFILE` for fallback tests.
 
 ### MT-23A: Verify safe instruction transport boundaries
 
-Use only the maintained fake Codex fixture and the non-secret multiline instruction
-`Use "quoted" runtime smoke \ transport.\nKeep each answer concise.`. The packaged smoke must pass that
-instruction per invocation for an alias call and receive
-`fake:instruction-present`; the otherwise identical explicit call must receive
-`fake:instruction-absent`. The fixture `PATH` must contain only the temporary
-fixture directory, and non-Windows runs must set `SHELL` to a nonexistent file,
-so no real CLI or LLM can be selected. The loopback fake Ollama check may still
-run, but no external network request is permitted.
+Use only the maintained fake Codex fixture and its two non-secret multiline
+sentinels. The packaged smoke must pass the saved sentinel for an alias call and
+receive `fake:instruction-present`; the otherwise identical explicit call must
+receive `fake:instruction-absent`. A second alias call supplies the distinct
+command-line sentinel and must receive `fake:instruction-override`, proving
+replacement rather than mere presence. The alias store must remain unchanged.
+The fixture `PATH` must contain only the temporary fixture directory, and
+non-Windows runs must set `SHELL` to a nonexistent file, so no real CLI or LLM
+can be selected. The loopback fake Ollama check may still run, but no external
+network request is permitted.
 
 Confirm failure diagnostics are fixed text and do not echo child-process
 arguments. CLI-backed providers may nevertheless place instructions in their

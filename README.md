@@ -108,6 +108,32 @@ llm-now --input "Hello" --provider ollama --model llama3
 printf 'Hello' | llm-now --provider claude-cli --model default
 ```
 
+Supply a behavioral instruction for one request with any selection form:
+
+```bash
+llm-now daily --instruction "Answer as a concise editor" --input "Revise this"
+llm-now --alias daily --instruction "Answer as a skeptical reviewer" --input "Review this"
+llm-now --provider ollama --model llama3 --instruction "Use plain language" --input "Explain closures"
+llm-now daily --instruction=-brief --input "Summarize this"
+```
+
+`--instruction` is sent separately from the prompt and does not count as prompt
+input. The prompt must still come from exactly one existing source: `--input`,
+stdin, or the alias-only terminal prompt. For an alias with saved instructions,
+the command-line value replaces the saved value for that request; omitting the
+option keeps the saved value. `llm-now` does not write the command-line value to
+the alias store or mutate the selected alias. If a fresh interactive selection
+later offers to save an alias, its instruction field starts independently and
+only a value entered in that save flow is persisted.
+
+The option is not a secret-input mechanism. Its value may be visible in shell
+history and local process inspection, in child-process arguments for CLI-backed
+providers, under the selected provider's handling and retention policies, and
+in successful model output. Runtime failures redact the active command-line
+instruction from `llm-now` diagnostics in raw and serialized forms, but
+successful model output is intentionally not filtered. Do not pass secrets,
+credentials, or data you are not permitted to disclose.
+
 Arguments, `--input`, piped input, and noninteractive execution bypass the launcher. For scripts and non-interactive calls, exactly one prompt source is required: `--input` or stdin. Non-interactive calls require a positional alias, `--alias`, or both `--provider` and `--model`. A second positional argument is never treated as prompt text. Successful generation writes the model response, byte-for-byte, to stdout. Interactive UI and diagnostics use stderr, so the response remains safe to redirect or pipe. After an interactive response, stderr resets terminal styling and adds a clean visual boundary without changing stdout.
 
 ## Aliases and configuration

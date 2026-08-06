@@ -14,6 +14,7 @@ const runtimeSmoke = join(
   process.platform === "win32" ? "runtime-smoke.exe" : "runtime-smoke",
 );
 const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
+const overrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
 
 try {
   const configHome = join(directory, "config");
@@ -82,7 +83,7 @@ try {
         "Creation uses “Use an available provider…” or “Add a provider with an API key…”.\n  Creation saves the provider/model target and optional instructions before its first prompt.\n  Saved instructions are sent separately on every shortcut run.\n  Run once generates without saving or offering a shortcut.",
         "Manage connections owns discovery and API-key addition, replacement, and deletion.\n  Opening a launcher menu performs no provider discovery or credential access.",
         "Arguments, --input, piped input, and noninteractive calls bypass the launcher.\n  Deterministic calls use an alias or both --provider and --model.",
-        "Options:\n  --aliases            List saved aliases\n  --input <text>       Prompt text",
+        "Options:\n  --aliases            List saved aliases\n  --input <text>       Prompt text\n  --instruction <text> Request-scoped behavioral instruction",
         "API key environment variables:\n  ANTHROPIC_API_KEY",
         "  DEEPINFRA_TOKEN",
         "  XAI_API_KEY",
@@ -117,11 +118,36 @@ try {
       stderr: "",
     },
     {
+      name: "fake CLI generation with explicit request instruction",
+      executable: spike,
+      args: [
+        "--input",
+        "smoke",
+        "--provider",
+        "codex-cli",
+        "--model",
+        "default",
+        "--instruction",
+        overrideInstructions,
+      ],
+      exitCode: 0,
+      stdout: "fake:instruction-override",
+      stderr: "",
+    },
+    {
       name: "fake CLI generation through positional alias",
       executable: spike,
       args: ["dAiLy", "--input", "smoke"],
       exitCode: 0,
       stdout: "fake:instruction-present",
+      stderr: "",
+    },
+    {
+      name: "fake CLI generation with alias instruction replacement",
+      executable: spike,
+      args: ["dAiLy", "--input", "smoke", "--instruction", overrideInstructions],
+      exitCode: 0,
+      stdout: "fake:instruction-override",
       stderr: "",
     },
   ] as const;

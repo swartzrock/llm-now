@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: Command-line instructions for LLM-Now</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f3ee;
+      --surface: #fffdf9;
+      --surface-2: #ece9e2;
+      --text: #22231f;
+      --muted: #64655e;
+      --line: #d9d5cb;
+      --accent: #145f58;
+      --accent-soft: #dcece8;
+      --accent-text: #0b4a44;
+      --info-soft: #e6eef7;
+      --info-text: #234d78;
+      --warn-soft: #f5ead2;
+      --warn-text: #72501c;
+      --danger-soft: #f5dfdc;
+      --danger-text: #7c2f29;
+      --code-bg: #ebe8e0;
+      --shadow: 0 12px 34px rgba(34, 35, 31, .08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171916;
+        --surface: #20231f;
+        --surface-2: #2a2e29;
+        --text: #eceee8;
+        --muted: #b8bcb2;
+        --line: #3c413a;
+        --accent: #76c7bd;
+        --accent-soft: #163d39;
+        --accent-text: #9fe0d7;
+        --info-soft: #203449;
+        --info-text: #a8caed;
+        --warn-soft: #43361f;
+        --warn-text: #eed097;
+        --danger-soft: #482724;
+        --danger-text: #efaaa3;
+        --code-bg: #2a2e29;
+        --shadow: 0 12px 34px rgba(0, 0, 0, .24);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.62 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    code {
+      padding: .12em .36em;
+      border-radius: 5px;
+      background: var(--code-bg);
+      font-size: .9em;
+    }
+    .page { width: min(940px, calc(100% - 32px)); margin: 28px auto 56px; }
+    header, section, footer {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+    header { padding: clamp(24px, 5vw, 52px); }
+    section { margin-top: 20px; padding: clamp(22px, 4vw, 38px); }
+    footer { margin-top: 20px; padding: 18px 22px; color: var(--muted); font-size: 13px; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.18; letter-spacing: -.025em; }
+    h1 { max-width: 18ch; margin: 0; font-size: clamp(34px, 6vw, 58px); }
+    h2 { margin: 0 0 18px; font-size: clamp(24px, 3.5vw, 32px); }
+    h3 { margin: 0; font-size: 22px; }
+    p { max-width: 72ch; }
+    .lede { margin: 18px 0 0; max-width: 67ch; color: var(--muted); font-size: 18px; }
+    .metadata, .stats, .chips { display: flex; flex-wrap: wrap; gap: 9px; }
+    .metadata { margin-top: 24px; }
+    .pill {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 13px;
+    }
+    .stats { margin-top: 18px; }
+    .stat {
+      min-width: 125px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+    }
+    .stat strong { display: block; color: inherit; font-size: 24px; line-height: 1.1; }
+    .stat span { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    .context-grid, .axis-grid, .scope-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .context-card, .axis-card, .scope-card {
+      padding: 16px;
+      border-radius: 13px;
+      background: var(--surface-2);
+    }
+    .context-card h3, .axis-card h3, .scope-card h4 { margin: 0 0 8px; font-size: 16px; }
+    .context-card p, .axis-card p, .scope-card p { margin: 0; color: var(--muted); }
+    .scope-card.core { background: var(--accent-soft); color: var(--accent-text); }
+    .scope-card.core p { color: var(--accent-text); }
+    .scope-card.deferred { background: var(--warn-soft); color: var(--warn-text); }
+    .scope-card.deferred p { color: var(--warn-text); }
+    .axis-no {
+      display: inline-grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      margin-bottom: 10px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      font-weight: 800;
+    }
+    .jump-list {
+      display: grid;
+      gap: 7px;
+      margin: 0 0 24px;
+      padding: 15px 18px 15px 34px;
+      border-radius: 13px;
+      background: var(--surface-2);
+    }
+    .idea {
+      margin-top: 16px;
+      padding: clamp(20px, 4vw, 30px);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+    }
+    .idea-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+    .rank {
+      flex: 0 0 auto;
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--accent);
+      color: var(--surface);
+      font-weight: 850;
+    }
+    .idea-title { flex: 1; }
+    .idea-title .eyebrow { margin-bottom: 5px; }
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .field { padding: 14px; border-radius: 12px; background: var(--surface-2); }
+    .field dt {
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .field dd { margin: 0; }
+    .basis, .downside {
+      margin-top: 12px;
+      padding: 15px 16px;
+      border-radius: 12px;
+    }
+    .basis { background: var(--info-soft); color: var(--info-text); }
+    .downside { background: var(--warn-soft); color: var(--warn-text); }
+    .basis strong, .downside strong { color: inherit; }
+    .concept {
+      margin: 20px 0 4px;
+      padding: 16px;
+      overflow-x: auto;
+      border-radius: 14px;
+      background: var(--surface-2);
+    }
+    .concept svg { display: block; width: 100%; min-width: 650px; height: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 11px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 11px; letter-spacing: .07em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .sources { margin: 20px 0 0; padding-left: 20px; }
+    .sources li { margin: 6px 0; }
+    .composition-signal { overflow-wrap: anywhere; }
+    @media (max-width: 680px) {
+      .page { width: min(100% - 20px, 940px); margin-top: 10px; }
+      .context-grid, .axis-grid, .scope-grid, .field-grid { grid-template-columns: 1fr; }
+      .idea-head { flex-direction: column; }
+      .rank { width: 34px; height: 34px; }
+      th:first-child, td:first-child { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <p class="eyebrow">Repo-grounded ideation</p>
+      <h1>Command-line instructions for LLM-Now</h1>
+      <p class="lede">Yes: a request-scoped <code>--instruction</code> is a strong fit. The best version is universal across selectors, remains separate from the user prompt, and replaces—rather than silently appends to—an alias’s saved instructions for that run.</p>
+      <div class="metadata">
+        <span class="pill"><b>Date</b> <time datetime="2026-08-05">2026-08-05</time></span>
+        <span class="pill"><b>Topic</b> command-line-instruction</span>
+        <span class="pill"><b>Focus</b> request-scoped <code>--instruction</code> alongside alias instructions</span>
+        <span class="pill"><b>Mode</b> repo-grounded</span>
+      </div>
+      <div class="stats">
+        <div class="stat"><strong>40</strong><span>Raw ideas</span></div>
+        <div class="stat"><strong>19</strong><span>Distinct candidates</span></div>
+        <div class="stat"><strong>7</strong><span>Ranked survivors</span></div>
+        <div class="stat"><strong>4</strong><span>Topic axes</span></div>
+      </div>
+    </header>
+
+    <section id="grounding-context">
+      <p class="eyebrow">Evidence before preference</p>
+      <h2>Grounding Context</h2>
+      <div class="context-grid">
+        <article class="context-card">
+          <h3>The transport seam already exists</h3>
+          <p>Alias selection already carries one optional <code>instructions</code> string into a shared generation tail. BYOK Runtime 2.2 maps it to each provider’s native behavioral channel without joining it to the user prompt.</p>
+        </article>
+        <article class="context-card">
+          <h3>The missing capability is request resolution</h3>
+          <p>Strict argument parsing rejects <code>--instruction</code> today. Explicit provider/model calls deliberately construct instruction-free selections, even though the runtime can already accept the value.</p>
+        </article>
+        <article class="context-card">
+          <h3>Existing contracts constrain the design</h3>
+          <p>Prompt text has exactly one input source; successful stdout is byte-exact model output; runtime failures redact active instructions; saved instructions are nonblank and reject unsafe control characters.</p>
+        </article>
+        <article class="context-card">
+          <h3>External precedent separates replacement from append</h3>
+          <p>Claude Code gives replacement and append different flags. Other LLM CLIs support request-scoped behavioral text, but their varied names reinforce the need for an explicit llm-now contract.</p>
+        </article>
+      </div>
+      <p>The key uncertainty is not feasibility. It is precedence: when an alias has saved instructions and the command supplies another value, the tool must choose replacement, composition, or conflict. One runtime value and the strongest external precedent favor replacement.</p>
+    </section>
+
+    <section id="topic-axes">
+      <p class="eyebrow">Surface map</p>
+      <h2>Topic Axes</h2>
+      <div class="axis-grid">
+        <article class="axis-card"><span class="axis-no">1</span><h3>Invocation syntax and input-source ergonomics</h3><p>Where the option works and how it coexists with positional, flag, stdin, and TTY prompt paths.</p></article>
+        <article class="axis-card"><span class="axis-no">2</span><h3>Alias-versus-command-line instruction precedence</h3><p>How saved behavior and one-shot intent resolve to one effective instruction.</p></article>
+        <article class="axis-card"><span class="axis-no">3</span><h3>Validation, privacy, and failure behavior</h3><p>What text is accepted, preserved, redacted, persisted, or exposed by the operating environment.</p></article>
+        <article class="axis-card"><span class="axis-no">4</span><h3>Provider-runtime fidelity and observability</h3><p>How one neutral value reaches distinct provider-native channels without changing output contracts.</p></article>
+      </div>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">Strongest directions</p>
+      <h2>Ranked Ideas</h2>
+      <ol class="jump-list">
+        <li><a href="#idea-1">Universal request-scoped <code>--instruction</code></a></li>
+        <li><a href="#idea-2">Command-line instruction replaces the alias default</a></li>
+        <li><a href="#idea-3">Provider-native instruction delivery</a></li>
+        <li><a href="#idea-4">Shared structural validation with exact preservation</a></li>
+        <li><a href="#idea-5">Ephemeral, not confidential</a></li>
+        <li><a href="#idea-6">Provider-neutral “instruction” terminology</a></li>
+        <li><a href="#idea-7">Minimal core with explicitly deferred companions</a></li>
+      </ol>
+
+      <article class="idea" id="idea-1">
+        <div class="idea-head">
+          <span class="rank">1</span>
+          <div class="idea-title"><p class="eyebrow">Invocation syntax and input-source ergonomics</p><h3>1. Universal request-scoped <code>--instruction</code></h3></div>
+        </div>
+        <p><strong>Description:</strong> Accept one exact <code>--instruction &lt;text&gt;</code> value with positional aliases, <code>--alias</code>, and explicit <code>--provider</code>/<code>--model</code> selection. It modifies only the behavioral channel; the user prompt continues to come from the existing <code>--input</code>, stdin, or alias-only interactive path.</p>
+        <div class="concept" role="img" aria-label="Conceptual flow showing selector and command-line instruction resolving separately from the user prompt before one runtime request">
+          <svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="arrow-one" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/></marker></defs>
+            <rect x="22" y="24" width="180" height="58" rx="12" fill="var(--info-soft)" stroke="var(--line)"/>
+            <text x="112" y="49" text-anchor="middle" fill="var(--info-text)" font-size="13" font-weight="700">Target selection</text>
+            <text x="112" y="69" text-anchor="middle" fill="var(--info-text)" font-size="12">alias or provider/model</text>
+            <rect x="22" y="103" width="180" height="58" rx="12" fill="var(--accent-soft)" stroke="var(--line)"/>
+            <text x="112" y="128" text-anchor="middle" fill="var(--accent-text)" font-size="13" font-weight="700">--instruction</text>
+            <text x="112" y="148" text-anchor="middle" fill="var(--accent-text)" font-size="12">optional one-shot value</text>
+            <rect x="288" y="63" width="194" height="68" rx="12" fill="var(--surface)" stroke="var(--accent)" stroke-width="2"/>
+            <text x="385" y="91" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Resolve effective instruction</text>
+            <text x="385" y="113" text-anchor="middle" fill="var(--muted)" font-size="12">exactly one optional string</text>
+            <rect x="22" y="184" width="180" height="34" rx="12" fill="var(--warn-soft)" stroke="var(--line)"/>
+            <text x="112" y="206" text-anchor="middle" fill="var(--warn-text)" font-size="12" font-weight="700">User prompt: flag, stdin, or TTY</text>
+            <rect x="566" y="81" width="170" height="72" rx="12" fill="var(--surface)" stroke="var(--line)"/>
+            <text x="651" y="108" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Runtime request</text>
+            <text x="651" y="129" text-anchor="middle" fill="var(--muted)" font-size="12">prompt + instructions</text>
+            <path d="M202 53 H250 Q270 53 282 78" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-one)"/>
+            <path d="M202 132 H250 Q270 132 282 111" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-one)"/>
+            <path d="M482 97 H558" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-one)"/>
+            <path d="M202 201 H520 Q542 201 562 151" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-one)"/>
+          </svg>
+        </div>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>It exposes an existing runtime capability without forcing temporary alias creation and preserves every established prompt-input contract.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>96%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Medium</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct:</strong> <code>src/args.ts</code> already normalizes multiple selector forms; <code>src/app.ts</code> routes them into a shared generation tail that accepts prompt and instructions separately.</p>
+        <p class="downside"><strong>Downsides:</strong> The flag expands the tested invocation matrix and makes long or multiline values awkward in ordinary shell syntax.</p>
+      </article>
+
+      <article class="idea" id="idea-2">
+        <div class="idea-head">
+          <span class="rank">2</span>
+          <div class="idea-title"><p class="eyebrow">Alias-versus-command-line instruction precedence</p><h3>2. Command-line instruction replaces the alias default</h3></div>
+        </div>
+        <p><strong>Description:</strong> Treat the saved alias instruction as a default. With no new flag, the alias behaves exactly as it does today; with <code>--instruction</code>, the command-line value is the complete effective instruction for that invocation and the saved alias remains unchanged. Never concatenate the two under this flag.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>Users can answer “what instruction did this request use?” with one value and one precedence rule, independent of provider.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>95%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Low</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct + external:</strong> Alias records and runtime requests each carry one optional instruction string. Claude Code independently separates replacement from append, showing that composition should not hide behind the same option.</p>
+        <p class="downside"><strong>Downsides:</strong> Users who intuitively expect additive behavior may be surprised unless help text states the override rule plainly.</p>
+      </article>
+
+      <article class="idea" id="idea-3">
+        <div class="idea-head">
+          <span class="rank">3</span>
+          <div class="idea-title"><p class="eyebrow">Provider-runtime fidelity and observability</p><h3>3. Provider-native instruction delivery</h3></div>
+        </div>
+        <p><strong>Description:</strong> Resolve the effective instruction once, pass it unchanged through the existing RuntimeGateway field, and let BYOK Runtime remain the sole owner of provider-native translation. Prompt concatenation is never a fallback; an incapable future adapter should fail rather than silently omit or role-change an explicit instruction.</p>
+        <div class="concept" role="img" aria-label="Conceptual fan-out from one provider-neutral instruction to four provider-native behavioral channels">
+          <svg viewBox="0 0 760 255" xmlns="http://www.w3.org/2000/svg">
+            <defs><marker id="arrow-three" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/></marker></defs>
+            <rect x="24" y="92" width="210" height="72" rx="12" fill="var(--accent-soft)" stroke="var(--line)"/>
+            <text x="129" y="120" text-anchor="middle" fill="var(--accent-text)" font-size="13" font-weight="700">RuntimeGateway</text>
+            <text x="129" y="142" text-anchor="middle" fill="var(--accent-text)" font-size="12">instructions?: string</text>
+            <rect x="520" y="16" width="214" height="44" rx="11" fill="var(--info-soft)" stroke="var(--line)"/>
+            <text x="627" y="43" text-anchor="middle" fill="var(--info-text)" font-size="12">API system/developer message</text>
+            <rect x="520" y="76" width="214" height="44" rx="11" fill="var(--info-soft)" stroke="var(--line)"/>
+            <text x="627" y="103" text-anchor="middle" fill="var(--info-text)" font-size="12">Ollama system field</text>
+            <rect x="520" y="136" width="214" height="44" rx="11" fill="var(--info-soft)" stroke="var(--line)"/>
+            <text x="627" y="163" text-anchor="middle" fill="var(--info-text)" font-size="12">Claude append-system-prompt</text>
+            <rect x="520" y="196" width="214" height="44" rx="11" fill="var(--info-soft)" stroke="var(--line)"/>
+            <text x="627" y="223" text-anchor="middle" fill="var(--info-text)" font-size="12">Codex developer_instructions</text>
+            <path d="M234 128 H350 Q392 128 512 38" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-three)"/>
+            <path d="M234 128 H380 Q420 128 512 98" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-three)"/>
+            <path d="M234 128 H380 Q420 128 512 158" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-three)"/>
+            <path d="M234 128 H350 Q392 128 512 218" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow-three)"/>
+          </svg>
+        </div>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>One neutral contract supports every current and future provider without provider-specific branching in llm-now.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>95%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Low</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct:</strong> <code>src/runtime.ts</code> already constructs separate <code>prompt</code> and <code>instructions</code> fields, and BYOK Runtime 2.2 documents exact provider-native mapping and omission semantics.</p>
+        <p class="downside"><strong>Downsides:</strong> Native channels do not guarantee identical role priority across providers; the product can promise faithful transport, not identical model behavior.</p>
+      </article>
+
+      <article class="idea" id="idea-4">
+        <div class="idea-head">
+          <span class="rank">4</span>
+          <div class="idea-title"><p class="eyebrow">Validation, privacy, and failure behavior</p><h3>4. Shared structural validation with exact preservation</h3></div>
+        </div>
+        <p><strong>Description:</strong> Give ephemeral and saved instructions the same textual contract: reject blank values and prohibited control characters, but preserve every accepted byte, including leading/trailing whitespace and line breaks. Keep persistence-only credential and vault work out of the request path while reusing existing runtime failure redaction.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>One definition of valid instruction text prevents alias and command-line behavior from drifting while keeping one-shot calls stateless.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>93%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Low</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct:</strong> <code>src/aliases.ts</code> defines the nonblank/control invariant; alias and runtime tests already prove exact preservation; credential screening is tied to saving persistent state.</p>
+        <p class="downside"><strong>Downsides:</strong> The validation rule becomes a cross-surface contract and must stay consistent if either the alias schema or CLI later evolves.</p>
+      </article>
+
+      <article class="idea" id="idea-5">
+        <div class="idea-head">
+          <span class="rank">5</span>
+          <div class="idea-title"><p class="eyebrow">Validation, privacy, and failure behavior</p><h3>5. Ephemeral, not confidential</h3></div>
+        </div>
+        <p><strong>Description:</strong> Describe <code>--instruction</code> as “not persisted by llm-now,” not as a secret-input mechanism. Continue redacting the active value from runtime failures and never echo it in routine diagnostics, while documenting that shell history, process inspection, CLI-provider child arguments, provider retention, and successful model output can still reveal it.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>The feature’s privacy boundary remains accurate, useful, and testable instead of turning convenience into secret theater.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>92%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Low</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct:</strong> Runtime tests already redact raw and escaped instruction values from failures, preserve successful output, and use fixed presence-only markers for CLI fixtures. The README already documents provider and child-argument exposure.</p>
+        <p class="downside"><strong>Downsides:</strong> A clear warning adds documentation weight to a small flag, and llm-now cannot redact content deliberately echoed by the model without breaking stdout fidelity.</p>
+      </article>
+
+      <article class="idea" id="idea-6">
+        <div class="idea-head">
+          <span class="rank">6</span>
+          <div class="idea-title"><p class="eyebrow">Provider-runtime fidelity and observability</p><h3>6. Provider-neutral “instruction” terminology</h3></div>
+        </div>
+        <p><strong>Description:</strong> Keep the public option singular and provider-neutral: <code>--instruction</code> supplies one request-scoped behavioral instruction. Avoid promising a universal “system prompt,” because the runtime maps the same logical value to system messages, Ollama’s system field, Claude’s append-system option, and Codex developer instructions.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>The name matches the runtime abstraction and OpenAI’s request vocabulary without overstating cross-provider equivalence.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>91%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Low</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct + external:</strong> BYOK Runtime exposes <code>instructions?: string</code>, the alias schema already calls the field <code>instructions</code>, and OpenAI’s Responses API uses <code>instructions</code> for request-scoped behavior.</p>
+        <p class="downside"><strong>Downsides:</strong> Users familiar with <code>--system</code> may search for that term, and the singular CLI name differs slightly from the internal plural field.</p>
+      </article>
+
+      <article class="idea" id="idea-7">
+        <div class="idea-head">
+          <span class="rank">7</span>
+          <div class="idea-title"><p class="eyebrow">Alias-versus-command-line instruction precedence</p><h3>7. Minimal core with explicitly deferred companions</h3></div>
+        </div>
+        <p><strong>Description:</strong> Keep the first product contract to one universal replacement flag. Evaluate suppression, file input, and composition as separate future questions instead of letting them quietly complicate this feature.</p>
+        <div class="scope-grid">
+          <article class="scope-card core"><h4>Core now</h4><p><code>--instruction &lt;text&gt;</code> works across selectors, replaces any alias default for one run, preserves bytes, and uses the existing provider-native lane.</p></article>
+          <article class="scope-card deferred"><h4>Evaluate separately</h4><p><code>--no-instruction</code>, <code>--instruction-file</code>, and <code>--append-instruction</code> each introduce a distinct user need and contract.</p></article>
+        </div>
+        <dl class="field-grid">
+          <div class="field"><dt>Rationale</dt><dd>The smallest evidenced contract solves the motivating problem and leaves later additions compatible rather than speculative.</dd></div>
+          <div class="field"><dt>Confidence</dt><dd>90%</dd></div>
+          <div class="field"><dt>Complexity</dt><dd>Low</dd></div>
+        </dl>
+        <p class="basis"><strong>Basis — direct + external:</strong> The current runtime needs only one optional value, while the rejected companions require new states, file semantics, or composition rules with no demonstrated demand in this request.</p>
+        <p class="downside"><strong>Downsides:</strong> Users cannot temporarily suppress an alias instruction, avoid inline shell quoting through a file option, or append to a saved instruction in the first version.</p>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <p class="eyebrow">What did not earn the cut</p>
+      <h2>Rejection Summary</h2>
+      <table>
+        <thead><tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Complete three-state alias overlay</td><td>Coherent but unsupported scope expansion; no evidence yet that one-run suppression is needed.</td></tr>
+          <tr><td>2</td><td>Separate append vocabulary now</td><td>Useful future distinction, but duplicate scope control; repeated string flags also use last-wins today rather than existing rejection behavior.</td></tr>
+          <tr><td>3</td><td>Credential screening for one-shot text</td><td>Basis refuted: credential and vault checks protect persistence, while ordinary outbound prompts are not screened.</td></tr>
+          <tr><td>4</td><td>File-backed instruction lane</td><td>Good multiline ergonomics, but adds file/error semantics and does not fully remove CLI-provider argument exposure.</td></tr>
+          <tr><td>5</td><td>Provenance-only diagnostics</td><td>Presence-only fixtures support testing, not a new user-facing diagnostic surface; success stderr is intentionally clean.</td></tr>
+          <tr><td>6</td><td>Selector-equivalence as a separate product contract</td><td>Valuable verification case already subsumed by universal invocation and precedence.</td></tr>
+          <tr><td>7</td><td>Instruction-only launcher entry</td><td>Basis refuted: it breaks the documented rule that arguments bypass the launcher without demonstrated user need.</td></tr>
+          <tr><td>8</td><td>Explicit-selector-only first release</td><td>Withholds the central alias override use case even though the same runtime seam supports both paths.</td></tr>
+          <tr><td>9</td><td>Reject repeated instruction flags</td><td>Duplicates composition deferral and requires new behavior because the current parser accepts last-wins string options.</td></tr>
+          <tr><td>10</td><td>Instruction-source algebra</td><td>Premature abstraction coupled to unsupported suppression and provenance states.</td></tr>
+          <tr><td>11</td><td>Two-lane instruction UX</td><td>Bundles the weak file-lane case into the core without stronger evidence.</td></tr>
+          <tr><td>12</td><td>Full invocation conformance matrix</td><td>Testing elaboration rather than a separate direction, and overbroad because it assumes deferred states.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="sources">
+      <p class="eyebrow">Evidence index</p>
+      <h2>Sources &amp; References</h2>
+      <ul class="sources">
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/args.ts"><code>src/args.ts</code></a> — strict parsing, help text, selectors, and run-result shape.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/app.ts"><code>src/app.ts</code></a> — alias/explicit selection and shared generation flow.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/aliases.ts"><code>src/aliases.ts</code></a> — alias v2 instruction schema and validation.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/runtime.ts"><code>src/runtime.ts</code></a> — RuntimeGateway request shape, exact forwarding, and error redaction.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/README.md"><code>README.md</code></a> — public invocation, output, and instruction-exposure contracts.</li>
+        <li><a href="https://code.claude.com/docs/en/cli-usage">Claude Code CLI reference</a> — distinct replacement and append system-prompt options.</li>
+        <li><a href="https://llm.datasette.io/en/stable/usage.html">LLM CLI usage</a> and <a href="https://llm.datasette.io/en/stable/templates.html">templates</a> — one-shot system prompts alongside reusable saved behavior.</li>
+        <li><a href="https://developers.openai.com/codex/config-reference">OpenAI Codex configuration reference</a> — persistent developer instructions and per-run overrides.</li>
+        <li><a href="https://docs.ollama.com/cli">Ollama CLI</a>, <a href="https://docs.ollama.com/modelfile">Modelfile</a>, and <a href="https://docs.ollama.com/api/generate">generate API</a> — persisted and per-request system behavior.</li>
+      </ul>
+    </section>
+
+    <footer class="composition-signal">Composed 2026-08-06T03:16:57Z by ce-ideate from the user question: “llm-now supports setting a system prompt for an alias, but it should also support a <code>--instruction</code> argument to specify it on the command line, right?”</footer>
+  </main>
+</body>
+</html>
