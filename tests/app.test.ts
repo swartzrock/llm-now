@@ -2291,11 +2291,11 @@ describe("one-shot application", () => {
     expect(piped.runtime.calls.generate).toBe(1);
   });
 
-  test("offers sorted saved aliases first and bypasses discovery for the selected alias", async () => {
+  test("applies a request instruction after selectorless interactive alias selection", async () => {
     const seen: Array<{ message: string; options: PromptOption[] }> = [];
     let loads = 0;
     const app = dependencies({
-      args: ["--input", "hello"],
+      args: ["--input", "hello", "--instruction", "interactive request role"],
       stdin: input("", true),
       stderrTty: true,
       prompter: prompts({ choices: ["fast"], seen }),
@@ -2318,7 +2318,7 @@ describe("one-shot application", () => {
       runtime: runtime({
         generate: async (provider, model, _prompt, _signal, instructions) => {
           expect({ provider, model }).toEqual({ provider: "openai", model: "gpt-5" });
-          expect(instructions).toBe("interactive picker role");
+          expect(instructions).toBe("interactive request role");
           return "alias-result";
         },
       }),
@@ -2467,6 +2467,57 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).not.toContain("u2-existing-role");
   });
 
+  test("keeps a request instruction independent from fresh-selection alias saving", async () => {
+    const inputMessages: string[] = [];
+    const instructionMessages: string[] = [];
+    let saved: AliasRecord | undefined;
+    const app = dependencies({
+      args: ["--input", "hello", "--instruction", "request-only role"],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      nativeVaultEnabled: false,
+      prompter: prompts({
+        choices: [false, "ollama", "qwen"],
+        names: ["new-alias"],
+        instructions: ["separately saved role"],
+        inputMessages,
+        instructionMessages,
+      }),
+      loadAliases: async () => ({
+        version: 1,
+        aliases: { daily: { provider: "ollama", model: "qwen" } },
+      }),
+      runtime: runtime({
+        generate: async (_provider, _model, prompt, _signal, instructions) => {
+          expect(prompt).toBe("hello");
+          expect(instructions).toBe("request-only role");
+          return "exact response";
+        },
+      }),
+      saveAlias: async (_path, _name, selection) => {
+        saved = selection;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("exact response");
+    expect(inputMessages).toEqual([
+      "Enter an alias name for Ollama · qwen (Enter to exit)",
+    ]);
+    expect(instructionMessages).toEqual([
+      "Optional instructions for this shortcut (press Enter to skip)",
+    ]);
+    expect(saved).toEqual({
+      provider: "ollama",
+      model: "qwen",
+      instructions: "separately saved role",
+    });
+    expect(app.stderr.text()).not.toContain("is already saved as alias daily");
+    expect(app.stderr.text()).not.toContain("request-only role");
+  });
+
   test("suggests an existing alias for a provider-default target", async () => {
     const inputMessages: string[] = [];
     let saves = 0;
@@ -2553,15 +2604,24 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).toContain("failed to load alias store");
   });
 
-  test("explicit interactive provider selection does not load aliases", async () => {
+  test("explicit interactive provider selection forwards a request instruction without loading aliases", async () => {
     const app = dependencies({
-      args: ["--input", "hello", "--provider", "openai", "--model", "gpt-5"],
+      args: [
+        "--input",
+        "hello",
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5",
+        "--instruction",
+        "explicit request role",
+      ],
       stdin: input("", true),
       stderrTty: true,
       prompter: prompts({ confirms: [false] }),
       runtime: runtime({
         generate: async (_provider, _model, _prompt, _signal, instructions) => {
-          expect(instructions).toBeUndefined();
+          expect(instructions).toBe("explicit request role");
           return "response";
         },
       }),
@@ -2609,48 +2669,92 @@ describe("one-shot application", () => {
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
   });
 
-  test("positional and long-form aliases have exact application parity", async () => {
-    const results = [];
-    for (const args of [
-      ["Daily", "--input", "hello"],
-      ["--input", "hello", "--alias", "Daily"],
+  test("positional and long-form aliases preserve default and override parity", async () => {
+    for (const scenario of [
+      { instructionArgs: [] as string[], expected: "shared alias role" },
+      {
+        instructionArgs: ["--instruction", "request alias role"],
+        expected: "request alias role",
+      },
     ]) {
-      const calls: string[] = [];
-      const app = dependencies({
-        args,
-        runtime: runtime({
-          generate: async (provider, model, prompt, signal, instructions) => {
-            calls.push(`${provider}:${model}:${prompt}:${signal !== undefined}:${instructions}`);
-            return "alias-result";
+      const results = [];
+      for (const args of [
+        ["Daily", "--input", "hello", ...scenario.instructionArgs],
+        ["--input", "hello", "--alias", "Daily", ...scenario.instructionArgs],
+      ]) {
+        const calls: string[] = [];
+        const resolved = Object.freeze({
+          provider: "claude-cli" as const,
+          model: null,
+          instructions: "shared alias role",
+        });
+        const app = dependencies({
+          args,
+          runtime: runtime({
+            generate: async (provider, model, prompt, signal, instructions) => {
+              calls.push(`${provider}:${model}:${prompt}:${signal !== undefined}:${instructions}`);
+              return "alias-result";
+            },
+          }),
+          resolveAlias: async (_path, name) => {
+            calls.push(`resolve:${name}`);
+            return resolved;
           },
-        }),
-        resolveAlias: async (_path, name) => {
-          calls.push(`resolve:${name}`);
-          return {
-            provider: "claude-cli",
-            model: null,
-            instructions: "shared alias role",
-          };
+        });
+
+        results.push({
+          exitCode: await runApplication(app.value),
+          stdout: app.stdout.text(),
+          stderr: app.stderr.text(),
+          runtimeCalls: app.runtime.calls,
+          calls,
+          resolved,
+        });
+      }
+
+      expect(results[0]).toEqual(results[1]);
+      expect(results[0]).toEqual({
+        exitCode: 0,
+        stdout: "alias-result",
+        stderr: "",
+        runtimeCalls: { discover: 0, list: 0, generate: 1 },
+        calls: [`resolve:Daily`, `claude-cli:null:hello:true:${scenario.expected}`],
+        resolved: {
+          provider: "claude-cli",
+          model: null,
+          instructions: "shared alias role",
         },
       });
-
-      results.push({
-        exitCode: await runApplication(app.value),
-        stdout: app.stdout.text(),
-        stderr: app.stderr.text(),
-        runtimeCalls: app.runtime.calls,
-        calls,
-      });
     }
+  });
 
-    expect(results[0]).toEqual(results[1]);
-    expect(results[0]).toEqual({
-      exitCode: 0,
-      stdout: "alias-result",
-      stderr: "",
-      runtimeCalls: { discover: 0, list: 0, generate: 1 },
-      calls: ["resolve:Daily", "claude-cli:null:hello:true:shared alias role"],
+  test("does not persist a request instruction in the real alias store", async () => {
+    const directory = await temporaryDirectory();
+    const aliasPath = join(directory, "aliases.json");
+    const stored = JSON.stringify({
+      version: 2,
+      aliases: {
+        daily: {
+          provider: "ollama",
+          model: "qwen",
+          instructions: "saved alias role",
+        },
+      },
     });
+    await Bun.write(aliasPath, stored);
+    const app = dependencies({
+      args: ["daily", "--input", "hello", "--instruction", "request alias role"],
+      aliasPath,
+      runtime: runtime({
+        generate: async (_provider, _model, _prompt, _signal, instructions) => {
+          expect(instructions).toBe("request alias role");
+          return "alias-result";
+        },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(await Bun.file(aliasPath).text()).toBe(stored);
   });
 
   test("resolves positional and long-form aliases case-insensitively through the real store", async () => {
@@ -2738,7 +2842,10 @@ describe("one-shot application", () => {
 
   test("positional and long-form alias-only TTY calls prompt once with target context", async () => {
     const results = [];
-    for (const args of [["Daily"], ["--alias", "Daily"]]) {
+    for (const args of [
+      ["Daily", "--instruction", "prompted request role"],
+      ["--alias", "Daily", "--instruction", "prompted request role"],
+    ]) {
       const events: string[] = [];
       const inputMessages: string[] = [];
       const inputOptions: TextPromptOptions[] = [];
@@ -2756,8 +2863,8 @@ describe("one-shot application", () => {
           return { provider: "claude-cli", model: null };
         },
         runtime: runtime({
-          generate: async (provider, model, prompt) => {
-            events.push(`generate:${provider}:${model}:${prompt}`);
+          generate: async (provider, model, prompt, _signal, instructions) => {
+            events.push(`generate:${provider}:${model}:${prompt}:${instructions}`);
             return "alias-result";
           },
         }),
@@ -2784,7 +2891,7 @@ describe("one-shot application", () => {
       validatesBlank: "prompt must not be blank.",
       events: [
         "resolve:Daily",
-        "generate:claude-cli:null:  exact prompt  ",
+        "generate:claude-cli:null:  exact prompt  :prompted request role",
       ],
     });
   });
@@ -2876,24 +2983,20 @@ describe("one-shot application", () => {
     }
   });
 
-  test("piped input works with a positional alias", async () => {
+  test("piped input keeps a request instruction separate from the prompt", async () => {
     const app = dependencies({
-      args: ["Daily"],
+      args: ["Daily", "--instruction", "piped request role"],
       stdin: input("piped prompt"),
       runtime: runtime({
         generate: async (_provider, _model, prompt, _signal, instructions) => {
           expect(prompt).toBe("piped prompt");
-          expect(instructions).toBe("piped alias role");
+          expect(instructions).toBe("piped request role");
           return "alias-result";
         },
       }),
       resolveAlias: async (_path, name) => {
         expect(name).toBe("Daily");
-        return {
-          provider: "claude-cli",
-          model: null,
-          instructions: "piped alias role",
-        };
+        return { provider: "claude-cli", model: null };
       },
     });
 
@@ -3041,6 +3144,59 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).not.toContain("\r");
     expect(app.stderr.text().length).toBeLessThanOrEqual(1_100);
     expect(app.stderr.text()).toContain("generation (openai)");
+  });
+
+  test("redacts raw and serialized request instructions from runtime failures", async () => {
+    const instruction = 'temporary\n  Use "quotes" and \\slashes.  ';
+    const serialized = JSON.stringify(instruction);
+    const escaped = serialized.slice(1, -1);
+    const sensitive = createSensitiveValueRegistry();
+    const gateway = createRuntimeGateway({
+      env: {},
+      credentialResolver: createCredentialResolver({
+        env: {},
+        vault: {
+          get: async () => null,
+          set: async () => undefined,
+          delete: async () => false,
+        },
+        vaultEnabled: false,
+      }),
+      sensitive,
+      createProvider: (config) => ({
+        id: config.provider,
+        label: "Fake",
+        requiresNetwork: false,
+        requiresDownload: false,
+        async testConnection() { return { ok: true, message: "ok" }; },
+        async listModels() { return []; },
+        async generateText() {
+          throw new Error(`raw=${instruction} serialized=${serialized} escaped=${escaped}`);
+        },
+      }),
+    });
+    const app = dependencies({
+      args: [
+        "--input",
+        "hello",
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen",
+        "--instruction",
+        instruction,
+      ],
+      runtime: { value: gateway, calls: { discover: 0, list: 0, generate: 0 } },
+      sensitive,
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).not.toContain(instruction);
+    expect(app.stderr.text()).not.toContain(serialized);
+    expect(app.stderr.text()).not.toContain(escaped);
+    expect(app.stderr.text()).toContain("generation (ollama):");
+    expect(app.stderr.text()).toContain("[REDACTED]");
   });
 
   test("propagates the generation timeout signal and names the stage", async () => {

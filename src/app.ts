@@ -1454,12 +1454,13 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       selection = resolved;
     }
 
+    const effectiveInstructions = parsed.instruction ?? selection.selection.instructions;
     const response = await generateWithTimeout(
       deps,
       selection.selection.provider,
       selection.selection.model,
       prompt,
-      selection.selection.instructions,
+      effectiveInstructions,
     );
     const terminalResponse = stripTerminalSequences(response);
     if (
@@ -1476,6 +1477,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       interactive
       && selection.shortcutFollowUp !== "none"
       && selection.existingAlias !== undefined
+      && parsed.instruction === undefined
     ) {
       const colors = createTerminalColors(deps.stderr, deps.env);
       const target = safeFormatSelection(deps, selection.selection);

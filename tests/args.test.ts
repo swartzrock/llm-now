@@ -3,6 +3,7 @@ import { BYOK_API_KEY_ENV_VARS } from "@swartzrock/byok-runtime";
 import pc from "picocolors";
 import {
   HELP_TEXT,
+  type Selection,
   UsageError,
   parseArguments,
   renderHelpText,
@@ -23,6 +24,7 @@ Usage:
   llm-now --input <text>
   llm-now <alias>
   llm-now <alias> --input <text>
+  llm-now <alias> --instruction <text> --input <text>
   llm-now --provider <id> --model <id|default> --input <text>
 
 Rules:
@@ -39,6 +41,8 @@ Rules:
   Opening a launcher menu performs no provider discovery or credential access.
   A terminal alias with no input source also asks for one prompt.
   Otherwise, input comes from exactly one of --input or stdin.
+  --instruction is separate from prompt input and applies only to the current request.
+  A command-line instruction replaces saved shortcut instructions for that request.
   Arguments, --input, piped input, and noninteractive calls bypass the launcher.
   Deterministic calls use an alias or both --provider and --model.
   Model "default" is available only for codex-cli and claude-cli.
@@ -46,6 +50,7 @@ Rules:
 Options:
   --aliases            List saved aliases
   --input <text>       Prompt text
+  --instruction <text> Request-scoped behavioral instruction
   --alias <name>       Saved shortcut selection
   --provider <id>      Explicit provider
   --model <id>         Explicit model, or default for a supported CLI provider
@@ -113,6 +118,84 @@ describe("arguments and input", () => {
     expect(parseArguments(["Daily"])).toEqual({
       kind: "run",
       selection: { kind: "alias", alias: "Daily" },
+    });
+  });
+
+  test("preserves an exact request instruction across every selection surface", () => {
+    const instruction = "  temporary\nrule  ";
+    const cases: Array<{ args: string[]; selection: Selection }> = [
+      {
+        args: ["Daily", "--instruction", instruction],
+        selection: { kind: "alias", alias: "Daily" },
+      },
+      {
+        args: ["--alias", "Daily", "--instruction", instruction],
+        selection: { kind: "alias", alias: "Daily" },
+      },
+      {
+        args: [
+          "--provider",
+          "ollama",
+          "--model",
+          "qwen",
+          "--instruction",
+          instruction,
+        ],
+        selection: { kind: "explicit", provider: "ollama", model: "qwen" },
+      },
+      {
+        args: ["--instruction", instruction],
+        selection: { kind: "interactive" },
+      },
+    ];
+
+    for (const { args, selection } of cases) {
+      expect(parseArguments(args)).toEqual({
+        kind: "run",
+        instruction,
+        selection,
+      });
+    }
+  });
+
+  test("rejects blank and prohibited instruction text with fixed value-free errors", () => {
+    const invalid = [
+      ["", "--instruction must not be blank."],
+      [" \n ", "--instruction must not be blank."],
+      ["\t", "--instruction must use ordinary line breaks and contain no other control characters."],
+      ["one\rtwo", "--instruction must use ordinary line breaks and contain no other control characters."],
+      ["one\u0000two", "--instruction must use ordinary line breaks and contain no other control characters."],
+      ["one\u0085two", "--instruction must use ordinary line breaks and contain no other control characters."],
+      ["one\u2028two", "--instruction must use ordinary line breaks and contain no other control characters."],
+      ["one\u2029two", "--instruction must use ordinary line breaks and contain no other control characters."],
+    ] as const;
+
+    for (const [value, message] of invalid) {
+      try {
+        parseArguments(["--instruction", value]);
+        throw new Error("expected instruction validation to fail");
+      } catch (error) {
+        expect(error).toBeInstanceOf(UsageError);
+        expect((error as UsageError).exitCode).toBe(2);
+        expect((error as Error).message).toBe(message);
+        if (value.length > 0) expect((error as Error).message).not.toContain(value);
+      }
+    }
+  });
+
+  test("uses the last instruction and accepts a dash-leading equals value", () => {
+    expect(
+      parseArguments([
+        "Daily",
+        "--instruction",
+        "first",
+        "--instruction",
+        "second",
+      ]),
+    ).toMatchObject({ kind: "run", instruction: "second" });
+    expect(parseArguments(["Daily", "--instruction=-brief"])).toMatchObject({
+      kind: "run",
+      instruction: "-brief",
     });
   });
 
@@ -253,6 +336,36 @@ describe("arguments and input", () => {
       kind: "alias",
       alias: "daily",
     });
+
+    const instructed = parseArguments([
+      "--input",
+      "hello",
+      "--instruction",
+      "temporary",
+    ]);
+    if (instructed.kind !== "run") throw new Error("expected run arguments");
+    expect(() => requireDeterministicSelection(instructed.selection, false)).toThrow(
+      "non-interactive calls require a positional alias, --alias, or --provider and --model",
+    );
+  });
+
+  test("keeps instruction separate from prompt-source validation", async () => {
+    const parsed = parseArguments([
+      "--input",
+      "prompt",
+      "--instruction",
+      "temporary",
+    ]);
+    if (parsed.kind !== "run") throw new Error("expected run arguments");
+    await expect(resolvePrompt(parsed.input, input("piped"))).rejects.toThrow(
+      "exactly one input source",
+    );
+
+    const instructionOnly = parseArguments(["--instruction", "temporary"]);
+    if (instructionOnly.kind !== "run") throw new Error("expected run arguments");
+    await expect(resolvePrompt(instructionOnly.input, input("", true))).rejects.toThrow(
+      "provide --input or pipe prompt text",
+    );
   });
 
   test("interactivity requires both readable stdin and diagnostic TTY", () => {
@@ -269,6 +382,12 @@ describe("arguments and input", () => {
     expect(() => parseArguments(["daily", "--help"])).toThrow(UsageError);
     expect(() => parseArguments(["--version", "daily"])).toThrow(UsageError);
     expect(() => parseArguments(["daily", "--version"])).toThrow(UsageError);
+    expect(() => parseArguments(["--help", "--instruction", "temporary"])).toThrow(
+      UsageError,
+    );
+    expect(() => parseArguments(["--version", "--instruction", "temporary"])).toThrow(
+      UsageError,
+    );
   });
 
   test("aliases is a standalone option while the bare word remains an alias", () => {
@@ -278,6 +397,9 @@ describe("arguments and input", () => {
       selection: { kind: "alias", alias: "aliases" },
     });
     expect(() => parseArguments(["--aliases", "--input", "hello"])).toThrow(UsageError);
+    expect(() => parseArguments(["--aliases", "--instruction", "temporary"])).toThrow(
+      UsageError,
+    );
   });
 
   test("renders the exact approved compact plain help", () => {
@@ -346,6 +468,7 @@ describe("arguments and input", () => {
     expect(rendered).toContain(colors.bold(colors.greenBright("Usage:")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("llm-now")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--input")));
+    expect(rendered).toContain(colors.bold(colors.cyanBright("--instruction")));
     expect(rendered).toContain(colors.cyan("<text>"));
     expect(rendered).toContain(colors.cyan("ANTHROPIC_API_KEY"));
     expect(rendered).toContain(

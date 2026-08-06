@@ -236,6 +236,7 @@ async function smoke(archivePath: string): Promise<void> {
     const aliasEnvironment = process.platform === "win32"
       ? { APPDATA: configHome }
       : { XDG_CONFIG_HOME: configHome };
+    const overrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
 
     const inheritedEnvironment = Object.fromEntries(
       Object.entries(process.env).filter(([name]) => name.toUpperCase() !== "PATH"),
@@ -247,17 +248,25 @@ async function smoke(archivePath: string): Promise<void> {
       ...aliasEnvironment,
     };
     const cases = [
-      { args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>", stderrIncludes: "" },
-      { args: ["--version"], code: 0, stdout: `${packageMetadata.version}\n`, stderrIncludes: "" },
-      { args: ["--input", "smoke"], code: 2, stdout: "", stderrIncludes: "usage: non-interactive calls require" },
+      { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>", stderrIncludes: "" },
+      { name: "version", args: ["--version"], code: 0, stdout: `${packageMetadata.version}\n`, stderrIncludes: "" },
+      { name: "deterministic usage failure", args: ["--input", "smoke"], code: 2, stdout: "", stderrIncludes: "usage: non-interactive calls require" },
       {
+        name: "alias inventory",
         args: ["--aliases"],
         code: 0,
         stdout: "aliases → Codex CLI · provider default\nzeta → OpenAI · gpt-5\n",
         stderr: "",
       },
-      { args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:instruction-absent", stderrIncludes: "" },
-      { args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:instruction-present", stderr: "" },
+      { name: "explicit generation", args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:instruction-absent", stderrIncludes: "" },
+      { name: "saved alias instruction", args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:instruction-present", stderr: "" },
+      {
+        name: "alias instruction replacement",
+        args: ["aliases", "--input", "smoke", "--instruction", overrideInstructions],
+        code: 0,
+        stdout: "fake:instruction-override",
+        stderr: "",
+      },
     ] as const;
 
     for (const testCase of cases) {
@@ -271,7 +280,7 @@ async function smoke(archivePath: string): Promise<void> {
         ? stderr === testCase.stderr
         : stderr.includes(testCase.stderrIncludes);
       if (result.exitCode !== testCase.code || !stdoutMatches || !stderrMatches) {
-        throw new Error(`native smoke failed: args=${testCase.args.join(" ")} exit=${result.exitCode} stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`);
+        throw new Error(`native smoke failed: case=${testCase.name} exit=${result.exitCode} stdout=${JSON.stringify(stdout)} stderr=${JSON.stringify(stderr)}`);
       }
     }
 

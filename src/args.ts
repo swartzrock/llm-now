@@ -5,6 +5,7 @@ import {
 } from "@swartzrock/byok-runtime";
 import pc from "picocolors";
 import { parseArgs as parseNodeArgs } from "node:util";
+import { hasInvalidInstructionCharacters } from "./aliases.ts";
 
 type TerminalColors = ReturnType<typeof pc.createColors>;
 
@@ -34,6 +35,7 @@ ${heading("Usage:")}
   ${literal("llm-now")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${metadata("<alias>")}
   ${literal("llm-now")} ${metadata("<alias>")} ${literal("--input")} ${metadata("<text>")}
+  ${literal("llm-now")} ${metadata("<alias>")} ${literal("--instruction")} ${metadata("<text>")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${literal("--provider")} ${metadata("<id>")} ${literal("--model")} ${metadata("<id|default>")} ${literal("--input")} ${metadata("<text>")}
 
 ${heading("Rules:")}
@@ -50,6 +52,8 @@ ${heading("Rules:")}
   Opening a launcher menu performs no provider discovery or credential access.
   A terminal alias with no input source also asks for one prompt.
   Otherwise, input comes from exactly one of ${literal("--input")} or stdin.
+  ${literal("--instruction")} is separate from prompt input and applies only to the current request.
+  A command-line instruction replaces saved shortcut instructions for that request.
   Arguments, ${literal("--input")}, piped input, and noninteractive calls bypass the launcher.
   Deterministic calls use an alias or both ${literal("--provider")} and ${literal("--model")}.
   Model "default" is available only for codex-cli and claude-cli.
@@ -57,6 +61,7 @@ ${heading("Rules:")}
 ${heading("Options:")}
   ${literal("--aliases")}            List saved aliases
   ${literal("--input")} ${metadata("<text>")}       Prompt text
+  ${literal("--instruction")} ${metadata("<text>")} Request-scoped behavioral instruction
   ${literal("--alias")} ${metadata("<name>")}       Saved shortcut selection
   ${literal("--provider")} ${metadata("<id>")}      Explicit provider
   ${literal("--model")} ${metadata("<id>")}         Explicit model, or default for a supported CLI provider
@@ -95,7 +100,7 @@ export type ParsedArguments =
   | { kind: "help" }
   | { kind: "version" }
   | { kind: "aliases" }
-  | { kind: "run"; input?: string; selection: Selection };
+  | { kind: "run"; input?: string; instruction?: string; selection: Selection };
 
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
 
@@ -105,9 +110,20 @@ function nonBlankArgument(name: string, value: string | undefined): string | und
   return value;
 }
 
+function instructionArgument(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (hasInvalidInstructionCharacters(value)) {
+    throw new UsageError(
+      "--instruction must use ordinary line breaks and contain no other control characters.",
+    );
+  }
+  return nonBlankArgument("--instruction", value);
+}
+
 export function parseArguments(args: string[]): ParsedArguments {
   let values: {
     input?: string;
+    instruction?: string;
     alias?: string;
     provider?: string;
     model?: string;
@@ -123,6 +139,7 @@ export function parseArguments(args: string[]): ParsedArguments {
       args,
       options: {
         input: { type: "string" },
+        instruction: { type: "string" },
         alias: { type: "string" },
         provider: { type: "string" },
         model: { type: "string" },
@@ -164,6 +181,7 @@ export function parseArguments(args: string[]): ParsedArguments {
   }
 
   const input = values.input;
+  const instruction = instructionArgument(values.instruction);
   const positionalAlias = nonBlankArgument("alias", positionals[0]);
   const alias = positionalAlias ?? nonBlankArgument("--alias", values.alias);
   const providerValue = nonBlankArgument("--provider", values.provider);
@@ -193,7 +211,12 @@ export function parseArguments(args: string[]): ParsedArguments {
     }
   }
 
-  return { kind: "run", ...(input === undefined ? {} : { input }), selection };
+  return {
+    kind: "run",
+    ...(input === undefined ? {} : { input }),
+    ...(instruction === undefined ? {} : { instruction }),
+    selection,
+  };
 }
 
 export function requireDeterministicSelection(
