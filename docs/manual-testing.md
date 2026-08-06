@@ -14,7 +14,7 @@ A candidate is ready when:
 - shortcut inventory and diagnostics do not disclose saved instruction text or instruction-bearing child-process arguments;
 - no unexplained release-blocking manual failure remains.
 
-Homebrew and Chocolatey are intentionally outside the current release scope. Do not test or publish package-manager integration unless a future version explicitly reintroduces it.
+Homebrew is a post-publication projection of each verified public Release and has dedicated commissioning cases below. Chocolatey remains outside the current release scope.
 
 ## Coverage matrix
 
@@ -718,7 +718,7 @@ Leave the reviewed release pull request open until MT-31 is ready. If its checks
 Run only when publication is explicitly authorized. Before dispatch:
 
 1. Confirm the repository is public and eligible to issue GitHub artifact attestations.
-2. Confirm the `release-signing` and `release-publication` environments have the intended required reviewers and only the signing environment contains Apple credentials.
+2. Confirm the `release-signing` and `release-publication` environments have the intended required reviewers and only the signing environment contains Apple credentials. Confirm `homebrew-publication` is restricted to protected `main` and trusted stable `v*` tags; it is reviewer-free by default unless maintainers deliberately accept approval-gated Homebrew projection.
 3. Commission the `v*` tag rule: the protected publication actor may create a new tag, while other actors cannot move or delete release tags.
 4. Confirm the intended `vX.Y.Z` tag and Release do not exist and no higher stable Release is public.
 5. Merge the approved `chore: release` pull request from MT-30. Record its exact merge SHA and version:
@@ -733,6 +733,7 @@ Run only when publication is explicitly authorized. Before dispatch:
 6. Confirm the push starts `Release`, and its classifier promotes the exact release SHA with publication enabled. The event's `before` SHA must be the release commit's first parent, and the diff must contain the stable version increase, matching changelog section, and a consumed Changeset deletion.
 7. Confirm both macOS jobs wait for and receive `release-signing` approval. Before granting `release-publication` approval, confirm the release tag still does not exist.
 8. Grant `release-publication` approval. Confirm checksum verification and artifact attestation finish before the workflow creates the tag, verifies it at `RELEASE_SHA`, and creates the GitHub Release.
+9. After the GitHub Release is public, confirm the Homebrew job downloads and reverifies the exact six-asset set before it reads or updates the tap formula. Use MT-39 and MT-40 for baseline and first-write commissioning; reserve MT-41 for credential/ref denial and recovery commissioning.
 
 If automatic promotion fails before creating the tag and newer commits later reach `main`, rerun the original automatic workflow run. Do not manually dispatch from the newer `main` ref: a public run requires `release-sha` to equal the selected ref's `GITHUB_SHA`, preserving attestation provenance.
 
@@ -785,7 +786,7 @@ Finally, record:
 - a full functional pass on Windows x64; and
 - operation without Bun or Node.js on every tested target.
 
-The Linux artifacts do not claim Alpine or other musl compatibility. Windows signing, Homebrew, and Chocolatey remain deferred.
+The Linux artifacts do not claim Alpine or other musl compatibility. Windows signing and Chocolatey remain deferred; Homebrew projection is verified separately in MT-39 through MT-41.
 
 ### MT-32: Completed release no-op
 
@@ -798,7 +799,7 @@ gh workflow run release.yml --ref "$TAG" \
   -f publish=true
 ```
 
-The preflight must download exactly the five ZIPs and `SHA256SUMS`, validate all checksums, and verify every archive attestation against this repository, `.github/workflows/release.yml`, and `RELEASE_SHA`. It must then report a completed no-op: no native build, signing, publication approval, tag mutation, asset replacement, or duplicate Release.
+The preflight must download exactly the five ZIPs and `SHA256SUMS`, validate all checksums, and verify every archive attestation against this repository, `.github/workflows/release.yml`, and `RELEASE_SHA`. It must then skip native build, signing, and GitHub publication mutation while still entering Homebrew reconciliation. An exact tap formula reports `already-current`; a safe older formula may update once. The run must never mutate the tag, Release, assets, or attestations.
 
 ### MT-33: Exact-tag/no-Release resume
 
@@ -865,6 +866,68 @@ On Linux, repeat setup in a session without Secret Service. On other platforms, 
 
 After every session, verify that the probe identity and every `llm-now` test-provider record are absent, the temporary credentials are revoked, the isolated alias/config directory is removed, and the disposable OS session is destroyed.
 
+### MT-39: Static public v2.2.0 formula baseline
+
+This is a static convergence check, not live commissioning. The `v2.2.0` tag predates the Homebrew job, so dispatching that historical tag cannot execute or recover the new projection.
+
+1. Download the current public tap formula into an isolated temporary directory:
+
+   ```bash
+   HOMEBREW_BASELINE_DIR="$(mktemp -d)"
+   gh api \
+     -H 'Accept: application/vnd.github.raw+json' \
+     'repos/swartzrock/homebrew-tap/contents/Formula/llm-now.rb?ref=main' \
+     > "$HOMEBREW_BASELINE_DIR/live.rb"
+   ```
+
+2. Run the focused golden test. It renders from the authoritative five-entry public `v2.2.0` manifest data and requires byte equality with the checked-in baseline:
+
+   ```bash
+   bun test tests/packaging.test.ts --test-name-pattern \
+     'renders the public 2.2.0 Homebrew formula byte-for-byte'
+   ```
+
+3. Compare that rendered baseline with public tap `main`:
+
+   ```bash
+   cmp tests/fixtures/homebrew/llm-now-2.2.0.rb \
+     "$HOMEBREW_BASELINE_DIR/live.rb"
+   ```
+
+Both checks must pass without changing `swartzrock/homebrew-tap`. Remove the temporary directory after recording the result.
+
+### MT-40: First post-merge Homebrew write commissioning
+
+Run this with the first release whose exact tag contains the Homebrew job.
+
+1. Create a fine-grained PAT that selects only `swartzrock/homebrew-tap`, grants repository **Contents: Read and write**, and grants no Workflow, Administration, Actions, organization, or `swartzrock/llm-now` access. Record that Contents write still covers every non-workflow file in the tap; it is not path-scoped.
+2. Store it as `HOMEBREW_TAP_TOKEN` in `homebrew-publication`. Confirm selected deployment refs admit only protected `main` and trusted stable `v*` tags. Keep no reviewer by default for automatic synchronization, or record the stricter approval policy if maintainers intentionally enable one.
+3. While authenticated, inspect `swartzrock/homebrew-tap/main` branch protection and rulesets. Confirm the fine-grained identity may make the intended direct Contents update. Stop if a pull request or different identity is required; do not broaden permissions or bypass policy.
+4. Record the current tap formula commit, then complete the normal release through MT-31. After the GitHub Release is public, confirm the Homebrew job independently verifies the remote tag SHA, non-draft/non-prerelease state, exact six assets, all manifest checksums, and every archive attestation before mutation.
+5. Confirm exactly one new tap commit changes only `Formula/llm-now.rb`. Its version, four immutable URLs, and four checksums must match the public Release manifest and the source renderer byte-for-byte. No second write may occur, and the source tag and Release must remain unchanged.
+6. Record the terminal disposition. A successful first advance is `updated`; a repeated run is `already-current`. HTTP status and request ID may be null when no response supplied them. The summary must contain no raw formula, manifest, API body, header, or credential.
+
+Do not create production same-version drift, downgrade, malformed formula, stale-SHA, or ambiguous transport states. `tests/homebrew-reconcile.test.ts` supplies the U2 automated fixtures for those refusal and one-read-back cases.
+
+### MT-41: Homebrew credential and deployment-ref denial recovery
+
+Use a release whose stable tag contains the Homebrew job; `v2.2.0` and other older tags cannot exercise this recovery path.
+
+1. Verify the environment boundary before using the real token. From a temporary reviewed diagnostic workflow, attempt an environment deployment from a disposable feature branch and a same-repository pull request using a non-sensitive sentinel secret in `homebrew-publication`. GitHub must reject both refs before the job starts, proving those refs receive no environment secret, including `HOMEBREW_TAP_TOKEN`. Remove the diagnostic workflow and sentinel after review; never print or probe the PAT value.
+2. For a later commissioning release, remove, expire, or replace `HOMEBREW_TAP_TOKEN` with a deliberately denied token before the Homebrew mutation step. Let GitHub Release publication complete. Homebrew must report `failed-before-write`; the exact tag, Release, six assets, checksums, and attestations must remain unchanged.
+3. Restore the correctly scoped token, peel the exact stable tag, and dispatch that tag's committed workflow:
+
+   ```bash
+   TAG=vX.Y.Z
+   RELEASE_SHA="$(git rev-parse "${TAG}^{commit}")"
+   gh workflow run release.yml --ref "$TAG" \
+     -f release-sha="$RELEASE_SHA" \
+     -f publish=true
+   ```
+
+4. Confirm the run reverifies the existing public Release, performs no build or GitHub publication mutation, and retries only the Homebrew projection. It may issue one blob-SHA-guarded write. After every attempted write it must read once; exact desired bytes report `updated` or `already-current`, while a non-exact or unavailable read-back reports `write-outcome-unconfirmed`. It must never issue a second write in that run.
+5. Confirm a same-version divergent formula, newer formula, or missing or invalid formula would refuse mutation as `failed-before-write` using the U2 automated fixtures; do not manufacture those states in the public tap.
+
 ## Automation-backed coverage
 
 Keep the Bun test suite as the authority for behavior that is difficult or unreliable to verify manually:
@@ -878,6 +941,7 @@ Keep the Bun test suite as the authority for behavior that is difficult or unrel
 - diagnostic truncation at 1,024 characters;
 - v1-to-v2 instruction migration, add/change/remove transitions, and plaintext validation;
 - exact per-invocation instruction forwarding with absent instructions on explicit and run-once calls;
+- Homebrew exact/older/drift/newer/invalid classification, one-write concurrency, nullable response metadata, and credential-safe diagnostics in `tests/homebrew-reconcile.test.ts`;
 - fixed fake-CLI diagnostics that never echo instruction-bearing arguments;
 - concurrent alias writers and stale-lock recovery; and
 - atomic rename failure handling.
