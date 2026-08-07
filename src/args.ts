@@ -32,6 +32,7 @@ export function renderHelpText(
 ${heading("Usage:")}
   ${literal("llm-now")}
   ${literal("llm-now")} ${literal("--aliases")}
+  ${literal("llm-now")} ${literal("--voice")} [${literal("--input")} ${metadata("<text>")}]
   ${literal("llm-now")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${metadata("<alias>")}
   ${literal("llm-now")} ${metadata("<alias>")} ${literal("--input")} ${metadata("<text>")}
@@ -52,6 +53,7 @@ ${heading("Rules:")}
   Opening a launcher menu performs no provider discovery or credential access.
   A terminal alias with no input source also asks for one prompt.
   Otherwise, input comes from exactly one of ${literal("--input")} or stdin.
+  On macOS, ${literal("--voice")} routes one dictated transcript without changing positional aliases.
   ${literal("--instruction")} is separate from prompt input and applies only to the current request.
   A command-line instruction replaces saved shortcut instructions for that request.
   Arguments, ${literal("--input")}, piped input, and noninteractive calls bypass the launcher.
@@ -60,6 +62,7 @@ ${heading("Rules:")}
 
 ${heading("Options:")}
   ${literal("--aliases")}            List saved aliases
+  ${literal("--voice")}              Route one dictated transcript on macOS
   ${literal("--input")} ${metadata("<text>")}       Prompt text
   ${literal("--instruction")} ${metadata("<text>")} Request-scoped behavioral instruction
   ${literal("--alias")} ${metadata("<name>")}       Saved shortcut selection
@@ -100,6 +103,7 @@ export type ParsedArguments =
   | { kind: "help" }
   | { kind: "version" }
   | { kind: "aliases" }
+  | { kind: "voice"; input?: string }
   | { kind: "run"; input?: string; instruction?: string; selection: Selection };
 
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
@@ -128,6 +132,7 @@ export function parseArguments(args: string[]): ParsedArguments {
     provider?: string;
     model?: string;
     aliases?: boolean;
+    voice?: boolean;
     help?: boolean;
     version?: boolean;
   };
@@ -144,6 +149,7 @@ export function parseArguments(args: string[]): ParsedArguments {
         provider: { type: "string" },
         model: { type: "string" },
         aliases: { type: "boolean" },
+        voice: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean" },
       },
@@ -166,6 +172,16 @@ export function parseArguments(args: string[]): ParsedArguments {
       throw new UsageError("--help and --version must be used without other options.");
     }
     return values.help ? { kind: "help" } : { kind: "version" };
+  }
+  if (values.voice) {
+    const hasConflictingOption = supplied.some(([name]) => name !== "voice" && name !== "input");
+    if (hasConflictingOption || positionals.length > 0) {
+      throw new UsageError("--voice may be combined only with --input.");
+    }
+    return {
+      kind: "voice",
+      ...(values.input === undefined ? {} : { input: values.input }),
+    };
   }
 
   if (positionals.length > 1) {

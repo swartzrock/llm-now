@@ -10,11 +10,18 @@ export interface TextOutput extends TtyState {
   write(text: string, callback?: (error?: Error | null) => void): unknown;
 }
 
+export class InvalidUtf8Error extends Error {
+  constructor() {
+    super("stdin must contain valid UTF-8 text.");
+    this.name = "InvalidUtf8Error";
+  }
+}
+
 export function isInteractive(stdin: TtyState, stderr: TtyState): boolean {
   return stdin.isTTY === true && stderr.isTTY === true;
 }
 
-async function readUtf8(input: PromptInput): Promise<string> {
+export async function readUtf8(input: PromptInput): Promise<string> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let text = "";
   for await (const chunk of input) {
@@ -22,14 +29,30 @@ async function readUtf8(input: PromptInput): Promise<string> {
     try {
       text += decoder.decode(bytes, { stream: true });
     } catch {
-      throw new UsageError("stdin must contain valid UTF-8 text.");
+      throw new InvalidUtf8Error();
     }
   }
   try {
     return text + decoder.decode();
   } catch {
-    throw new UsageError("stdin must contain valid UTF-8 text.");
+    throw new InvalidUtf8Error();
   }
+}
+
+export async function resolveInputSource(
+  inputFlag: string | undefined,
+  stdin: PromptInput,
+): Promise<string> {
+  if (stdin.isTTY === true) {
+    if (inputFlag !== undefined) return inputFlag;
+    throw new UsageError("provide --input or pipe prompt text on stdin.");
+  }
+
+  const stdinText = await readUtf8(stdin);
+  if (inputFlag !== undefined && stdinText.length > 0) {
+    throw new UsageError("provide exactly one input source: --input or stdin.");
+  }
+  return inputFlag ?? stdinText;
 }
 
 export function promptValidationMessage(
@@ -50,14 +73,10 @@ export async function resolvePrompt(
   inputFlag: string | undefined,
   stdin: PromptInput,
 ): Promise<string> {
-  if (stdin.isTTY === true) {
-    if (inputFlag !== undefined) return validatePrompt(inputFlag);
-    throw new UsageError("provide --input or pipe prompt text on stdin.");
+  try {
+    return validatePrompt(await resolveInputSource(inputFlag, stdin));
+  } catch (error) {
+    if (error instanceof InvalidUtf8Error) throw new UsageError(error.message);
+    throw error;
   }
-
-  const stdinText = await readUtf8(stdin);
-  if (inputFlag !== undefined && stdinText.length > 0) {
-    throw new UsageError("provide exactly one input source: --input or stdin.");
-  }
-  return validatePrompt(inputFlag ?? stdinText);
 }

@@ -140,6 +140,7 @@ describe("release workflow policy", () => {
       "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
       "actions/checkout@v7.0.0",
       "actions/download-artifact@v8.0.1",
+      "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405",
       "actions/upload-artifact@v7.0.1",
     ]);
     for (const workflow of [ciWorkflow, releaseWorkflow, changesetsWorkflow]) {
@@ -149,6 +150,33 @@ describe("release workflow policy", () => {
         ? githubActions.has(action)
         : /@[a-f0-9]{40}$/.test(action))).toBe(true);
     }
+  });
+
+  test("runs the locked macOS voice router suite in source CI only", () => {
+    const sourceJob = ciWorkflow.slice(
+      ciWorkflow.indexOf("\n  source:"),
+      ciWorkflow.indexOf("\n  native:"),
+    );
+    const nativeJob = ciWorkflow.slice(
+      ciWorkflow.indexOf("\n  native:"),
+      ciWorkflow.indexOf("\n  release-assets:"),
+    );
+
+    expect(sourceJob).toContain(
+      "uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405",
+    );
+    expect(sourceJob).toContain(
+      "uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b",
+    );
+    expect(sourceJob).toContain('python-version: "3.11"');
+    expect(sourceJob).toContain('version: "0.11.16"');
+    expect(sourceJob).toContain("run: bun run check");
+    expect(sourceJob).toContain(
+      "run: uv run --project examples/macos-voice-router --locked python -m unittest discover -s examples/macos-voice-router/tests",
+    );
+    expect(nativeJob).not.toContain("setup-python");
+    expect(nativeJob).not.toContain("setup-uv");
+    expect(nativeJob).not.toContain("macos-voice-router");
   });
 
   test("maintains one version-only release PR with narrow cancelable permissions", () => {

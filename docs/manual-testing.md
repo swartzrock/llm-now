@@ -949,6 +949,28 @@ Use a release whose stable tag contains the Homebrew job; `v2.2.0` and other old
 4. Confirm the run reverifies the existing public Release, performs no build or GitHub publication mutation, and retries only the Homebrew projection. It may issue one blob-SHA-guarded write. After every attempted write it must read once; exact desired bytes report `updated` or `already-current`, while a non-exact or unavailable read-back reports `write-outcome-unconfirmed`. It must never issue a second write in that run.
 5. Confirm a same-version divergent formula, newer formula, or missing or invalid formula would refuse mutation as `failed-before-write` using the U2 automated fixtures; do not manufacture those states in the public tap.
 
+## macOS voice router example
+
+### MT-42: Complete the two-action voice Shortcut matrix
+
+On a Mac with Dictation enabled, follow the authoritative
+[macOS voice shortcut guide](../examples/macos-voice-shortcut.md) from its Text
+smoke test through the global keyboard shortcut. Start with `uv`, `llm-now`, the
+repository checkout, and one working alias already available; record the time
+from opening the setup section to the first spoken answer. Under ordinary network
+conditions, it must take less than three minutes.
+
+Complete the guide's routing, wake-word, rejection, local/hosted provider,
+per-alias voice/rate/pitch, clean clipboard, audible pitch A/B, provider failure,
+cancellation, permission, privacy, and recovery checks. A successful process
+exit alone is not evidence that an installed voice honored the pitch setting.
+The finished Shortcut must contain only
+`Dictate Text` followed by `Run Shell Script`; no marker parser, clipboard action,
+or separate `Speak Text` action may remain. Record the macOS version, Dictation
+mode, shortcut key, aliases/providers used, installed voices, elapsed setup time,
+pitch values and audible comparison, clean-clipboard result, clipboard sentinel
+result, cancellation result, and any permission prompts in the test report below.
+
 ## Automation-backed coverage
 
 Keep the Bun test suite as the authority for behavior that is difficult or unreliable to verify manually:

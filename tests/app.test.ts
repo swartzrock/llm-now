@@ -13,6 +13,7 @@ import {
   type SaveAliasResult,
 } from "../src/aliases.ts";
 import { renderHelpText } from "../src/args.ts";
+import { resolveInputSource } from "../src/io.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import { createRuntimeGateway } from "../src/runtime.ts";
 import { runApplication, type ApplicationPrompter } from "../src/app.ts";
@@ -171,6 +172,7 @@ function dependencies(options: {
   home?: string;
   aliasPath?: string;
   credentialMutationLock?: CredentialMutationLock;
+  runVoice?: NonNullable<Parameters<typeof runApplication>[0]["runVoice"]>;
 }) {
   const stdout = output(options.stdoutTty ?? false);
   const stderr = output(options.stderrTty ?? false);
@@ -211,6 +213,7 @@ function dependencies(options: {
       credentialResolver,
       sensitive,
       nativeVaultEnabled: options.nativeVaultEnabled ?? true,
+      runVoice: options.runVoice,
       credentialMutationLock: options.credentialMutationLock
         ?? (async (_directory, _provider, operation) => operation()),
     },
@@ -317,6 +320,78 @@ describe("help output", () => {
       "usage: --help and --version must be used without other options.\n",
     );
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+});
+
+describe("voice boundary", () => {
+  test("rejects non-macOS before stdin, aliases, runtime, or injected voice work", async () => {
+    let stdinReads = 0;
+    let voiceCalls = 0;
+    const app = dependencies({
+      args: ["--voice"],
+      platform: "linux",
+      stdin: {
+        isTTY: false,
+        async *[Symbol.asyncIterator]() {
+          stdinReads += 1;
+          yield new TextEncoder().encode("do not read");
+        },
+      },
+      loadAliases: async () => {
+        throw new Error("voice platform guard must not load aliases");
+      },
+      runtime: runtime({
+        generate: async () => {
+          throw new Error("voice platform guard must not generate");
+        },
+      }),
+      runVoice: async () => {
+        voiceCalls += 1;
+        throw new Error("voice platform guard must not initialize voice work");
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toBe("voice: llm-now --voice currently supports macOS only.\n");
+    expect(stdinReads).toBe(0);
+    expect(voiceCalls).toBe(0);
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("passes exactly one macOS voice input source to injected voice work", async () => {
+    const transcripts: string[] = [];
+    const runVoice: NonNullable<Parameters<typeof runApplication>[0]["runVoice"]> = async (
+      inputFlag,
+      stdin,
+    ) => {
+      transcripts.push(await resolveInputSource(inputFlag, stdin));
+      return 0;
+    };
+    const flag = dependencies({
+      args: ["--voice", "--input", "flag transcript"],
+      platform: "darwin",
+      stdin: input("", true),
+      runVoice,
+    });
+    const piped = dependencies({
+      args: ["--voice"],
+      platform: "darwin",
+      stdin: input("piped transcript"),
+      runVoice,
+    });
+    const both = dependencies({
+      args: ["--voice", "--input", "flag transcript"],
+      platform: "darwin",
+      stdin: input("piped transcript"),
+      runVoice,
+    });
+
+    expect(await runApplication(flag.value)).toBe(0);
+    expect(await runApplication(piped.value)).toBe(0);
+    expect(await runApplication(both.value)).toBe(2);
+    expect(transcripts).toEqual(["flag transcript", "piped transcript"]);
+    expect(both.stderr.text()).toContain("exactly one input source");
   });
 });
 

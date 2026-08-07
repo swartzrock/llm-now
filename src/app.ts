@@ -107,6 +107,7 @@ export interface ApplicationDependencies {
   credentialResolver: CredentialResolver;
   sensitive: SensitiveValueRegistry;
   nativeVaultEnabled: boolean;
+  runVoice?: (inputFlag: string | undefined, stdin: PromptInput) => Promise<number>;
   credentialMutationLock?: CredentialMutationLock;
 }
 
@@ -1405,6 +1406,17 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     if (parsed.kind === "version") {
       deps.stdout.write(`${deps.version}\n`);
       return 0;
+    }
+    if (parsed.kind === "voice") {
+      if (deps.platform !== "darwin") {
+        diagnostic("voice: llm-now --voice currently supports macOS only.");
+        return 1;
+      }
+      if (deps.runVoice === undefined) {
+        diagnostic("voice: native voice routing is unavailable in this build.");
+        return 1;
+      }
+      return await deps.runVoice(parsed.input, deps.stdin);
     }
     if (parsed.kind === "aliases") {
       const aliases = (await (deps.loadAliases ?? loadStoredAliases)(

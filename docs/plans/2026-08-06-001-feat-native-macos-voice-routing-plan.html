@@ -1,0 +1,1008 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Native macOS Voice Routing - Plan</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f1ea;
+      --surface: #fffdf8;
+      --surface-2: #ece8df;
+      --text: #24231f;
+      --muted: #68645b;
+      --line: #d4cfc3;
+      --accent: #176b5c;
+      --accent-soft: #dcefe9;
+      --accent-text: #0c4d41;
+      --info-soft: #e4edf8;
+      --info-text: #244c78;
+      --warn-soft: #f8e9c6;
+      --warn-text: #745210;
+      --danger-soft: #f6ded8;
+      --danger-text: #7a2f25;
+      --code: #f0ece3;
+      --shadow: 0 12px 32px rgba(44, 39, 28, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171916;
+        --surface: #20231f;
+        --surface-2: #2b2f29;
+        --text: #f1eee6;
+        --muted: #b9b4a9;
+        --line: #41463e;
+        --accent: #7fd0bc;
+        --accent-soft: #173d34;
+        --accent-text: #b4eadc;
+        --info-soft: #20354d;
+        --info-text: #c5dcf5;
+        --warn-soft: #493b1f;
+        --warn-text: #f4d58f;
+        --danger-soft: #4a2a26;
+        --danger-text: #f2b8ae;
+        --code: #2b2e29;
+        --shadow: none;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.62;
+    }
+    main {
+      width: min(94vw, 960px);
+      margin: 2.25rem auto 4rem;
+    }
+    header.hero {
+      padding: clamp(1.4rem, 3vw, 2.5rem);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin: 0 0 0.45rem;
+      color: var(--accent);
+      font-size: 0.73rem;
+      font-weight: 800;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, h4 { line-height: 1.2; letter-spacing: -0.018em; }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.35rem); }
+    h2 { margin: 0 0 1rem; font-size: 1.62rem; }
+    h3 { margin: 0 0 0.7rem; font-size: 1.16rem; }
+    h4 { margin: 1rem 0 0.45rem; font-size: 0.96rem; }
+    p { max-width: 74ch; margin: 0.55rem 0 1rem; }
+    a { color: var(--accent); text-underline-offset: 0.18em; }
+    code {
+      padding: 0.08em 0.34em;
+      border-radius: 5px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.91em;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--code);
+    }
+    pre code { padding: 0; background: transparent; }
+    strong { color: inherit; }
+    .lede { max-width: 70ch; margin-top: 1rem; color: var(--muted); font-size: 1.05rem; }
+    .metadata {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+      gap: 0.7rem;
+      margin: 1.5rem 0 0;
+    }
+    .metadata div {
+      padding: 0.72rem 0.8rem;
+      border-radius: 10px;
+      background: var(--surface-2);
+    }
+    dt {
+      color: var(--muted);
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    dd { margin: 0.16rem 0 0; font-weight: 650; overflow-wrap: anywhere; }
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin-top: 1rem;
+    }
+    .pill, .id-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 1.75rem;
+      padding: 0.24rem 0.64rem;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      font-size: 0.76rem;
+      font-weight: 780;
+    }
+    .pill { background: var(--info-soft); color: var(--info-text); }
+    .id-chip { background: var(--accent-soft); color: var(--accent-text); }
+    nav.toc {
+      margin: 1rem 0 1.5rem;
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+    }
+    nav.toc strong { display: block; margin-bottom: 0.45rem; }
+    nav.toc ul { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; margin: 0; padding: 0; list-style: none; }
+    section {
+      margin-top: 1.25rem;
+      padding: clamp(1.1rem, 2.4vw, 1.8rem);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .subsection { margin-top: 1.35rem; }
+    .callout, .risk {
+      margin: 0.85rem 0;
+      padding: 0.9rem 1rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .callout.info, .risk.info { background: var(--info-soft); color: var(--info-text); }
+    .callout.good, .risk.good { background: var(--accent-soft); color: var(--accent-text); }
+    .callout.warn, .risk.warn { background: var(--warn-soft); color: var(--warn-text); }
+    .callout.danger, .risk.danger { background: var(--danger-soft); color: var(--danger-text); }
+    .callout .eyebrow, .risk .eyebrow { color: inherit; }
+    .callout p:last-child, .risk p:last-child { margin-bottom: 0; }
+    .table-wrap { overflow-x: auto; margin: 0.8rem 0 1.2rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.91rem; }
+    th, td { padding: 0.7rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
+    th { color: var(--muted); font-size: 0.7rem; letter-spacing: 0.07em; text-transform: uppercase; }
+    tbody tr:last-child td { border-bottom: 0; }
+    td:first-child { white-space: nowrap; }
+    ul, ol { padding-left: 1.3rem; }
+    li { margin: 0.28rem 0; }
+    .decision-grid, .risk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 0.8rem; }
+    article.card, article.unit {
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--surface);
+    }
+    article.card { padding: 1rem; }
+    article.card p:last-child { margin-bottom: 0; }
+    article.unit { margin: 0.85rem 0; padding: 1rem; }
+    article.unit h3 { display: flex; align-items: center; gap: 0.55rem; }
+    .unit-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 0.5rem;
+      margin: 0.7rem 0;
+    }
+    .unit-meta div { padding: 0.65rem; border-radius: 8px; background: var(--surface-2); }
+    details { margin-top: 0.55rem; border-top: 1px solid var(--line); padding-top: 0.55rem; }
+    summary { cursor: pointer; color: var(--accent); font-weight: 750; }
+    .diagram {
+      overflow-x: auto;
+      margin: 1rem 0;
+      padding: 0.6rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-2);
+    }
+    .diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+    .diagram text { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: var(--text); }
+    .diagram .box { fill: var(--surface); stroke: var(--line); stroke-width: 2; }
+    .diagram .accent-box { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+    .diagram .info-box { fill: var(--info-soft); stroke: var(--info-text); stroke-width: 2; }
+    .diagram .line { fill: none; stroke: var(--muted); stroke-width: 2; marker-end: url(#arrow); }
+    .diagram .dash { fill: none; stroke: var(--muted); stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+    .diagram .label { font-size: 14px; font-weight: 750; }
+    .diagram .small { font-size: 12px; fill: var(--muted); }
+    .composition-signal {
+      width: min(94vw, 960px);
+      margin: 0 auto 2.5rem;
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-align: center;
+    }
+    @media (max-width: 640px) {
+      main { width: min(96vw, 960px); margin-top: 0.8rem; }
+      header.hero, section { border-radius: 12px; }
+      th, td { padding: 0.58rem; }
+    }
+    @media print {
+      :root { color-scheme: light; }
+      body { background: #fff; }
+      main { width: 100%; margin: 0; }
+      header.hero, section, article.card, article.unit { box-shadow: none; break-inside: avoid; }
+      nav.toc { display: none; }
+      details > * { display: block; }
+      summary { display: none; }
+      .composition-signal { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <p class="eyebrow">Implementation-ready unified plan</p>
+      <h1>Native macOS Voice Routing - Plan</h1>
+      <p class="lede">Move the proven macOS voice-routing behavior into the installed <code>llm-now</code> binary, while preserving the Python example as an independent parity oracle. Users get one native command; contributors keep the reference implementation for differential testing.</p>
+      <dl class="metadata">
+        <div><dt>title</dt><dd>Native macOS Voice Routing - Plan</dd></div>
+        <div><dt>type</dt><dd>feat</dd></div>
+        <div><dt>date</dt><dd><time datetime="2026-08-06">2026-08-06</time></dd></div>
+        <div><dt>artifact_contract</dt><dd>ce-unified-plan/v1</dd></div>
+        <div><dt>artifact_readiness</dt><dd>implementation-ready</dd></div>
+        <div><dt>product_contract_source</dt><dd>ce-plan-bootstrap</dd></div>
+        <div><dt>execution</dt><dd>code</dd></div>
+        <div><dt>deepened</dt><dd><time datetime="2026-08-06">2026-08-06</time></dd></div>
+      </dl>
+      <div class="stats" aria-label="Plan summary">
+        <span class="pill">19 requirements</span>
+        <span class="pill">5 implementation units</span>
+        <span class="pill">5 native release targets</span>
+        <span class="pill">1 clean main-based PR</span>
+      </div>
+    </header>
+
+    <nav class="toc" aria-label="Plan navigation">
+      <strong>Plan navigation</strong>
+      <ul>
+        <li><a href="#goal-capsule">Goal Capsule</a></li>
+        <li><a href="#product-contract">Product Contract</a></li>
+        <li><a href="#planning-contract">Planning Contract</a></li>
+        <li><a href="#system-wide-impact">System-Wide Impact</a></li>
+        <li><a href="#implementation-units">Implementation Units</a></li>
+        <li><a href="#verification-contract">Verification Contract</a></li>
+        <li><a href="#definition-of-done">Definition of Done</a></li>
+        <li><a href="#appendix">Appendix</a></li>
+      </ul>
+    </nav>
+
+    <section id="goal-capsule">
+      <p class="eyebrow">Outcome and authority</p>
+      <h2>Goal Capsule</h2>
+      <p><strong>Objective.</strong> Ship a first-class macOS voice mode in the Bun/TypeScript <code>llm-now</code> executable. It must preserve the Python router's documented routing, safety, clipboard, and speech behavior without requiring Python, uv, or a repository checkout for normal use.</p>
+
+      <h3>Authority hierarchy</h3>
+      <ol>
+        <li>The user's settled decisions in this plan govern packaging, dependency choice, reference preservation, output format, and branch base.</li>
+        <li>The Product Contract governs user-visible behavior.</li>
+        <li>The Planning Contract governs implementation mechanism.</li>
+        <li>The retained Python example supplies test evidence for the shared parity corpus. It is not a runtime authority for native-only integration details.</li>
+        <li>Existing ordinary CLI, alias-store, credential, diagnostic, and release contracts remain unchanged unless an R-ID below says otherwise.</li>
+      </ol>
+
+      <h3>Execution profile</h3>
+      <div class="callout good">
+        <p class="eyebrow">One branch · one pull request</p>
+        <p>Create <code>codex/native-macos-voice</code> from the latest <code>origin/main</code>. Transfer only the allowlisted voice artifacts from <code>codex/macos-voice-shortcut-guide</code>. Implement, test, commit, push, and open one focused PR from that branch.</p>
+      </div>
+      <p><strong>Tail ownership.</strong> The executor owns the branch transplant, implementation, automated gates, documentation, release-size evidence, and PR. Manual macOS listening remains a recorded release/manual-test gate; it must not delay committing verified automated work.</p>
+
+      <h3>Stop conditions</h3>
+      <ul>
+        <li>Stop if native user setup still requires Python, uv, or the repository checkout.</li>
+        <li>Stop if <code>ratio()</code> changes a documented route decision at the 65-point threshold or 15-point runner-up margin.</li>
+        <li>Stop if the embedded WASM cannot compile and start on any existing release target.</li>
+        <li>Stop if the clean branch requires merging or broadly cherry-picking the current mixed feature branch.</li>
+        <li>Stop for review if executable or archive growth is materially larger than the embedded dependency evidence predicts; record measurements instead of inventing a CI size limit.</li>
+      </ul>
+    </section>
+
+    <section id="product-contract">
+      <p class="eyebrow">User-visible behavior</p>
+      <h2>Product Contract</h2>
+
+      <h3>Summary</h3>
+      <p>Add <code>llm-now --voice</code> for macOS. The mode accepts a dictated transcript, chooses a saved alias with conservative deterministic routing, generates one concise answer through the existing runtime, copies that answer, and speaks it. The installed binary performs the work directly. The existing Python router remains in the repository for independent parity testing and possible future removal.</p>
+
+      <h3>Problem Frame</h3>
+      <p>The Python example proves the interaction, but it asks end users to install uv, resolve three paths, keep a checkout, and launch a second application layer. That setup undermines the value of a keyboard-driven voice shortcut. The core executable already owns aliases, credentials, generation, diagnostics, and native packaging, so it is the correct user-facing boundary.</p>
+
+      <h3>Actors</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Actor</th><th>Need</th></tr></thead>
+          <tbody>
+            <tr id="a1"><td><span class="id-chip">A1.</span></td><td>macOS user</td><td>Invoke an installed command from Shortcuts and receive a copied and spoken answer without a Python toolchain.</td></tr>
+            <tr id="a2"><td><span class="id-chip">A2.</span></td><td>Contributor</td><td>Compare native behavior against the retained reference without making Python part of the product runtime.</td></tr>
+            <tr id="a3"><td><span class="id-chip">A3.</span></td><td>Release maintainer</td><td>Prove the embedded WASM and unchanged CLI surface work across every release target.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 id="product-requirements">Product Requirements</h3>
+
+      <h4>Invocation and portability</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Requirement</th><th>Covered by</th></tr></thead>
+          <tbody>
+            <tr id="r1"><td><span class="id-chip">R1.</span></td><td><code>llm-now --voice</code> must accept a transcript from exactly one of <code>--input</code> or stdin and must reject positionals, <code>--alias</code>, <code>--provider</code>, <code>--model</code>, and other standalone modes.</td><td>U1, AE1, AE9</td></tr>
+            <tr id="r2"><td><span class="id-chip">R2.</span></td><td>On non-macOS targets, voice mode must fail before reading configuration, loading aliases, initializing the scorer, generating, or starting an OS side effect; the positional word <code>voice</code> must remain usable as an alias.</td><td>U1, U4, AE9</td></tr>
+            <tr id="r3"><td><span class="id-chip">R3.</span></td><td>Native voice mode must load one alias-store snapshot and use the selected <code>AliasRecord</code> from that snapshot; it must not parse <code>--aliases</code> output or spawn <code>llm-now</code>.</td><td>U1, U3, AE1</td></tr>
+            <tr id="r4"><td><span class="id-chip">R4.</span></td><td>The supported Shortcut must remain <code>Dictate Text → Run Shell Script</code>, pass the transcript through stdin, and use installed <code>llm-now --voice</code> as the only application dependency after Dictation.</td><td>U5, AE10</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Configuration and routing</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Requirement</th><th>Covered by</th></tr></thead>
+          <tbody>
+            <tr id="r5"><td><span class="id-chip">R5.</span></td><td>Voice configuration must remain at absolute <code>$XDG_CONFIG_HOME/llm-now/voice-router.toml</code> or <code>~/.config/llm-now/voice-router.toml</code>, with default <code>wake_words = ["hey"]</code> and the closed per-alias fields <code>match_phrases</code>, <code>voice</code>, <code>rate</code>, and <code>pitch</code>.</td><td>U2, AE3, AE4</td></tr>
+            <tr id="r6"><td><span class="id-chip">R6.</span></td><td>Routing must use NFKC plus Unicode Default Case Folding and Unicode token boundaries, then preserve the leading-token flow: optional wake phrase, longest normalized canonical alias, longest configured phrase, then fuzzy canonical-alias fallback; every accepted route must preserve the original question substring.</td><td>U2, AE1-AE3</td></tr>
+            <tr id="r7"><td><span class="id-chip">R7.</span></td><td>Fuzzy routing must require a compact key of at least 4 characters, a candidate length difference no greater than <code>ceil(aliasLength × 0.2)</code>, identical digit sequences when either side has digits, a score of at least 65, and a runner-up margin of at least 15; score ties use the shorter span and deterministic alias order.</td><td>U2, U4, AE2</td></tr>
+            <tr id="r8"><td><span class="id-chip">R8.</span></td><td>The 0–100 ratio score must come only from exactly pinned <code>@3leaps/string-metrics-wasm@0.3.11</code>; documentation and diagnostics must call it similarity, never probability, and no package normalization, extraction, or ranking helper may change R6-R7.</td><td>U1, U2, U4</td></tr>
+            <tr id="r9"><td><span class="id-chip">R9.</span></td><td>Blank, invalid-UTF-8, alias-only, wake-only, punctuation-only, valid-empty-roster, weak, digit-mismatched, and ambiguous requests must not generate or mutate the clipboard; malformed or unreadable alias storage is a configuration failure, and normal typed CLI alias selection remains exact.</td><td>U1-U3, AE6, AE9</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Generation, clipboard, and speech</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Requirement</th><th>Covered by</th></tr></thead>
+          <tbody>
+            <tr id="r10"><td><span class="id-chip">R10.</span></td><td>Before generation, native voice mode must verify executable access to <code>/usr/bin/pbcopy</code> and <code>/usr/bin/say</code>, parse the complete configuration, and validate any configured voice against <code>say -v ?</code>.</td><td>U3, AE4</td></tr>
+            <tr id="r11"><td><span class="id-chip">R11.</span></td><td>An accepted route must call <code>RuntimeGateway.generate</code> exactly once with the selected provider/model, an abort signal, and the established concise plain-text speech instruction followed by the unchanged question.</td><td>U3, AE1, AE5</td></tr>
+            <tr id="r12"><td><span class="id-chip">R12.</span></td><td>A response must be nonblank and must reject <code>[[</code>, terminal escapes, and unsafe control characters before either output side effect.</td><td>U2, U3, AE6</td></tr>
+            <tr id="r13"><td><span class="id-chip">R13.</span></td><td>A successful request must send all answer/speech bytes to <code>pbcopy</code> and <code>say</code> through stdin, finish copying the exact UTF-8 answer before speech starts, and add only one trusted router-authored <code>[[pbas …]]</code> prefix for configured pitch.</td><td>U3, AE5, AE7</td></tr>
+            <tr id="r14"><td><span class="id-chip">R14.</span></td><td>Per-alias voice, integer rate from 80 through 500, and finite numeric pitch from 1 through 127 must preserve the reference behavior; stable notices must always use unconfigured system speech defaults.</td><td>U2, U3, AE4, AE5</td></tr>
+            <tr id="r15"><td><span class="id-chip">R15.</span></td><td>Voice mode must keep stdout empty, emit stable error categories without transcript/prompt/answer/speech payloads, pass remaining detail through request-value redaction and the shared sanitizer, and follow the terminal outcome table below.</td><td>U3, AE6-AE9</td></tr>
+            <tr id="r16"><td><span class="id-chip">R16.</span></td><td>SIGINT/SIGTERM must abort one root request and suppress later notices; each generation/child stage has its own deadline, reports cancellation versus timeout distinctly, and terminates/reaps the sole active operation before the next R15 action.</td><td>U3, AE7, AE8</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Verification, preservation, and documentation</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Requirement</th><th>Covered by</th></tr></thead>
+          <tbody>
+            <tr id="r17"><td><span class="id-chip">R17.</span></td><td>The Python router, package metadata, lockfile, tests, and historical plans must remain in place as an independent source-CI parity oracle; native runtime and release archives must never depend on them.</td><td>U1, U4, AE10</td></tr>
+            <tr id="r18"><td><span class="id-chip">R18.</span></td><td>Bun and Python tests must independently consume a shared routing/score corpus and must assert exact normalization, question offsets, route decisions, and tolerance-based raw score parity at the threshold, margin, length, digit, tie, and Unicode case-fold boundaries.</td><td>U2, U4, AE2, AE11</td></tr>
+            <tr id="r19"><td><span class="id-chip">R19.</span></td><td>Both macOS architectures, both Linux architectures, and Windows x64 must compile and launch with the dependency embedded; macOS CI must execute first and repeated compiled fuzzy scores, and the PR must record executable and archive size deltas plus the updated native-primary manual matrix.</td><td>U4, U5, AE9-AE11</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>R15 terminal outcome contract</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Terminal state</th><th>Exit</th><th>Clipboard / speech</th><th>Diagnostics</th></tr></thead>
+          <tbody>
+            <tr><td>Answer copied and spoken</td><td><code>0</code></td><td>Exact answer copied, then answer spoken</td><td>None required; stdout remains empty</td></tr>
+            <tr><td>Transcript or route rejected, including a valid empty alias roster</td><td><code>0</code> if retry notice succeeds; otherwise <code>1</code></td><td>Clipboard unchanged; unconfigured retry notice only</td><td>Stable local rejection category on stderr</td></tr>
+            <tr><td>Generation failed, timed out, returned blank, or returned unsafe text</td><td><code>0</code> if request-failed notice succeeds; otherwise <code>1</code></td><td>Clipboard unchanged; unconfigured request-failed notice only</td><td>Sanitized local detail on stderr</td></tr>
+            <tr><td>Platform, alias store, voice TOML/path, executable-access, or selected-voice failure</td><td><code>1</code></td><td>No answer side effect; configuration notice when <code>say</code> is available</td><td>Actionable sanitized local detail without request payloads</td></tr>
+            <tr><td>Clipboard failure</td><td><code>1</code></td><td>No answer speech; unconfigured copy-failed notice</td><td>Sanitized copy detail</td></tr>
+            <tr><td>Answer speech failure after copy</td><td><code>1</code></td><td>Copied answer remains; no replacement notice</td><td>Sanitized speech detail</td></tr>
+            <tr><td>SIGINT or SIGTERM</td><td><code>130</code></td><td>No later side effect or notice; a completed earlier copy is not rolled back</td><td><code>voice request cancelled</code></td></tr>
+            <tr><td>Invalid CLI option combination</td><td><code>2</code></td><td>No side effect</td><td>Existing sanitized usage boundary</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Flows</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Entry and decisions</th><th>Terminal state</th></tr></thead>
+          <tbody>
+            <tr id="f1"><td><span class="id-chip">F1.</span> Native success</td><td>Shortcut passes transcript → CLI validates macOS and input → one alias snapshot and config load → exact/configured/fuzzy route → preflight/profile validation → one generation → validate → copy → speak.</td><td>R15 success</td></tr>
+            <tr id="f2"><td><span class="id-chip">F2.</span> Handled rejection</td><td>Input or route does not produce a unique alias/question.</td><td>R15 retry outcome; no generation or clipboard mutation</td></tr>
+            <tr id="f3"><td><span class="id-chip">F3.</span> Setup failure</td><td>Platform, alias store, path, TOML, schema, command, or voice validation fails before generation.</td><td>R15 configuration outcome</td></tr>
+            <tr id="f4"><td><span class="id-chip">F4.</span> Response failure</td><td>Runtime fails or the returned string is blank or unsafe.</td><td>R15 request-failed outcome</td></tr>
+            <tr id="f5"><td><span class="id-chip">F5.</span> Partial side effect</td><td>Copy finishes, then answer speech fails.</td><td>R15 speech-failure outcome; clipboard remains useful</td></tr>
+            <tr id="f6"><td><span class="id-chip">F6.</span> Cancellation or deadline</td><td>A root signal or per-stage timeout reaches generation or a child operation.</td><td>Active work is reaped; R16 distinguishes exit 130 from the stage's R15 failure path</td></tr>
+            <tr id="f7"><td><span class="id-chip">F7.</span> Contributor parity</td><td>Shared fixtures run independently in Bun and locked Python; compiled smoke runs in the native matrix.</td><td>Exact decisions, tolerant scores, and all target gates pass</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Acceptance Examples</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr id="ae1"><td><span class="id-chip">AE1.</span></td><td><strong>Covers R1, R3, R6, R11.</strong> Given alias <code>deepseek32</code>, <code>Deep seek 32, explain mixture of experts</code> selects that record from one loaded snapshot and passes <code>explain mixture of experts</code> to the existing runtime without spawning <code>llm-now</code>.</td></tr>
+            <tr id="ae2"><td><span class="id-chip">AE2.</span></td><td><strong>Covers R7-R8, R18.</strong> <code>Tara, write a haiku</code> selects <code>terra</code> only when the raw ratio is at least 65 and leads the runner-up by at least 15; Bun and Python agree on the decision without rounding the score first.</td></tr>
+            <tr id="ae3"><td><span class="id-chip">AE3.</span></td><td><strong>Covers R5-R6.</strong> With configured phrase <code>op 47</code> and wake words <code>hey</code>/<code>computer</code>, requests with either wake word and requests without one preserve the same alias/question boundary.</td></tr>
+            <tr id="ae4"><td><span class="id-chip">AE4.</span></td><td><strong>Covers R5, R10, R14.</strong> An unknown profile field, invalid pitch/rate, relative XDG path, or unavailable configured voice fails before generation and leaves the clipboard unchanged.</td></tr>
+            <tr id="ae5"><td><span class="id-chip">AE5.</span></td><td><strong>Covers R11, R13-R14.</strong> A valid answer for an alias with voice, rate, and <code>pitch = 50</code> is copied without markup, then spoken with the configured arguments and exactly one router-authored <code>[[pbas 50]]</code> prefix.</td></tr>
+            <tr id="ae6"><td><span class="id-chip">AE6.</span></td><td><strong>Covers R9, R12, R15.</strong> Ambiguous input or model output containing <code>[[pbas 90]]</code> preserves a clipboard sentinel and speaks only the appropriate stable unconfigured notice.</td></tr>
+            <tr id="ae7"><td><span class="id-chip">AE7.</span></td><td><strong>Covers R13, R15-R16.</strong> If <code>pbcopy</code> succeeds and <code>say</code> fails or is cancelled, the original answer remains on the clipboard and no notice replaces it.</td></tr>
+            <tr id="ae8"><td><span class="id-chip">AE8.</span></td><td><strong>Covers R15-R16.</strong> Cancellation during generation, copy, or speech terminates and reaps the active operation, exits 130, and starts no later operation.</td></tr>
+            <tr id="ae9"><td><span class="id-chip">AE9.</span></td><td><strong>Covers R1-R2, R15, R19.</strong> Linux and Windows compiled binaries still run help/version, while <code>--voice</code> returns the stable macOS-only failure before config or WASM initialization.</td></tr>
+            <tr id="ae10"><td><span class="id-chip">AE10.</span></td><td><strong>Covers R4, R17.</strong> A release user reaches the Shortcut through the installed binary only; a contributor can separately run the locked Python suite from the retained example.</td></tr>
+            <tr id="ae11"><td><span class="id-chip">AE11.</span></td><td><strong>Covers R18-R19.</strong> Both implementations consume the shared boundary corpus, the compiled macOS fixture performs first and repeated fuzzy scores, all five release targets build, and the PR records before/after executable and archive sizes.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Scope Boundaries</h3>
+      <div class="decision-grid">
+        <div class="callout good"><p class="eyebrow">In scope</p><p>Native macOS voice mode, preserved routing behavior, per-alias speech settings, shared parity fixtures, compiled-WASM validation, and native-primary documentation.</p></div>
+        <div class="callout info"><p class="eyebrow">Preserved reference</p><p>The complete Python example and its locked source-CI suite remain. It may be removed in a future change only after native behavior has proven stable.</p></div>
+        <div class="callout warn"><p class="eyebrow">Deferred</p><p>Non-macOS speech backends, concurrent Shortcut serialization, and automatic clipboard clearing.</p></div>
+        <div class="callout danger"><p class="eyebrow">Outside</p><p>Fuzzy matching for ordinary typed CLI calls, a new alias schema, model-generated speech controls, a generic subprocess framework, or removal of the Python example.</p></div>
+      </div>
+    </section>
+
+    <section id="planning-contract">
+      <p class="eyebrow">Implementation mechanism</p>
+      <h2>Planning Contract</h2>
+
+      <h3>Key Technical Decisions</h3>
+      <nav class="toc" aria-label="Key technical decision navigation">
+        <strong>Decision index</strong>
+        <ul>
+          <li><a href="#ktd1">KTD1. CLI mode</a></li>
+          <li><a href="#ktd2">KTD2. Ratio dependency</a></li>
+          <li><a href="#ktd3">KTD3. Python oracle</a></li>
+          <li><a href="#ktd4">KTD4. Clean branch</a></li>
+          <li><a href="#ktd5">KTD5. Module boundary</a></li>
+          <li><a href="#ktd6">KTD6. Alias/runtime snapshot</a></li>
+          <li><a href="#ktd7">KTD7. TOML</a></li>
+          <li><a href="#ktd8">KTD8. Unicode case fold</a></li>
+          <li><a href="#ktd9">KTD9. Side effects</a></li>
+          <li><a href="#ktd10">KTD10. Diagnostics</a></li>
+          <li><a href="#ktd11">KTD11. Compiled WASM</a></li>
+        </ul>
+      </nav>
+      <div class="decision-grid">
+        <article class="card" id="ktd1">
+          <h3><span class="id-chip">KTD1.</span> Add a parsed <code>voice</code> mode</h3>
+          <p><code>src/args.ts</code> returns <code>{ kind: "voice"; input?: string }</code> for <code>--voice</code>. The branch occurs before ordinary selection. The bare positional <code>voice</code> stays an alias. Governs R1-R2. <strong>(session-settled: user-approved — chosen over a positional <code>voice</code> subcommand: alias names must remain unambiguous.)</strong></p>
+        </article>
+        <article class="card" id="ktd2">
+          <h3><span class="id-chip">KTD2.</span> Pin and isolate the ratio dependency</h3>
+          <p>Add production dependency <code>"@3leaps/string-metrics-wasm": "0.3.11"</code>, commit <code>bun.lock</code>, and import only <code>ratio</code> from the package root. llm-now owns only R7's routing policy. Do not add Rust, <code>wasm-pack</code>, a loose <code>.wasm</code> asset, dynamic import machinery, or a local edit-distance implementation. Governs R7-R8 and R19. <strong>(session-settled: user-directed — chosen over a local RapidFuzz-compatible implementation: library features should remain library-owned.)</strong></p>
+        </article>
+        <article class="card" id="ktd3">
+          <h3><span class="id-chip">KTD3.</span> Preserve Python as an independent oracle</h3>
+          <p>Keep <code>examples/macos-voice-router/**</code>, its 42 existing tests, RapidFuzz lock, and source-CI lane. Add shared JSON fixtures that both suites read independently. Do not launch Python from Bun tests or production. Governs R17-R18. <strong>(session-settled: user-directed — chosen over deleting the Python example: the reference is still needed to test native parity.)</strong></p>
+        </article>
+        <article class="card" id="ktd4">
+          <h3><span class="id-chip">KTD4.</span> Start from clean <code>main</code></h3>
+          <p>Create one new branch from latest <code>origin/main</code> and transfer voice artifacts path-by-path. Preserve the old voice plans unchanged. Do not merge or broadly cherry-pick <code>codex/macos-voice-shortcut-guide</code>. Governs R17-R19. <strong>(session-settled: user-directed — chosen over continuing the mixed feature branch: the implementation must carry cleanly from <code>main</code>.)</strong></p>
+        </article>
+        <article class="card" id="ktd5">
+          <h3><span class="id-chip">KTD5.</span> Keep routing pure and orchestration narrow</h3>
+          <p>Use <code>src/voice-routing.ts</code> only for config/normalization and discriminated route results. Use <code>src/voice.ts</code> as the sole coordinator for selected-record resolution, runtime, validation, typed voice outcomes, and macOS side-effect order. Keep <code>src/app.ts</code> as dispatch/sanitized output and <code>index.ts</code> as dependency/signal composition. Expected voice failures return typed outcomes instead of escaping into the ordinary app catch. Governs R5-R16.</p>
+        </article>
+        <article class="card" id="ktd6">
+          <h3><span class="id-chip">KTD6.</span> Reuse one alias and runtime snapshot</h3>
+          <p>Load aliases once, route over the keys, then call <code>RuntimeGateway.generate</code> with the selected record and a per-stage signal composed from the root request plus the 45-second deadline while preserving cancellation provenance. This removes the Python inventory parser and self-subprocess without changing the alias store. Governs R3, R9, R11, and R16.</p>
+        </article>
+        <article class="card" id="ktd7">
+          <h3><span class="id-chip">KTD7.</span> Parse TOML with Bun and validate at runtime</h3>
+          <p>Use <code>Bun.TOML.parse</code> and the existing XDG/home conventions. Enforce the reference's closed schema, collision rules, stale-profile validation, finite numeric bounds, and reserved <code>wake_words</code> root key. Do not add a TOML dependency or change <code>aliases.json</code>. Governs R5, R10, and R14.</p>
+        </article>
+        <article class="card" id="ktd8">
+          <h3><span class="id-chip">KTD8.</span> Use library-owned Unicode case folding</h3>
+          <p>Use NFKC, exactly pinned <code>unicode-case-folding@1.1.1</code>, Unicode letter/number/mark token boundaries, and alphanumeric compact keys. Import only <code>caseFold</code> from the package root. Cover <code>ß</code>, Greek sigma, Turkish dotted I, full-width digits, combining marks, and astral input. Do not hand-maintain Unicode case-fold tables. Governs R6, R9, and R18.</p>
+        </article>
+        <article class="card" id="ktd9">
+          <h3><span class="id-chip">KTD9.</span> Make side effects ordered and cancellable</h3>
+          <p>Use an injectable voice-local Bun process adapter with fixed router-authored argv and payload bytes only on stdin. One root signal represents SIGINT/SIGTERM; one composed deadline signal belongs to each stage. Track exactly one active operation, classify completed/failed/timed-out/cancelled, terminate then force-kill if required, and await settlement before mapping R15. Governs R10-R16.</p>
+        </article>
+        <article class="card" id="ktd10">
+          <h3><span class="id-chip">KTD10.</span> Keep diagnostics and stdout on existing boundaries</h3>
+          <p><code>src/voice.ts</code> maps every expected stage result to a typed terminal outcome before the generic app catch. It redacts request-scoped transcript, prompt, answer, and speech payload values, then passes stable categories and permitted detail through <code>src/app.ts</code>'s existing sanitizer. Voice stdout stays empty; notices never contain request or child detail. Governs R12-R16.</p>
+        </article>
+        <article class="card" id="ktd11">
+          <h3><span class="id-chip">KTD11.</span> Test lazy WASM where it executes</h3>
+          <p>A compiled production-routing fixture must invoke fuzzy scoring twice on each matching macOS runner. Release binaries compile and pass ordinary smoke on all five targets, with the non-macOS voice guard tested separately. Static package evaluation is accepted, but help/version and non-macOS voice must not call <code>ratio</code> or initialize WASM. Record size deltas and audit both exact-pinned package manifests on every upgrade. Governs R18-R19.</p>
+        </article>
+      </div>
+
+      <h3>High-Level Technical Design</h3>
+      <p>The production path stays inside one executable until it reaches macOS-owned side effects. The Python path touches only shared fixtures and source CI; no production arrow reaches it.</p>
+      <div class="diagram" role="img" aria-label="Native voice routing component flow and independent Python parity lane">
+        <svg viewBox="0 0 920 510" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted)"/>
+            </marker>
+          </defs>
+          <rect class="accent-box" x="25" y="35" width="155" height="70" rx="12"/>
+          <text class="label" x="102" y="64" text-anchor="middle">macOS Shortcut</text>
+          <text class="small" x="102" y="84" text-anchor="middle">Dictated stdin</text>
+
+          <rect class="box" x="230" y="35" width="155" height="70" rx="12"/>
+          <text class="label" x="307" y="64" text-anchor="middle">CLI boundary</text>
+          <text class="small" x="307" y="84" text-anchor="middle">args + platform + input</text>
+
+          <rect class="accent-box" x="435" y="35" width="170" height="70" rx="12"/>
+          <text class="label" x="520" y="64" text-anchor="middle">Voice orchestrator</text>
+          <text class="small" x="520" y="84" text-anchor="middle">typed outcomes + stage order</text>
+
+          <rect class="box" x="665" y="35" width="210" height="70" rx="12"/>
+          <text class="label" x="770" y="64" text-anchor="middle">index.ts composition</text>
+          <text class="small" x="770" y="84" text-anchor="middle">voice-only root signal</text>
+
+          <path class="line" d="M 180 70 L 230 70"/>
+          <path class="line" d="M 385 70 L 435 70"/>
+          <path class="line" d="M 665 70 L 605 70"/>
+
+          <rect class="box" x="230" y="155" width="155" height="70" rx="12"/>
+          <text class="label" x="307" y="184" text-anchor="middle">Alias snapshot + TOML</text>
+          <text class="small" x="307" y="204" text-anchor="middle">readonly validated input</text>
+
+          <rect class="info-box" x="435" y="155" width="170" height="70" rx="12"/>
+          <text class="label" x="520" y="184" text-anchor="middle">Pure router</text>
+          <text class="small" x="520" y="204" text-anchor="middle">discriminated result only</text>
+
+          <rect class="box" x="655" y="155" width="220" height="70" rx="12"/>
+          <text class="label" x="765" y="184" text-anchor="middle">RuntimeGateway.generate</text>
+          <text class="small" x="765" y="204" text-anchor="middle">selected AliasRecord + signal</text>
+
+          <path class="line" d="M 520 105 L 520 155"/>
+          <path class="line" d="M 385 190 L 435 190"/>
+          <path class="line" d="M 605 70 L 635 70 L 635 135 L 765 135 L 765 155"/>
+
+          <rect class="box" x="655" y="275" width="220" height="70" rx="12"/>
+          <text class="label" x="765" y="304" text-anchor="middle">Coordinator validates</text>
+          <text class="small" x="765" y="324" text-anchor="middle">nonblank + speech-safe</text>
+          <path class="line" d="M 765 225 L 765 275"/>
+
+          <rect class="accent-box" x="430" y="275" width="175" height="70" rx="12"/>
+          <text class="label" x="517" y="304" text-anchor="middle">/usr/bin/pbcopy</text>
+          <text class="small" x="517" y="324" text-anchor="middle">exact answer commits first</text>
+
+          <rect class="accent-box" x="205" y="275" width="175" height="70" rx="12"/>
+          <text class="label" x="292" y="304" text-anchor="middle">/usr/bin/say</text>
+          <text class="small" x="292" y="324" text-anchor="middle">profile + trusted pitch</text>
+
+          <path class="line" d="M 655 310 L 605 310"/>
+          <path class="line" d="M 430 310 L 380 310"/>
+          <text class="small" x="405" y="375" text-anchor="middle">voice-local process adapter owns child lifecycle</text>
+
+          <rect class="info-box" x="50" y="410" width="210" height="65" rx="12"/>
+          <text class="label" x="155" y="438" text-anchor="middle">Shared JSON corpus</text>
+          <text class="small" x="155" y="458" text-anchor="middle">scores + route outcomes</text>
+
+          <rect class="box" x="355" y="410" width="200" height="65" rx="12"/>
+          <text class="label" x="455" y="438" text-anchor="middle">Bun test suite</text>
+          <text class="small" x="455" y="458" text-anchor="middle">native production modules</text>
+
+          <rect class="box" x="650" y="410" width="220" height="65" rx="12"/>
+          <text class="label" x="760" y="438" text-anchor="middle">Locked Python suite</text>
+          <text class="small" x="760" y="458" text-anchor="middle">source CI only</text>
+
+          <path class="dash" d="M 260 442 L 355 442"/>
+          <path class="dash" d="M 260 455 C 390 495, 540 495, 650 455"/>
+        </svg>
+      </div>
+
+      <h3>Branch and artifact transfer</h3>
+      <p>The implementation branch begins at the then-current <code>origin/main</code>. Recover files and reapply small hunks explicitly. Do not inherit the current branch ancestry.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Carry to the clean branch</th><th>Do not carry wholesale</th></tr></thead>
+          <tbody>
+            <tr><td>This HTML plan and the unchanged 2026-07-30 and 2026-08-05 voice plans</td><td><code>docs/plans/2026-07-26-001-docs-cookbook-campaign-plan.html</code></td></tr>
+            <tr><td><code>examples/macos-voice-router/**</code> and <code>examples/macos-voice-shortcut.md</code></td><td>The 769-line <code>examples/README.md</code> cookbook merely to obtain its voice links</td></tr>
+            <tr><td>Voice-specific hunks in <code>.gitignore</code>, CI, release-policy tests, README, and manual testing</td><td>Unrelated README/cookbook hunks or a broad commit cherry-pick</td></tr>
+            <tr><td><code>docs/residual-review-findings/c4602c5.md</code> with the Python reference</td><td>A native dependency on Python's <code>parse_inventory</code> behavior</td></tr>
+            <tr><td>A broadened <code>.changeset/quick-voices-answer.md</code> that describes native mode and the retained reference</td><td>The old changeset wording that presents uv as the user-facing product</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout warn">
+        <p class="eyebrow">Reconcile with current main</p>
+        <p>If <code>examples/README.md</code> or equivalent cookbook work has merged by execution time, edit that main-based file in place. Do not import the old branch version. Keep every changed line traceable to native voice routing or reference parity.</p>
+      </div>
+
+      <h3>Sequencing</h3>
+      <ol>
+        <li>U1 establishes the clean branch, transfers the oracle and plans, pins the dependency, and fixes the public CLI boundary.</li>
+        <li>U2 ports pure config/routing behavior and makes the shared corpus authoritative for the supported parity surface.</li>
+        <li>U3 connects the chosen alias to the existing runtime and implements ordered macOS side effects.</li>
+        <li>U4 hardens independent parity, compiled lazy-WASM coverage, CI, and release-size evidence.</li>
+        <li>U5 makes native mode the primary documented setup and preserves a contributor-only Python reference path.</li>
+      </ol>
+
+      <h3>Voice request precedence and timeouts</h3>
+      <ol>
+        <li>Parse arguments and reject illegal combinations.</li>
+        <li>Reject non-macOS before any read, dependency initialization, or side effect.</li>
+        <li>Resolve exactly one input source and classify invalid transcript bytes/content as a handled retry.</li>
+        <li>Check executable access for <code>/usr/bin/say</code> and <code>/usr/bin/pbcopy</code>.</li>
+        <li>Resolve and read voice-config bytes, including absolute-XDG enforcement.</li>
+        <li>Load and validate one alias snapshot. Treat a valid empty roster as the R15 retry outcome and malformed/unreadable storage as the R15 configuration outcome.</li>
+        <li>Parse TOML, route, and validate the selected voice/profile before generation.</li>
+      </ol>
+      <p>Native voice mode uses the existing 45,000 ms generation deadline. It retains 5,000 ms for voice inventory, 5,000 ms for clipboard, and 120,000 ms for notice/answer speech. The Python router's 50-second generation-process timeout was an outer containment guard around the core 45-second deadline and does not become a second native timer.</p>
+
+      <h3>Implementation Constraints</h3>
+      <ul>
+        <li>Use Bun commands and Bun tests. Do not introduce Node-only launch steps, npm scripts, Vite, or a dev server.</li>
+        <li>Keep ordinary typed CLI output byte-for-byte compatible. Voice behavior branches before the normal selection/generation output path.</li>
+        <li>Do not expand <code>src/app.ts</code> into the routing implementation. Keep pure behavior independently testable.</li>
+        <li>Do not make Bun tests invoke Python. The same fixtures must prove two independent implementations.</li>
+        <li>Use the case-fold package for Unicode mappings. Do not duplicate its generated tables or silently fall back to <code>toLowerCase()</code>.</li>
+        <li>Do not add test-only behavior to the shipping <code>llm-now</code> CLI merely to initialize WASM. Use a compiled fixture that imports production routing code.</li>
+        <li>Do not add a second summarization request, JSON response markers, shell interpolation, or model-authored speech commands.</li>
+      </ul>
+    </section>
+
+    <section id="system-wide-impact">
+      <p class="eyebrow">Cross-boundary effects</p>
+      <h2>System-Wide Impact</h2>
+      <p>KTD5 assigns one owner to each boundary. <code>index.ts</code> composes dependencies and installs voice-only process-signal handlers after dispatch and the macOS guard, then removes them in <code>finally</code>. <code>src/app.ts</code> owns parsing, platform dispatch, and sanitized terminal output. <code>src/voice-routing.ts</code> is pure. <code>src/voice.ts</code> owns the voice session and R15 outcome. The process adapter owns only one active child lifecycle.</p>
+
+      <h3>Interface impact matrix</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Surface</th><th>Change</th><th>Invariant / evidence</th></tr></thead>
+          <tbody>
+            <tr><td>CLI parser and help</td><td>Add standalone <code>--voice</code> with optional <code>--input</code>.</td><td>R1-R2; every ordinary mode and positional alias remains compatible.</td></tr>
+            <tr><td>Input and privacy</td><td>Shortcut uses stdin. <code>--input</code> remains a manual convenience whose content can appear in argv/process history.</td><td>R1, R4; documentation prefers stdin and warns about local argv exposure.</td></tr>
+            <tr><td>Alias/config storage</td><td>Read one alias snapshot and one separate voice TOML file; write neither.</td><td>R3, R5, R9; valid-empty and malformed/unreadable storage have distinct R15 outcomes.</td></tr>
+            <tr><td>Runtime and credentials</td><td>Reuse the selected <code>AliasRecord</code>, credential resolution, and <code>RuntimeGateway.generate</code> abort signal.</td><td>R11, R16; runtime tests cover pre-aborted and post-setup abort checks without changing ordinary calls.</td></tr>
+            <tr><td>Output channels</td><td>Voice stdout is empty. Stable categories go to sanitized stderr; validated answer goes to clipboard then speech.</td><td>R12-R15; request-scoped values never appear in diagnostics or notices.</td></tr>
+            <tr><td>macOS processes</td><td>Start absolute <code>pbcopy</code>/<code>say</code> commands through an injectable adapter.</td><td>R10, R13, R16; fixed argv, stdin payloads, one active operation, deadline/reap tests.</td></tr>
+            <tr><td>Persistent local state</td><td>The answer remains on the global clipboard after success or post-copy speech failure.</td><td>R13, R15; no confidentiality or automatic-clear promise.</td></tr>
+            <tr><td>Native packaging</td><td>Statically bundle two exact-pinned ESM packages and embedded WASM into all five executables.</td><td>R8, R19; frozen lock, manifest audit, compile/start matrix, lazy-WASM smoke, size report.</td></tr>
+            <tr><td>Python parity</td><td>Retain a source-only reference with shared fixture ownership.</td><td>R17-R18; no Python in native jobs or release archives.</td></tr>
+            <tr><td>Concurrent Shortcuts</td><td>No global mutex or queue is added.</td><td>Deferred; guide tells users to let one request finish before starting another.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Failure propagation and cleanup</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Stage</th><th>Owner</th><th>Cleanup obligation</th><th>Permitted next action</th><th>Terminal mapping</th></tr></thead>
+          <tbody>
+            <tr><td>Arguments / platform</td><td><code>src/app.ts</code></td><td>None; no voice session exists.</td><td>None on failure.</td><td>R15 usage or platform result.</td></tr>
+            <tr><td>Input / config / aliases / route</td><td><code>src/voice.ts</code> with pure routing</td><td>Remove signal handlers if installed; no child exists.</td><td>Only the R15 notice allowed for that typed outcome.</td><td>R15 retry or configuration result.</td></tr>
+            <tr><td>Generation</td><td><code>src/voice.ts</code> + <code>RuntimeGateway</code></td><td>Abort and await settlement; re-check the root signal after async setup.</td><td>Request-failed notice after a stage timeout/failure; none after root cancellation.</td><td>R15 request failure or exit 130.</td></tr>
+            <tr><td>Clipboard</td><td>Voice process adapter</td><td>Terminate/reap the sole child and clear active state after settlement.</td><td>Copy-failed notice after timeout/failure; none after root cancellation; never answer speech.</td><td>R15 copy failure or exit 130.</td></tr>
+            <tr><td>Answer speech</td><td>Voice process adapter</td><td>Terminate/reap and clear active state.</td><td>No later operation or replacement notice.</td><td>R15 speech failure or exit 130; copied answer persists.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="implementation-units">
+      <p class="eyebrow">Executable work packets</p>
+      <h2>Implementation Units</h2>
+
+      <article class="unit" id="u1">
+        <h3><span class="id-chip">U1.</span> Establish the clean branch and CLI boundary</h3>
+        <dl class="unit-meta">
+          <div><dt>Goal</dt><dd>Create the main-based execution surface without mixed-branch ancestry.</dd></div>
+          <div><dt>Requirements</dt><dd>R1-R4, R8, R17</dd></div>
+          <div><dt>Dependencies</dt><dd>None</dd></div>
+          <div><dt>Primary files</dt><dd><code>src/args.ts</code>, <code>package.json</code>, <code>bun.lock</code>, plans and parity artifacts</dd></div>
+        </dl>
+        <div class="callout info"><p class="eyebrow">Execution note</p><p>Start from latest <code>origin/main</code>. Transfer the plan and reference allowlist before editing production code. Verify the branch diff does not contain cookbook campaign ancestry.</p></div>
+        <details>
+          <summary>Approach</summary>
+          <ol>
+            <li>Create <code>codex/native-macos-voice</code> at latest <code>origin/main</code>.</li>
+            <li>Transfer the new plan, historical voice plans, Python example, guide, and voice-only supporting hunks from KTD4.</li>
+            <li>Add <code>@3leaps/string-metrics-wasm</code> at exact version <code>0.3.11</code> and <code>unicode-case-folding</code> at exact version <code>1.1.1</code> with Bun, then commit the lockfile change.</li>
+            <li>Add the parsed <code>voice</code> mode, standalone option rules, help text, and fail-before-read platform guard from KTD1.</li>
+            <li>Expose strict UTF-8 reading below <code>resolvePrompt</code> so ordinary blank-input semantics stay unchanged while voice mode can classify retryable dictated input.</li>
+          </ol>
+        </details>
+        <details>
+          <summary>Test scenarios</summary>
+          <ul>
+            <li><code>--voice</code> accepts stdin or <code>--input</code>, but never both.</li>
+            <li><code>--voice</code> rejects selection flags and positionals; positional <code>voice</code> still parses as an alias.</li>
+            <li>Non-macOS voice mode does not read stdin/config/aliases or initialize injected voice dependencies.</li>
+            <li>The metric and case-fold dependencies resolve exactly <code>0.3.11</code> and <code>1.1.1</code>.</li>
+          </ul>
+        </details>
+        <details>
+          <summary>Verification</summary>
+          <p><code>bun test tests/args.test.ts tests/app.test.ts</code>, <code>bun run typecheck</code>, and a reviewed <code>git diff --name-status origin/main...HEAD</code>.</p>
+        </details>
+      </article>
+
+      <article class="unit" id="u2">
+        <h3><span class="id-chip">U2.</span> Port pure configuration and routing</h3>
+        <dl class="unit-meta">
+          <div><dt>Goal</dt><dd>Make the supported Python routing contract deterministic and testable in TypeScript.</dd></div>
+          <div><dt>Requirements</dt><dd>R5-R9, R12, R14, R18</dd></div>
+          <div><dt>Dependencies</dt><dd>U1</dd></div>
+          <div><dt>Primary files</dt><dd><code>src/voice-routing.ts</code>, <code>tests/voice-routing.test.ts</code>, shared JSON fixtures, Python tests</dd></div>
+        </dl>
+        <div class="callout info"><p class="eyebrow">Execution note</p><p>Write the shared score/route fixtures first. Make the existing Python suite consume them before porting the TypeScript router, so every native decision has a reference result.</p></div>
+        <details>
+          <summary>Approach</summary>
+          <ol>
+            <li>Define typed immutable <code>VoiceConfig</code>, <code>AliasProfile</code>, token, and route-result values.</li>
+            <li>Use <code>Bun.TOML.parse</code> behind exact runtime validation from KTD7.</li>
+            <li>Port compact keys, token offsets, wake views, longest exact/configured stages, and fuzzy candidate generation.</li>
+            <li>Call only <code>ratio(candidateKey, aliasKey)</code>. Apply R7 without pre-rounding.</li>
+            <li>Port voice-inventory parsing and unsafe-response validation as pure functions.</li>
+            <li>Add shared corpus loaders to Bun and Python. Keep orchestration-specific tests separate.</li>
+          </ol>
+        </details>
+        <details>
+          <summary>Test scenarios</summary>
+          <ul>
+            <li>Canonical, configured, wake-word, longest-span, missing-question, and original-question preservation.</li>
+            <li>Score and margin immediately below, at, and above R7 boundaries.</li>
+            <li>Shortest-span tie behavior, deterministic alias ordering, length guard, and digit guard.</li>
+            <li>NFKC compatibility forms, composed/decomposed marks, <code>ß</code>, Greek sigma, Turkish dotted I, full-width digits, and astral input match Python normalization and question offsets.</li>
+            <li>Closed TOML schema, duplicate/colliding phrases, stale profiles, reserved root name, finite rate/pitch, and installed voice parsing.</li>
+            <li>Unsafe answer controls and trusted pitch formatting remain distinct.</li>
+          </ul>
+        </details>
+        <details>
+          <summary>Verification</summary>
+          <p><code>bun test tests/voice-routing.test.ts</code> and <code>uv run --project examples/macos-voice-router --locked python -m unittest discover -s examples/macos-voice-router/tests</code>.</p>
+        </details>
+      </article>
+
+      <article class="unit" id="u3">
+        <h3><span class="id-chip">U3.</span> Connect runtime, clipboard, and speech</h3>
+        <dl class="unit-meta">
+          <div><dt>Goal</dt><dd>Execute one accepted native request with exact safety and side-effect ordering.</dd></div>
+          <div><dt>Requirements</dt><dd>R3, R9-R16</dd></div>
+          <div><dt>Dependencies</dt><dd>U2</dd></div>
+          <div><dt>Primary files</dt><dd><code>src/voice.ts</code>, <code>src/app.ts</code>, <code>src/runtime.ts</code>, <code>index.ts</code>, voice/app/runtime tests</dd></div>
+        </dl>
+        <div class="callout info"><p class="eyebrow">Execution note</p><p>Begin with fake-runner tests for the R15 matrix. No unit test may invoke a real provider, <code>pbcopy</code>, or <code>say</code>.</p></div>
+        <details>
+          <summary>Approach</summary>
+          <ol>
+            <li>Add an injectable voice process interface and a Bun implementation that uses fixed argv, stdin payloads, per-stage deadlines, root cancellation, and reaping.</li>
+            <li>Load one alias snapshot, config bytes, and optional voice inventory before generation.</li>
+            <li>Resolve the selected record from the same snapshot and call the runtime directly with combined cancellation/timeout state.</li>
+            <li>Install voice-only SIGINT/SIGTERM handlers through the composition boundary after parse/platform checks, pass the root signal into the session, and remove handlers in <code>finally</code>.</li>
+            <li>Have <code>RuntimeGateway.generate</code> honor a pre-aborted signal and re-check after asynchronous provider/credential setup.</li>
+            <li>Classify every expected voice result before the generic app catch and redact request-scoped values before the shared sanitizer.</li>
+            <li>Encode one answer payload, copy it, then derive the optional pitch-prefixed speech payload.</li>
+            <li>Implement every R15 terminal state and leave stdout empty.</li>
+          </ol>
+        </details>
+        <details>
+          <summary>Test scenarios</summary>
+          <ul>
+            <li>Exact call order for preflight, optional voice inventory, generation, copy, and speech.</li>
+            <li>One loaded alias snapshot and one runtime call; no self-subprocess.</li>
+            <li>Fake errors echo transcript, prompt, answer, speech, API-key, path, ANSI, and control sentinels; none reach stderr or notices.</li>
+            <li>Answers beginning with <code>-v</code>, <code>--</code>, quotes, newlines, and shell metacharacters remain stdin bytes and never alter argv/environment.</li>
+            <li>Provider, blank response, unsafe response, copy, and speech failures match R15.</li>
+            <li>Root cancellation before start and during generation/copy/speech suppresses notices, prevents every later step, and exits 130.</li>
+            <li>Each stage timeout reaps only that operation and maps to its R15 notice/failure unless the root signal has also aborted.</li>
+            <li>Speech failure after copy preserves the answer without speaking a replacement notice.</li>
+          </ul>
+        </details>
+        <details>
+          <summary>Verification</summary>
+          <p><code>bun test tests/voice.test.ts tests/app.test.ts tests/runtime.test.ts</code>, <code>bun run typecheck</code>, and <code>bun run check</code>.</p>
+        </details>
+      </article>
+
+      <article class="unit" id="u4">
+        <h3><span class="id-chip">U4.</span> Enforce parity and native packaging</h3>
+        <dl class="unit-meta">
+          <div><dt>Goal</dt><dd>Prove the reference, embedded scorer, and release matrix remain healthy.</dd></div>
+          <div><dt>Requirements</dt><dd>R17-R19</dd></div>
+          <div><dt>Dependencies</dt><dd>U2, U3</dd></div>
+          <div><dt>Primary files</dt><dd>CI, release validation, compile fixtures, <code>tests/release-policy.test.ts</code>, <code>scripts/build.ts</code></dd></div>
+        </dl>
+        <div class="callout info"><p class="eyebrow">Execution note</p><p>Exercise <code>ratio()</code> in a compiled production-routing fixture. Help/version alone cannot prove the lazily initialized WASM works.</p></div>
+        <details>
+          <summary>Approach</summary>
+          <ol>
+            <li>Keep Python 3.11 and pinned uv in source CI only, after <code>bun run check</code>.</li>
+            <li>Add a compiled fixture that imports production routing code and performs first plus repeated fuzzy scores on host-native macOS targets without provider or OS side effects.</li>
+            <li>Build all existing release targets. Run ordinary smoke and the macOS-only guard on non-macOS runners.</li>
+            <li>Assert that no sibling <code>.wasm</code> file or runtime asset is required.</li>
+            <li>Record the published tarball/file list, license, lifecycle scripts, runtime dependencies, and lock integrity for both new exact-pinned packages; repeat this review for every upgrade.</li>
+            <li>Measure and record before/after executable and archive bytes for every target in the PR.</li>
+            <li>Update release-policy assertions so Python never leaks into native/release jobs.</li>
+          </ol>
+        </details>
+        <details>
+          <summary>Test scenarios</summary>
+          <ul>
+            <li>First and second compiled <code>ratio()</code> calls return expected 0–100 scores.</li>
+            <li>Help/version and non-macOS voice never call <code>ratio</code> or initialize WASM even though static ESM modules are bundled.</li>
+            <li>Both macOS targets compile the embedded WASM; Linux and Windows still start and reject voice before initialization.</li>
+            <li>Source CI runs both independent suites; native jobs install only Bun/project dependencies.</li>
+            <li>Archive manifest, signature repair, native credential gate, and release assembly remain unchanged.</li>
+          </ul>
+        </details>
+        <details>
+          <summary>Verification</summary>
+          <p><code>bun run check</code>, the locked Python command, <code>bun run build:native</code>, <code>bun run release:validate</code>, and the full five-target GitHub Actions matrix. Host/target-specific checks remain CI-authoritative.</p>
+        </details>
+      </article>
+
+      <article class="unit" id="u5">
+        <h3><span class="id-chip">U5.</span> Publish native setup and retain the reference path</h3>
+        <dl class="unit-meta">
+          <div><dt>Goal</dt><dd>Make the installed binary the obvious user path without erasing the Python oracle.</dd></div>
+          <div><dt>Requirements</dt><dd>R4, R8, R14, R17-R19</dd></div>
+          <div><dt>Dependencies</dt><dd>U3, U4</dd></div>
+          <div><dt>Primary files</dt><dd><code>examples/macos-voice-shortcut.md</code>, <code>README.md</code>, <code>docs/manual-testing.md</code>, Changeset</dd></div>
+        </dl>
+        <div class="callout info"><p class="eyebrow">Execution note</p><p>Rewrite the guide around <code>llm-now --voice</code>. Keep a contributor-only section for running the Python reference and parity tests. Do not delete or hide it.</p></div>
+        <details>
+          <summary>Approach</summary>
+          <ol>
+            <li>Reduce Shortcut prerequisites to macOS Dictation, installed <code>llm-now</code>, and one working alias.</li>
+            <li>Replace the uv launcher with an absolute installed <code>llm-now --voice</code> invocation and retain credential privacy guidance.</li>
+            <li>Use stdin in every Shortcut example; describe <code>--input</code> as a manual option that can expose text through process arguments.</li>
+            <li>Preserve matching, TOML, voice/rate/pitch, clipboard, cancellation, and recovery documentation.</li>
+            <li>Warn that Dictation may use Apple services, hosted aliases send the transcript to their provider, speech is audible, and the global clipboard persists until replaced.</li>
+            <li>Add a clearly separate contributor section for the retained uv/Python oracle.</li>
+            <li>Update README and cookbook links only where those files exist on the main-based branch.</li>
+            <li>Broaden the existing unreleased Changeset to describe native mode and the retained reference.</li>
+          </ol>
+        </details>
+        <details>
+          <summary>Test scenarios</summary>
+          <ul>
+            <li>A clean timed walkthrough reaches a spoken answer without uv or a checkout.</li>
+            <li>The guide distinguishes local and hosted aliases, advises against sensitive dictation in an unsuitable setting, and makes no clipboard-clearing promise.</li>
+            <li>Exact, configured, unique fuzzy, poor, and ambiguous routes follow the guide.</li>
+            <li>Clipboard sentinel, pitch A/B, local/hosted provider, cancellation, permissions, and recovery checks remain present.</li>
+            <li>The contributor command still runs the locked Python suite.</li>
+          </ul>
+        </details>
+        <details>
+          <summary>Verification</summary>
+          <p>Run documentation link checks already covered by <code>bun test</code>, perform the native macOS manual matrix, and confirm the guide never presents Python or uv as a release-user prerequisite.</p>
+        </details>
+      </article>
+    </section>
+
+    <section id="verification-contract">
+      <p class="eyebrow">Evidence required to ship</p>
+      <h2>Verification Contract</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Gate</th><th>Scope</th><th>Expected result</th></tr></thead>
+          <tbody>
+            <tr><td><code>bun test tests/args.test.ts tests/voice-routing.test.ts tests/voice.test.ts tests/app.test.ts tests/runtime.test.ts tests/release-policy.test.ts tests/build.test.ts</code></td><td>U1-U4</td><td>CLI, pure routing, orchestration, cancellation-aware runtime, app integration, CI policy, and build contracts pass without real side effects.</td></tr>
+            <tr><td><code>bun run typecheck</code></td><td>U1-U4</td><td>Package declarations and all new boundaries typecheck under TypeScript 5.9.3.</td></tr>
+            <tr><td><code>bun run runtime:smoke</code></td><td>U1, U4</td><td>The compiled CLI keeps existing output contracts and the compiled production-routing fixture executes first and repeated ratio calls.</td></tr>
+            <tr><td><code>bun run check</code></td><td>All code units</td><td>Full Bun suite, typecheck, and compile smoke pass.</td></tr>
+            <tr><td><code>uv run --project examples/macos-voice-router --locked python -m unittest discover -s examples/macos-voice-router/tests</code></td><td>U2, U4</td><td>All retained tests plus shared-corpus assertions pass independently.</td></tr>
+            <tr><td><code>bun scripts/build.ts --target &lt;target&gt; --outdir dist</code> and <code>bun scripts/release-validate.ts archives dist</code></td><td>U4</td><td>Each matching CI runner builds one valid single-executable archive with no sibling WASM asset.</td></tr>
+            <tr><td><code>bun scripts/release-validate.ts smoke dist/*.zip</code></td><td>U4</td><td>All five archives start; normal commands remain compatible; non-macOS voice rejects at the platform gate.</td></tr>
+            <tr><td>Before/after size report</td><td>U4</td><td>PR records uncompressed executable and compressed archive byte deltas for all five targets, with any surprising growth explained.</td></tr>
+            <tr><td>MT-39 native macOS matrix</td><td>U5</td><td>Two-action Shortcut, routes, notices, clipboard, per-alias speech, pitch A/B, cancellation, permissions, privacy, and recovery behave as documented.</td></tr>
+            <tr><td><code>git diff --name-status origin/main...HEAD</code></td><td>All units</td><td>Every file is voice-specific; no cookbook campaign or unrelated branch ancestry appears.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout warn">
+        <p class="eyebrow">CI authority</p>
+        <p>The full architecture matrix is verified on its matching GitHub Actions runners. Local macOS work should run the matching target and all source checks, but it must not claim host-incompatible release targets were executed locally.</p>
+      </div>
+    </section>
+
+    <section id="definition-of-done">
+      <p class="eyebrow">Completion contract</p>
+      <h2>Definition of Done</h2>
+
+      <h3>Global</h3>
+      <ul>
+        <li>A release user can run the documented two-action Shortcut through the installed <code>llm-now --voice</code> without Python, uv, or a checkout.</li>
+        <li>R1-R19 and AE1-AE11 are verified, and ordinary CLI behavior remains unchanged.</li>
+        <li><code>@3leaps/string-metrics-wasm</code> is exactly pinned at <code>0.3.11</code>, and <code>unicode-case-folding</code> is exactly pinned at <code>1.1.1</code>; no local metric or Unicode-table implementation, loose WASM asset, or extra Rust toolchain exists.</li>
+        <li>The entire Python example, tests, and lockfile remain available and enforced in source CI only.</li>
+        <li>Every release target builds and launches, compiled macOS fuzzy scoring initializes successfully, and the PR contains size-delta evidence.</li>
+        <li>Root cancellation and stage timeouts remain distinct; all request sentinels stay out of diagnostics, argv, environment, and temporary files.</li>
+        <li>The guide documents Dictation/provider/audio/clipboard privacy boundaries and uses stdin for the supported Shortcut.</li>
+        <li>The branch is based directly on current <code>main</code>, includes this plan and relevant historical artifacts, and contains no unrelated cookbook ancestry.</li>
+        <li>Automated work is committed, pushed, and opened as one focused pull request with manual-test instructions.</li>
+        <li>Abandoned experiments, duplicate helpers, test-only production switches, and unused imports are removed before completion.</li>
+      </ul>
+
+      <h3>Per Unit</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Unit</th><th>Done when</th></tr></thead>
+          <tbody>
+            <tr><td><a href="#u1">U1.</a></td><td>The clean branch contains only the selective voice transplant, exact dependency pin, documented CLI mode, and platform/input tests.</td></tr>
+            <tr><td><a href="#u2">U2.</a></td><td>Pure TypeScript routing matches the shared supported corpus and preserves all closed config and speech-safety rules.</td></tr>
+            <tr><td><a href="#u3">U3.</a></td><td>Every R15 outcome and R16 cancellation path passes with fake dependencies, one runtime call, empty stdout, and exact side-effect order.</td></tr>
+            <tr><td><a href="#u4">U4.</a></td><td>Independent Bun/Python parity, compiled lazy-WASM smoke, all release targets, CI policy, and size reporting pass.</td></tr>
+            <tr><td><a href="#u5">U5.</a></td><td>Native setup is primary, Python remains discoverable for contributors, manual checks are current, and the Changeset describes the combined result.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="appendix">
+      <p class="eyebrow">Research, risks, and references</p>
+      <h2>Appendix</h2>
+
+      <h3>Risks and Dependencies</h3>
+      <nav class="toc" aria-label="Risk navigation">
+        <strong>Risk index</strong>
+        <ul>
+          <li><a href="#risk-metric">Metric package</a></li>
+          <li><a href="#risk-unicode">Unicode package</a></li>
+          <li><a href="#risk-size">Binary size</a></li>
+          <li><a href="#risk-privacy">Voice privacy</a></li>
+          <li><a href="#risk-partial">Partial state</a></li>
+          <li><a href="#risk-inventory">Python inventory</a></li>
+          <li><a href="#risk-pitch">Pitch behavior</a></li>
+        </ul>
+      </nav>
+      <div class="risk-grid">
+        <article class="risk warn" id="risk-metric"><p class="eyebrow">Risk · mitigated</p><h3>Major-zero metric package</h3><p>Version <code>0.3.11</code> is pre-1.0, and older releases had standalone packaging defects. Exact pinning, frozen-lock/file-list review, shared parity, and all-target compile smoke make updates deliberate.</p></article>
+        <article class="risk warn" id="risk-unicode"><p class="eyebrow">Risk · pinned and tested</p><h3>Unicode fold dependency</h3><p>JavaScript lacks Python-equivalent full case folding. A 29,496-byte unpacked MIT package supplies mappings from the Unicode database; the exact pin and shared corpus guard its small but load-bearing surface.</p></article>
+        <article class="risk info" id="risk-size"><p class="eyebrow">Risk · measured</p><h3>Binary size growth</h3><p>The package embeds one WASM module for all metrics. The npm artifact is about 530 KB unpacked and a prior ratio-only Bun bundle added about 325 KB. Actual executable and archive deltas are recorded per target.</p></article>
+        <article class="risk warn" id="risk-privacy"><p class="eyebrow">Risk · disclosed and bounded</p><h3>Voice and clipboard privacy</h3><p>Dictation, a hosted selected provider, audible speech, argv-based manual input, and the global persistent clipboard are separate exposure points. The guide names each boundary; production diagnostics never echo request payloads.</p></article>
+        <article class="risk danger" id="risk-partial"><p class="eyebrow">Risk · explicit partial state</p><h3>Speech can fail after copy</h3><p>Copy commits before speech. If speech fails, the useful answer remains on the clipboard and the tool exits 1 without speaking a replacement notice.</p></article>
+        <article class="risk good" id="risk-inventory"><p class="eyebrow">Risk · isolated</p><h3>Python inventory presentation defect</h3><p>The known Python <code>parse_inventory</code> issue does not enter native code because native mode loads aliases directly. Shared parity focuses on config/routing outcomes; reference-specific inventory tests remain independent.</p></article>
+        <article class="risk warn" id="risk-pitch"><p class="eyebrow">Risk · manual gate</p><h3>Voice-dependent pitch behavior</h3><p>Tests prove the trusted payload. The guide still requires audible A/B checks because a successful <code>say</code> process does not prove every installed voice renders pitch distinctly.</p></article>
+      </div>
+
+      <h3>Research Findings That Shape the Plan</h3>
+      <ul>
+        <li><code>@3leaps/string-metrics-wasm@0.3.11</code> exposes synchronous <code>ratio(a, b): number</code>. Its Rust binding calls RapidFuzz-rs normalized ratio and multiplies by 100, which aligns with Python RapidFuzz's normalized Indel definition.</li>
+        <li>The package embeds base64 WASM and lazily initializes on the first metric call. Import does not require a filesystem asset. This fixes a Bun standalone startup problem present before 0.3.9.</li>
+        <li>The package has TypeScript declarations, MIT licensing, no runtime dependencies, a 183,969-byte tarball, and a 529,996-byte unpacked artifact at 0.3.11.</li>
+        <li>Algorithm and scale equivalence do not guarantee bit-identical floats between Python RapidFuzz and RapidFuzz-rs. Route decisions are exact; raw score comparisons use a tight tolerance.</li>
+        <li><code>unicode-case-folding@1.1.1</code> is an ESM MIT package with declarations, no runtime dependencies, and a 29,496-byte unpacked artifact. It supplies full Unicode case folding so the port does not recreate Unicode tables.</li>
+        <li>The current repository already provides the right seams: <code>loadAliases</code>, <code>RuntimeGateway.generate(signal)</code>, strict UTF-8 input, sanitized diagnostics, exact-pinned dependencies, and a five-target native matrix.</li>
+        <li>No institutional <code>docs/solutions/</code> corpus exists, so current code, tests, historical voice plans, and the retained example are the authoritative repository evidence.</li>
+      </ul>
+
+      <h3>Sources and References</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Source</th><th>Planning use</th></tr></thead>
+          <tbody>
+            <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/examples/macos-voice-router/src/llm_now_voice/cli.py">Python voice router</a></td><td>Behavioral reference for routing, config, notices, side-effect order, and cancellation.</td></tr>
+            <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/examples/macos-voice-router/tests/test_cli.py">Python voice tests</a></td><td>Existing reference coverage and shared-corpus consumer.</td></tr>
+            <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/docs/plans/2026-07-30-001-feat-macos-voice-shortcut-plan.md">Historical macOS voice plan</a></td><td>Behavioral contract retained; Python-as-user-runtime and no-core-command decisions are superseded.</td></tr>
+            <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/docs/plans/2026-08-05-001-feat-per-alias-speech-pitch-plan.md">Historical pitch plan</a></td><td>Trusted pitch and clipboard/speech separation remain authoritative.</td></tr>
+            <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/app.ts">Application boundary</a></td><td>Dependency injection, diagnostic redaction, generation timeout, and output contracts.</td></tr>
+            <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/args.ts">Argument parser</a></td><td>Standalone-mode and positional-alias patterns.</td></tr>
+            <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/src/aliases.ts">Alias store</a></td><td>Direct canonical alias snapshot and XDG conventions.</td></tr>
+            <tr><td><a href="https://github.com/swartzrock/llm-now/blob/main/scripts/build.ts">Native build matrix</a></td><td>Five current release targets and single-executable packaging.</td></tr>
+            <tr><td><a href="https://github.com/3leaps/string-metrics-wasm/tree/v0.3.11">string-metrics-wasm v0.3.11</a></td><td>Exact API, Bun standalone support, embedded WASM, license, and version policy.</td></tr>
+            <tr><td><a href="https://github.com/3leaps/string-metrics-wasm/blob/v0.3.11/src/lib.rs">v0.3.11 ratio binding</a></td><td>RapidFuzz-rs ratio implementation and 0–100 scale.</td></tr>
+            <tr><td><a href="https://github.com/3leaps/string-metrics-wasm/blob/v0.3.11/src/wasm.ts">v0.3.11 WASM loader</a></td><td>Embedded bytes and lazy synchronous initialization.</td></tr>
+            <tr><td><a href="https://github.com/3leaps/string-metrics-wasm/blob/v0.3.11/docs/releases/v0.3.9.md">v0.3.9 release note</a></td><td>Why older versions are not acceptable for Bun standalone executables.</td></tr>
+            <tr><td><a href="https://rapidfuzz.github.io/RapidFuzz/Usage/fuzz.html#rapidfuzz.fuzz.ratio">RapidFuzz ratio documentation</a></td><td>Normalized Indel definition, processor behavior, and score scale.</td></tr>
+            <tr><td><a href="https://bun.com/docs/bundler/executables">Bun standalone executables</a></td><td>Compile and cross-target packaging validation.</td></tr>
+            <tr><td><a href="https://semver.org/spec/v2.0.0.html#spec-item-4">Semantic Versioning 2.0.0 §4</a></td><td>Manual review policy for a 0.y.z dependency.</td></tr>
+            <tr><td><a href="https://www.npmjs.com/package/unicode-case-folding/v/1.1.1">unicode-case-folding 1.1.1</a></td><td>Unicode Default Case Folding API, declarations, license, and generated mapping ownership.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Supersession Notes</h3>
+      <p>This plan preserves the historical plans as records. It supersedes only these earlier implementation choices: Python/uv as the required user path, subprocess parsing of <code>llm-now --aliases</code>, subprocess generation through <code>llm-now</code>, and the decision to avoid a core voice command. The routing gates, closed TOML profile, stable notices, copy-before-speak order, response safety, per-alias speech settings, and pitch trust boundary remain in force.</p>
+    </section>
+  </main>
+
+  <footer class="composition-signal">Composed 2026-08-06T21:46:05Z by <code>compound-engineering:ce-plan</code> from the 2026-08-06 user prompt context, repository research, retained Python reference, and cited primary sources.</footer>
+</body>
+</html>
