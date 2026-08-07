@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import unittest
 import signal
 import subprocess
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from llm_now_voice.cli import (
@@ -12,6 +14,7 @@ from llm_now_voice.cli import (
     ProcessTimedOut,
     SubprocessRunner,
     VoiceRouterError,
+    compact_key,
     main,
     parse_config,
     parse_inventory,
@@ -22,6 +25,66 @@ from llm_now_voice.cli import (
 
 
 ALIASES = ("deepseek32", "fred", "haiku", "local", "opus47", "qwen", "terra")
+PARITY_CORPUS = json.loads(
+    (Path(__file__).parent / "fixtures" / "routing-parity.json").read_text(
+        encoding="utf-8"
+    )
+)
+
+
+class RoutingParityCorpusTests(unittest.TestCase):
+    def test_normalization_corpus(self) -> None:
+        for case in PARITY_CORPUS["normalization"]:
+            with self.subTest(case=case["id"]):
+                self.assertEqual(compact_key(case["input"]), case["compact"])
+
+    def test_raw_score_corpus(self) -> None:
+        from rapidfuzz import fuzz
+
+        for case in PARITY_CORPUS["scores"]:
+            with self.subTest(case=case["id"]):
+                left = compact_key(case["left"]) if case.get("normalize") else case["left"]
+                right = compact_key(case["right"]) if case.get("normalize") else case["right"]
+                self.assertAlmostEqual(
+                    fuzz.ratio(left, right, processor=None), case["expected"], places=10
+                )
+
+    def test_route_corpus_with_unicode_scalar_offsets(self) -> None:
+        for case in PARITY_CORPUS["routes"]:
+            with self.subTest(case=case["id"]):
+                aliases = tuple(case["aliases"])
+                config_text = case.get("config_toml")
+                config = parse_config(
+                    config_text.encode("utf-8") if config_text is not None else None,
+                    aliases,
+                )
+                result = route_transcript(case["transcript"], aliases, config)
+                expected = case["expected"]
+
+                self.assertEqual(result.alias, expected["alias"])
+                self.assertEqual(result.question, expected["question"])
+                self.assertEqual(result.reason, expected["reason"])
+                if expected["similarity"] is None:
+                    self.assertIsNone(result.similarity)
+                else:
+                    self.assertAlmostEqual(
+                        result.similarity or 0, expected["similarity"], places=10
+                    )
+                if expected["runner_up_similarity"] is None:
+                    self.assertIsNone(result.runner_up_similarity)
+                else:
+                    self.assertAlmostEqual(
+                        result.runner_up_similarity or 0,
+                        expected["runner_up_similarity"],
+                        places=10,
+                    )
+
+                question_offset = (
+                    len(case["transcript"]) - len(result.question)
+                    if result.question is not None
+                    else None
+                )
+                self.assertEqual(question_offset, expected["question_offset"])
 
 
 class InventoryTests(unittest.TestCase):

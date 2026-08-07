@@ -1,0 +1,493 @@
+{
+  "normalization": [
+    { "id": "nfkc_full_width", "input": "Ｏｐｕｓ４７", "compact": "opus47" },
+    { "id": "sharp_s", "input": "Straße", "compact": "strasse" },
+    { "id": "greek_sigma", "input": "ΟΣς", "compact": "οσσ" },
+    { "id": "turkish_dotted_i", "input": "İ", "compact": "i" },
+    { "id": "composed_mark", "input": "Café", "compact": "café" },
+    { "id": "decomposed_mark", "input": "Café", "compact": "café" },
+    { "id": "astral_case_fold", "input": "𐐀", "compact": "𐐨" }
+  ],
+  "scores": [
+    {
+      "id": "threshold_below",
+      "boundary": "threshold",
+      "left": "abcdefghijklmnopqrst",
+      "right": "abcdefghijkluuuuuuuu",
+      "expected": 60
+    },
+    {
+      "id": "threshold_at",
+      "boundary": "threshold",
+      "left": "abcdefghijklmnopqrst",
+      "right": "abcdefghijklmuuuuuuu",
+      "expected": 65
+    },
+    {
+      "id": "threshold_above",
+      "boundary": "threshold",
+      "left": "abcdefghijklmnopqrst",
+      "right": "abcdefghijklmnmmmmmm",
+      "expected": 70
+    },
+    {
+      "id": "margin_best",
+      "boundary": "margin",
+      "left": "abcdefghijklmnopqrst",
+      "right": "abcdefghijklmnopuuuu",
+      "expected": 80
+    },
+    {
+      "id": "margin_below_runner_up",
+      "boundary": "margin",
+      "left": "abcdefghijklmnvvvvvv",
+      "right": "abcdefghijklmnopuuuu",
+      "expected": 70
+    },
+    {
+      "id": "margin_at_runner_up",
+      "boundary": "margin",
+      "left": "abcdefghijklmvvvvvvv",
+      "right": "abcdefghijklmnopuuuu",
+      "expected": 65
+    },
+    {
+      "id": "margin_above_runner_up",
+      "boundary": "margin",
+      "left": "abcdefghijklvvvvvvvv",
+      "right": "abcdefghijklmnopuuuu",
+      "expected": 60
+    },
+    {
+      "id": "length_allowed",
+      "boundary": "length",
+      "left": "terra",
+      "right": "terrax",
+      "expected": 90.9090909090909
+    },
+    {
+      "id": "length_rejected_despite_score",
+      "boundary": "length",
+      "left": "terra",
+      "right": "terraxx",
+      "expected": 83.33333333333334
+    },
+    {
+      "id": "matching_digits",
+      "boundary": "digits",
+      "left": "opus47",
+      "right": "opas47",
+      "expected": 83.33333333333334
+    },
+    {
+      "id": "mismatched_digits_score_is_not_enough",
+      "boundary": "digits",
+      "left": "opus47",
+      "right": "opus48",
+      "expected": 83.33333333333334
+    },
+    {
+      "id": "tied_alias_one",
+      "boundary": "tie",
+      "left": "terra",
+      "right": "terri",
+      "expected": 80
+    },
+    {
+      "id": "tied_alias_two",
+      "boundary": "tie",
+      "left": "terry",
+      "right": "terri",
+      "expected": 80
+    },
+    {
+      "id": "tied_short_span",
+      "boundary": "tie",
+      "left": "abcdefg",
+      "right": "abcdx",
+      "expected": 66.66666666666667
+    },
+    {
+      "id": "tied_long_span",
+      "boundary": "tie",
+      "left": "abcdefg",
+      "right": "abcdxeyy",
+      "expected": 66.66666666666667
+    },
+    {
+      "id": "unicode_case_fold",
+      "boundary": "unicode",
+      "left": "Straße",
+      "right": "strasse",
+      "normalize": true,
+      "expected": 100
+    },
+    {
+      "id": "unicode_astral_fold",
+      "boundary": "unicode",
+      "left": "𐐀",
+      "right": "𐐨",
+      "normalize": true,
+      "expected": 100
+    }
+  ],
+  "routes": [
+    {
+      "id": "canonical_compact",
+      "transcript": "Deep seek 32, explain mixture of experts",
+      "aliases": ["deepseek32"],
+      "expected": {
+        "alias": "deepseek32",
+        "question": "explain mixture of experts",
+        "question_offset": 14,
+        "reason": "canonical",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "canonical_longest",
+      "transcript": "HAIKU, write a love poem",
+      "aliases": ["hai", "haiku"],
+      "expected": {
+        "alias": "haiku",
+        "question": "write a love poem",
+        "question_offset": 7,
+        "reason": "canonical",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "configured_longest",
+      "transcript": "Op. 47, explain this chord",
+      "aliases": ["opus47"],
+      "config_toml": "[opus47]\nmatch_phrases = [\"op\", \"op 47\"]\n",
+      "expected": {
+        "alias": "opus47",
+        "question": "explain this chord",
+        "question_offset": 8,
+        "reason": "configured",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "longest_wake_phrase",
+      "transcript": "Hey computer Terra, answer this",
+      "aliases": ["computer", "terra"],
+      "config_toml": "wake_words = [\"hey\", \"hey computer\"]\n",
+      "expected": {
+        "alias": "terra",
+        "question": "answer this",
+        "question_offset": 20,
+        "reason": "canonical",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "original_question_substring",
+      "transcript": "Terra -- Keep THIS, exactly!",
+      "aliases": ["terra"],
+      "expected": {
+        "alias": "terra",
+        "question": "Keep THIS, exactly!",
+        "question_offset": 9,
+        "reason": "canonical",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "alias_only",
+      "transcript": "terra",
+      "aliases": ["terra"],
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "missing_question",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "wake_only",
+      "transcript": "hey",
+      "aliases": ["terra"],
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "no_match",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "punctuation_only",
+      "transcript": "... 🧠 !!!",
+      "aliases": ["terra"],
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "missing_request",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "empty_roster",
+      "transcript": "terra, answer this",
+      "aliases": [],
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "no_match",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "threshold_below",
+      "transcript": "abcdefghijkluuuuuuuu, question",
+      "aliases": ["abcdefghijklmnopqrst"],
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "no_match",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "threshold_at",
+      "transcript": "abcdefghijklmuuuuuuu, question",
+      "aliases": ["abcdefghijklmnopqrst"],
+      "expected": {
+        "alias": "abcdefghijklmnopqrst",
+        "question": "question",
+        "question_offset": 22,
+        "reason": "fuzzy",
+        "similarity": 65,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "threshold_above",
+      "transcript": "abcdefghijklmnmmmmmm, question",
+      "aliases": ["abcdefghijklmnopqrst"],
+      "expected": {
+        "alias": "abcdefghijklmnopqrst",
+        "question": "question",
+        "question_offset": 22,
+        "reason": "fuzzy",
+        "similarity": 70,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "margin_below",
+      "transcript": "abcdefghijklmnopuuuu, question",
+      "aliases": ["abcdefghijklmnopqrst", "abcdefghijklmnvvvvvv"],
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "ambiguous",
+        "similarity": 80,
+        "runner_up_similarity": 70
+      }
+    },
+    {
+      "id": "margin_at",
+      "transcript": "abcdefghijklmnopuuuu, question",
+      "aliases": ["abcdefghijklmnopqrst", "abcdefghijklmvvvvvvv"],
+      "expected": {
+        "alias": "abcdefghijklmnopqrst",
+        "question": "question",
+        "question_offset": 22,
+        "reason": "fuzzy",
+        "similarity": 80,
+        "runner_up_similarity": 65
+      }
+    },
+    {
+      "id": "margin_above",
+      "transcript": "abcdefghijklmnopuuuu, question",
+      "aliases": ["abcdefghijklmnopqrst", "abcdefghijklvvvvvvvv"],
+      "expected": {
+        "alias": "abcdefghijklmnopqrst",
+        "question": "question",
+        "question_offset": 22,
+        "reason": "fuzzy",
+        "similarity": 80,
+        "runner_up_similarity": 60
+      }
+    },
+    {
+      "id": "length_allowed",
+      "transcript": "terrax, question",
+      "aliases": ["terra"],
+      "expected": {
+        "alias": "terra",
+        "question": "question",
+        "question_offset": 8,
+        "reason": "fuzzy",
+        "similarity": 90.9090909090909,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "length_rejected",
+      "transcript": "terraxx, question",
+      "aliases": ["terra"],
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "no_match",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "matching_digits",
+      "transcript": "opas47, question",
+      "aliases": ["opus47"],
+      "expected": {
+        "alias": "opus47",
+        "question": "question",
+        "question_offset": 8,
+        "reason": "fuzzy",
+        "similarity": 83.33333333333334,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "digit_mismatch",
+      "transcript": "opus48, question",
+      "aliases": ["opus47"],
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "no_match",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "deterministic_alias_tie",
+      "transcript": "terri, question",
+      "aliases": ["terry", "terra"],
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "ambiguous",
+        "similarity": 80,
+        "runner_up_similarity": 80
+      }
+    },
+    {
+      "id": "shortest_span_tie",
+      "transcript": "abcdx eyy question",
+      "aliases": ["abcdefg"],
+      "expected": {
+        "alias": "abcdefg",
+        "question": "eyy question",
+        "question_offset": 6,
+        "reason": "fuzzy",
+        "similarity": 66.66666666666667,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "sharp_s_case_fold",
+      "transcript": "Straße, Frage",
+      "aliases": ["strasse"],
+      "expected": {
+        "alias": "strasse",
+        "question": "Frage",
+        "question_offset": 8,
+        "reason": "canonical",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "greek_sigma_case_fold",
+      "transcript": "ΟΣς, question",
+      "aliases": ["terra"],
+      "config_toml": "[terra]\nmatch_phrases = [\"οσσ\"]\n",
+      "expected": {
+        "alias": "terra",
+        "question": "question",
+        "question_offset": 5,
+        "reason": "configured",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "turkish_dotted_i_case_fold",
+      "transcript": "İ, question",
+      "aliases": ["terra"],
+      "config_toml": "[terra]\nmatch_phrases = [\"i\"]\n",
+      "expected": {
+        "alias": "terra",
+        "question": "question",
+        "question_offset": 3,
+        "reason": "configured",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "full_width_digits",
+      "transcript": "Ｏｐｕｓ４７, question",
+      "aliases": ["opus47"],
+      "expected": {
+        "alias": "opus47",
+        "question": "question",
+        "question_offset": 8,
+        "reason": "canonical",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "decomposed_combining_mark",
+      "transcript": "Café, question",
+      "aliases": ["terra"],
+      "config_toml": "[terra]\nmatch_phrases = [\"café\"]\n",
+      "expected": {
+        "alias": "terra",
+        "question": "question",
+        "question_offset": 7,
+        "reason": "configured",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "astral_scalar_offset",
+      "transcript": "😀 𐐨, 🧠 Explain",
+      "aliases": ["terra"],
+      "config_toml": "[terra]\nmatch_phrases = [\"𐐀\"]\n",
+      "expected": {
+        "alias": "terra",
+        "question": "Explain",
+        "question_offset": 7,
+        "reason": "configured",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    }
+  ]
+}
