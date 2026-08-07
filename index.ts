@@ -8,6 +8,7 @@ import {
   isNativeVaultEnabled,
 } from "./src/credentials.ts";
 import { createRuntimeGateway } from "./src/runtime.ts";
+import { installVoiceCancellation } from "./src/voice.ts";
 
 const sensitive = createSensitiveValueRegistry();
 const credentialVault = createBunCredentialVault();
@@ -37,4 +38,5 @@ process.exitCode = await runApplication({
   credentialResolver,
   sensitive,
   nativeVaultEnabled,
+  installVoiceCancellation,
 });

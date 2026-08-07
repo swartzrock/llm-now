@@ -9,6 +9,12 @@ import {
   type ByokProviderRuntime,
 } from "@swartzrock/byok-runtime";
 import {
+  LocalCommandRunner,
+  type LocalProcess,
+} from "@swartzrock/byok-runtime/node";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import {
   createBunCredentialVault,
   createCredentialResolver,
   createSensitiveValueRegistry,
@@ -20,6 +26,75 @@ import {
 } from "../src/runtime.ts";
 
 const providerIds: ByokProviderId[] = [...BYOK_PROVIDER_IDS];
+
+test("local CLI cancellation force-kills and waits for close before rejecting", async () => {
+  const root = new AbortController();
+  const signals: NodeJS.Signals[] = [];
+  let closed = false;
+  let child!: LocalProcess & EventEmitter;
+  child = Object.assign(new EventEmitter(), {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill(signal: NodeJS.Signals = "SIGTERM") {
+      signals.push(signal);
+      if (signal === "SIGKILL") {
+        closed = true;
+        queueMicrotask(() => child.emit("close", 137));
+      }
+      return true;
+    },
+  }) as LocalProcess & EventEmitter;
+  const runner = new LocalCommandRunner(
+    () => child,
+    {},
+    { warn: () => undefined },
+    () => "",
+  );
+  const running = runner.run({
+    command: "/fake/codex",
+    stdin: "prompt",
+    signal: root.signal,
+    timeoutMs: 10_000,
+  });
+  root.abort();
+
+  await expect(running).rejects.toThrow("was cancelled");
+  expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+  expect(closed).toBeTrue();
+});
+
+test("local CLI input failure terminates and waits for close before rejecting", async () => {
+  const signals: NodeJS.Signals[] = [];
+  const stdin = new PassThrough();
+  stdin.end = (() => {
+    throw new Error("broken pipe");
+  }) as typeof stdin.end;
+  let child!: LocalProcess & EventEmitter;
+  child = Object.assign(new EventEmitter(), {
+    stdin,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill(signal: NodeJS.Signals = "SIGTERM") {
+      signals.push(signal);
+      queueMicrotask(() => child.emit("close", 1));
+      return true;
+    },
+  }) as LocalProcess & EventEmitter;
+  const runner = new LocalCommandRunner(
+    () => child,
+    {},
+    { warn: () => undefined },
+    () => "",
+  );
+
+  await expect(runner.run({
+    command: "/fake/codex",
+    stdin: "prompt",
+    timeoutMs: 10_000,
+  })).rejects.toThrow("failed to receive input: broken pipe");
+  expect(signals).toEqual(["SIGTERM"]);
+});
 
 function runtime(overrides: Partial<ByokProviderRuntime> = {}): ByokProviderRuntime {
   return {
@@ -202,6 +277,54 @@ describe("runtime gateway", () => {
         signal: controller.signal,
       },
     ]);
+  });
+
+  test("rejects a pre-aborted generation before provider setup", async () => {
+    let providerCalls = 0;
+    const gateway = createTestGateway({
+      env: {},
+      createProvider: () => {
+        providerCalls += 1;
+        return runtime();
+      },
+    });
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+
+    await expect(
+      gateway.generate("ollama", "qwen", "prompt", controller.signal),
+    ).rejects.toThrow("cancelled");
+    expect(providerCalls).toBe(0);
+  });
+
+  test("re-checks generation cancellation after async credential setup", async () => {
+    let providerCalls = 0;
+    let generationCalls = 0;
+    const controller = new AbortController();
+    const gateway = createTestGateway({
+      env: {},
+      credentialResolver: {
+        resolve: async () => {
+          controller.abort(new Error("cancelled after setup"));
+          return { source: "environment", apiKey: "secret", envName: "OPENAI_API_KEY" };
+        },
+      },
+      createProvider: () => {
+        providerCalls += 1;
+        return runtime({
+          generateText: async () => {
+            generationCalls += 1;
+            return { text: "unexpected" };
+          },
+        });
+      },
+    });
+
+    await expect(
+      gateway.generate("openai", "gpt-test", "prompt", controller.signal),
+    ).rejects.toThrow("cancelled after setup");
+    expect(providerCalls).toBe(1);
+    expect(generationCalls).toBe(0);
   });
 
   test("redacts raw and JSON-escaped instructions only from generation failures", async () => {

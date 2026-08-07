@@ -23,6 +23,10 @@ $ llm-now --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5
 
 ![Animated terminal demo of llm-now discovering available providers and using model aliases](docs/demos/demo.gif)
 
+On macOS, the installed `llm-now --voice` command can power a two-action global
+Shortcut without Python, uv, or a repository checkout. See
+[Talk to a saved alias from a macOS keyboard shortcut](examples/macos-voice-shortcut.md).
+
 ## Install
 
 ### Homebrew (macOS and Linux)

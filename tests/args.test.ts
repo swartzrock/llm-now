@@ -10,8 +10,11 @@ import {
   requireDeterministicSelection,
 } from "../src/args.ts";
 import {
+  InvalidUtf8Error,
   isInteractive,
   promptValidationMessage,
+  readUtf8,
+  resolveInputSource,
   resolvePrompt,
 } from "../src/io.ts";
 import { stripTerminalSequences } from "../src/prompts.ts";
@@ -21,6 +24,7 @@ const APPROVED_HELP_TEXT = `A tiny CLI to send text-generation prompts to the mo
 Usage:
   llm-now
   llm-now --aliases
+  llm-now --voice [--input <text>]
   llm-now --input <text>
   llm-now <alias>
   llm-now <alias> --input <text>
@@ -41,6 +45,7 @@ Rules:
   Opening a launcher menu performs no provider discovery or credential access.
   A terminal alias with no input source also asks for one prompt.
   Otherwise, input comes from exactly one of --input or stdin.
+  On macOS, --voice routes one dictated transcript without changing positional aliases.
   --instruction is separate from prompt input and applies only to the current request.
   A command-line instruction replaces saved shortcut instructions for that request.
   Arguments, --input, piped input, and noninteractive calls bypass the launcher.
@@ -49,6 +54,7 @@ Rules:
 
 Options:
   --aliases            List saved aliases
+  --voice              Route one dictated transcript on macOS
   --input <text>       Prompt text
   --instruction <text> Request-scoped behavioral instruction
   --alias <name>       Saved shortcut selection
@@ -104,6 +110,28 @@ describe("arguments and input", () => {
     );
   });
 
+  test("exposes strict UTF-8 and source resolution without applying prompt blank rules", async () => {
+    await expect(readUtf8(input(""))).resolves.toBe("");
+    await expect(resolveInputSource("  exact flag  ", input(""))).resolves.toBe(
+      "  exact flag  ",
+    );
+    await expect(resolveInputSource(undefined, input("  exact stdin  "))).resolves.toBe(
+      "  exact stdin  ",
+    );
+    await expect(resolveInputSource("flag", input("stdin"))).rejects.toThrow(
+      "exactly one input source",
+    );
+
+    const invalid = {
+      isTTY: false,
+      async *[Symbol.asyncIterator]() {
+        yield Uint8Array.from([0xc3, 0x28]);
+      },
+    };
+    await expect(readUtf8(invalid)).rejects.toBeInstanceOf(InvalidUtf8Error);
+    await expect(resolvePrompt(undefined, invalid)).rejects.toThrow("valid UTF-8");
+  });
+
   test("normalizes one exact positional alias before or after options", () => {
     expect(parseArguments(["Daily", "--input", "hello"])).toEqual({
       kind: "run",
@@ -119,6 +147,31 @@ describe("arguments and input", () => {
       kind: "run",
       selection: { kind: "alias", alias: "Daily" },
     });
+  });
+
+  test("parses --voice as a standalone mode while preserving the positional alias", () => {
+    expect(parseArguments(["--voice"])).toEqual({ kind: "voice" });
+    expect(parseArguments(["--voice", "--input", "  dictated text  "])).toEqual({
+      kind: "voice",
+      input: "  dictated text  ",
+    });
+    expect(parseArguments(["voice"])).toEqual({
+      kind: "run",
+      selection: { kind: "alias", alias: "voice" },
+    });
+  });
+
+  test("rejects voice mode combined with positionals, selection, instructions, or other modes", () => {
+    const conflicts = [
+      ["--voice", "daily"],
+      ["--voice", "--alias", "daily"],
+      ["--voice", "--provider", "ollama", "--model", "qwen"],
+      ["--voice", "--instruction", "temporary"],
+      ["--voice", "--aliases"],
+      ["--voice", "--help"],
+      ["--voice", "--version"],
+    ];
+    for (const args of conflicts) expect(() => parseArguments(args)).toThrow(UsageError);
   });
 
   test("preserves an exact request instruction across every selection surface", () => {
@@ -467,6 +520,7 @@ describe("arguments and input", () => {
 
     expect(rendered).toContain(colors.bold(colors.greenBright("Usage:")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("llm-now")));
+    expect(rendered).toContain(colors.bold(colors.cyanBright("--voice")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--input")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--instruction")));
     expect(rendered).toContain(colors.cyan("<text>"));

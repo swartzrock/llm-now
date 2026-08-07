@@ -3,6 +3,13 @@ import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
 import { resolveAliasPath, saveAlias } from "../src/aliases";
 
+if (
+  packageMetadata.dependencies["@3leaps/string-metrics-wasm"] !== "0.3.11"
+  || packageMetadata.dependencies["unicode-case-folding"] !== "1.1.1"
+) {
+  throw new Error("voice routing dependencies must remain exactly pinned");
+}
+
 const directory = await mkdtemp(join(process.cwd(), ".tmp-runtime-"));
 const fakeCli = join(directory, process.platform === "win32" ? "codex.exe" : "codex");
 const spike = join(
@@ -12,6 +19,10 @@ const spike = join(
 const runtimeSmoke = join(
   directory,
   process.platform === "win32" ? "runtime-smoke.exe" : "runtime-smoke",
+);
+const voiceRoutingSmoke = join(
+  directory,
+  process.platform === "win32" ? "voice-routing-smoke.exe" : "voice-routing-smoke",
 );
 const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
 const overrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
@@ -35,6 +46,7 @@ try {
   const builds: Array<[string, string]> = [
     [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
     [join(import.meta.dir, "fixtures/runtime-smoke-entry.ts"), runtimeSmoke],
+    [join(import.meta.dir, "fixtures/voice-routing-compile-entry.ts"), voiceRoutingSmoke],
     [join(import.meta.dir, "../index.ts"), spike],
   ];
   for (const [entrypoint, outfile] of builds) {
@@ -63,6 +75,14 @@ try {
   };
   const cases = [
     {
+      name: "voice routing scorer boundary",
+      executable: voiceRoutingSmoke,
+      args: [],
+      exitCode: 0,
+      stdout: "100\n66.66666666666667\n",
+      stderr: "",
+    },
+    {
       name: "runtime boundary",
       executable: runtimeSmoke,
       args: [fakeCli],
@@ -75,15 +95,15 @@ try {
       executable: spike,
       args: ["--help"],
       exitCode: 0,
-      stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>\n  llm-now <alias>",
+      stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --voice [--input <text>]\n  llm-now --input <text>\n  llm-now <alias>",
       stdoutLandmarks: [
-        "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>\n  llm-now <alias>",
+        "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --voice [--input <text>]\n  llm-now --input <text>\n  llm-now <alias>",
         "Rules:\n  Run llm-now with no arguments in a terminal to open the adaptive launcher.",
         "With shortcuts: “Run with a saved shortcut…”, “Create a new shortcut…”,\n  “Run once with another provider and model…”, then “Manage connections…”.\n  Without shortcuts: “Create a new shortcut…”, “Run once with a provider and model…”,\n  then “Manage connections…”.",
         "Creation uses “Use an available provider…” or “Add a provider with an API key…”.\n  Creation saves the provider/model target and optional instructions before its first prompt.\n  Saved instructions are sent separately on every shortcut run.\n  Run once generates without saving or offering a shortcut.",
         "Manage connections owns discovery and API-key addition, replacement, and deletion.\n  Opening a launcher menu performs no provider discovery or credential access.",
         "Arguments, --input, piped input, and noninteractive calls bypass the launcher.\n  Deterministic calls use an alias or both --provider and --model.",
-        "Options:\n  --aliases            List saved aliases\n  --input <text>       Prompt text\n  --instruction <text> Request-scoped behavioral instruction",
+        "Options:\n  --aliases            List saved aliases\n  --voice              Route one dictated transcript on macOS\n  --input <text>       Prompt text\n  --instruction <text> Request-scoped behavioral instruction",
         "API key environment variables:\n  ANTHROPIC_API_KEY",
         "  DEEPINFRA_TOKEN",
         "  XAI_API_KEY",
