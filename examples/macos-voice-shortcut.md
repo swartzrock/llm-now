@@ -7,40 +7,35 @@ actions:
 1. `Dictate Text`
 2. `Run Shell Script`
 
-The shell action starts the uv-managed router in
-[`macos-voice-router`](macos-voice-router). The router reads the current aliases
-from `llm-now --aliases`, rejects uncertain matches, calls the selected alias
-once, copies the answer, and speaks it with macOS `say`.
+The shell action passes the dictated text through stdin to the installed
+`llm-now --voice` command. The native command loads the current aliases, rejects
+uncertain matches, calls the selected alias once, copies the answer, and speaks
+it with macOS `say`. Normal use does not require Python, uv, this repository, or
+a second launcher.
 
 ## Before you start
 
 You need:
 
 - macOS Dictation enabled in **System Settings → Keyboard → Dictation**;
-- `uv` installed;
-- `llm-now` installed and available on `PATH`;
-- this repository checkout; and
+- `llm-now` installed; and
 - at least one working saved alias.
+
+The selected alias still needs everything it normally needs. A hosted alias may
+need network access and its usual provider credential. An Ollama or LM Studio
+alias needs that local service running. A CLI-backed alias needs its CLI
+installed and authenticated.
 
 Confirm the command-line pieces in Terminal:
 
 ```bash
-command -v uv
 command -v llm-now
 llm-now --aliases
-cd /path/to/llm-now
-pwd
 ```
 
-Keep the three absolute paths printed by those commands. The first uv run may
-download RapidFuzz from PyPI. The three-minute setup target assumes ordinary
-network access for that first run; run this once before starting an offline or
-timed setup:
-
-```bash
-uv sync --project /absolute/path/to/llm-now/examples/macos-voice-router \
-  --locked --no-dev
-```
+Keep the absolute path printed by `command -v llm-now`. Test one alias normally
+before building the Shortcut so its provider, credential, network, or local
+service prerequisites are already known to work.
 
 ## Set up the Shortcut
 
@@ -59,35 +54,23 @@ Add **Run Shell Script** immediately after Text. Set:
 - **Input:** the `Text` magic variable
 - **Pass Input:** `to stdin`
 
-Paste this launcher and replace all three example paths:
+Paste one command, replacing the example with the absolute path printed by
+`command -v llm-now`:
 
 ```zsh
-#!/bin/zsh
-set -euo pipefail
-
-UV="/opt/homebrew/bin/uv"
-PROJECT="/Users/you/Code/llm-now/examples/macos-voice-router"
-LLM_NOW_DIR="/opt/homebrew/bin"
-
-export PATH="$LLM_NOW_DIR:/usr/bin:/bin:/usr/sbin:/sbin"
-exec "$UV" run \
-  --project "$PROJECT" \
-  --locked \
-  --no-dev \
-  llm-now-voice
+/opt/homebrew/bin/llm-now --voice
 ```
 
-`UV` is the full `command -v uv` result. `PROJECT` ends at
-`examples/macos-voice-router`. `LLM_NOW_DIR` is the directory containing the
-full `command -v llm-now` result, not the executable itself.
+Intel Homebrew commonly installs the binary at `/usr/local/bin/llm-now`; direct
+downloads may use another location. Use the path from your Mac instead of
+assuming either example.
 
 Do not put API keys in this script. Shortcuts does not reliably inherit
-variables from an interactive shell. Use a local or CLI-backed alias, a normal
-provider environment available to GUI apps, or llm-now's supported native
-credential storage.
+variables from an interactive shell. Use a local or authenticated CLI-backed
+alias, a provider environment available to GUI apps, or llm-now's supported
+native credential storage.
 
-Run the Shortcut from the editor. The first run can take longer while uv creates
-the isolated environment. Success means:
+Run the Shortcut from the editor. Success means:
 
 - the answer is spoken;
 - the identical answer is on the clipboard; and
@@ -96,6 +79,15 @@ the isolated environment. Success means:
 Paste somewhere to confirm the clipboard. Fix this Text test before involving
 the microphone; it isolates paths, dependencies, aliases, and providers from
 Dictation permissions.
+
+For manual Terminal testing, `--input` is also available:
+
+```bash
+/absolute/path/to/llm-now --voice --input 'haiku, explain a perfect chord'
+```
+
+The Shortcut must use stdin. Command-line input can be visible in shell history
+and local process inspection, so do not use `--input` for sensitive text.
 
 ### 2. Switch Text to Dictate Text
 
@@ -120,22 +112,23 @@ accepts both `Hey haiku, ...` and `haiku, ...`.
 
 Open the Shortcut's details, choose **Add Keyboard Shortcut**, and press an
 unused key combination. Switch to another application and invoke it. Wait for
-the current run to finish before starting another one; the Shortcut remains
-active while the provider and speech processes run.
+the current run to finish before starting another one. Only one active voice
+invocation is supported: overlapping runs can interleave writes to the global
+clipboard and audible speech.
 
 If macOS asks whether Shortcuts may run shell scripts, allow it. Managed Macs
 may require an administrator to permit that capability.
 
 ## How alias matching works
 
-Aliases are discovered on every request, so adding an llm-now alias does not
-require editing the Shortcut or copying an alias roster into another file.
+Aliases are loaded on every request, so adding an llm-now alias does not require
+editing the Shortcut or copying an alias roster into another file.
 
 The router examines only the leading spoken phrase and tries these stages:
 
 1. normalized canonical alias;
 2. configured `match_phrases`; and
-3. conservative RapidFuzz similarity.
+3. conservative native similarity scoring.
 
 Normalization is case-insensitive and removes punctuation and spacing for the
 comparison, so `Deep seek 32` can select `deepseek32`. The original question is
@@ -277,18 +270,13 @@ sentinel, and ask it a question. You should hear only the stable request-failed
 notice. Provider stderr must not enter speech or the clipboard.
 
 Start a deliberately slow request and press the Shortcut's stop button. Wait
-past the provider's normal response time. There must be no delayed speech or
-new downstream action. If cancellation occurs after copying has begun, macOS
-may already have partially or fully changed the clipboard; the router does not
-attempt an unsafe restore.
-
-Automated tests cover otherwise destructive failure injection for `pbcopy`,
-`say`, timeouts, invalid UTF-8, control bytes, and process-group force-kill:
-
-```bash
-uv run --project examples/macos-voice-router --locked \
-  python -m unittest discover -s examples/macos-voice-router/tests
-```
+past the provider's normal response time. The stop control is the supported
+cancellation affordance: `llm-now` handles the interrupt as one root request,
+terminates and reaps the active operation, exits `130`, and writes
+`voice request cancelled` to the Shortcut result. There must be no later notice,
+speech, or downstream action. If cancellation occurs after copying completed,
+the clipboard may already contain the answer; the command does not attempt an
+unsafe restore.
 
 ## Troubleshooting
 
@@ -316,20 +304,31 @@ safe outcome.
 
 ### The shell action fails immediately
 
-Recheck `UV`, `PROJECT`, `LLM_NOW_DIR`, **Pass Input: to stdin**, and the shell's
-script-running permission. Paths in Shortcuts do not use your interactive
-shell aliases or startup files.
+Recheck the absolute `llm-now` path, **Pass Input: to stdin**, the selected
+alias's ordinary provider prerequisites, and the shell's script-running
+permission. Paths in Shortcuts do not use your interactive shell aliases or
+startup files.
 
-Run the same launcher from Terminal with a transcript to see local diagnostics:
+Run the same installed binary from Terminal with a transcript to see local
+diagnostics:
 
 ```bash
-printf 'haiku, explain a perfect chord' | /bin/zsh /path/to/copied-launcher.zsh
+printf 'haiku, explain a perfect chord' | /absolute/path/to/llm-now --voice
 ```
 
-Handled routing and provider failures return after a spoken notice, so the shell
-action may otherwise show no useful result. Configuration, missing-command,
-clipboard, and speech failures return nonzero so Shortcuts exposes the action
-error.
+Rejected input says `I couldn't match an alias and question. Please try again.`
+A generation failure says `The request failed. Please try again.` Configuration
+problems say `The voice router needs attention. Check the Shortcut result.` A
+clipboard failure says `I couldn't copy the answer. Check the Shortcut result.`
+These notices use the unconfigured system speech defaults and never include
+provider or request detail.
+
+Handled routing and generation failures exit `0` only when their notice is
+spoken successfully. Configuration, missing-command, clipboard, and answer
+speech failures exit `1`; if answer speech fails after copying, the answer stays
+on the clipboard and no replacement notice is spoken. Cancellation exits `130`.
+Shortcuts may otherwise show little beyond the sanitized diagnostic in the
+shell action result.
 
 ### A custom speech profile fails
 
@@ -348,13 +347,33 @@ command only to the separate speech input.
 
 ## Privacy and state
 
-- macOS Dictation handles the transcript before the router receives it; review
-  Apple's Dictation settings and policy for the selected mode.
-- An accepted question and answer cross the local or hosted provider selected by
-  the alias. Use a local alias for material that should not leave the Mac.
+- macOS Dictation handles the transcript before `llm-now` receives it and may
+  use Apple services. Review Apple's Dictation settings and policy for the
+  selected mode.
+- A hosted alias sends the accepted question content to its selected provider.
+  Use a suitable local alias for material that should not leave the Mac, and do
+  not dictate sensitive material in an unsuitable setting.
+- Speech is audible to people and devices nearby.
 - The optional TOML file contains presentation preferences, not credentials.
 - A successful answer replaces the clipboard before speech begins and remains
-  there after the Shortcut finishes.
+  there until another application replaces it; `llm-now` does not clear it.
+- Only one invocation is supported at a time. Overlapping requests can
+  interleave global clipboard writes and audible speech.
 - Technical diagnostics stay on stderr and are never copied or spoken. Model
   output containing terminal controls or macOS `[[...]]` speech commands is
   rejected before either side effect.
+
+## Contributor-only Python parity oracle
+
+Release users do not need Python, uv, or a repository checkout. Contributors
+keep the complete [`macos-voice-router`](macos-voice-router) Python example as
+an independent routing and score oracle. It uses its locked RapidFuzz reference
+and the shared parity corpus; native production code does not launch it.
+
+From a repository checkout with uv installed, run the complete locked reference
+suite exactly as source CI does:
+
+```bash
+uv run --project examples/macos-voice-router --locked \
+  python -m unittest discover -s examples/macos-voice-router/tests
+```

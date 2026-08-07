@@ -949,27 +949,48 @@ Use a release whose stable tag contains the Homebrew job; `v2.2.0` and other old
 4. Confirm the run reverifies the existing public Release, performs no build or GitHub publication mutation, and retries only the Homebrew projection. It may issue one blob-SHA-guarded write. After every attempted write it must read once; exact desired bytes report `updated` or `already-current`, while a non-exact or unavailable read-back reports `write-outcome-unconfirmed`. It must never issue a second write in that run.
 5. Confirm a same-version divergent formula, newer formula, or missing or invalid formula would refuse mutation as `failed-before-write` using the U2 automated fixtures; do not manufacture those states in the public tap.
 
-## macOS voice router example
+## Native macOS voice Shortcut
 
 ### MT-42: Complete the two-action voice Shortcut matrix
 
 On a Mac with Dictation enabled, follow the authoritative
 [macOS voice shortcut guide](../examples/macos-voice-shortcut.md) from its Text
-smoke test through the global keyboard shortcut. Start with `uv`, `llm-now`, the
-repository checkout, and one working alias already available; record the time
-from opening the setup section to the first spoken answer. Under ordinary network
-conditions, it must take less than three minutes.
+smoke test through the global keyboard shortcut. Start with installed `llm-now`
+and one working alias. Confirm the selected alias's ordinary network, credential,
+local-service, or CLI-runtime prerequisites separately. Record the time from
+opening the setup section to the first spoken answer. Under ordinary provider
+conditions, it must take less than three minutes without Python, uv, or a
+repository checkout.
 
-Complete the guide's routing, wake-word, rejection, local/hosted provider,
-per-alias voice/rate/pitch, clean clipboard, audible pitch A/B, provider failure,
-cancellation, permission, privacy, and recovery checks. A successful process
-exit alone is not evidence that an installed voice honored the pitch setting.
-The finished Shortcut must contain only
-`Dictate Text` followed by `Run Shell Script`; no marker parser, clipboard action,
-or separate `Speak Text` action may remain. Record the macOS version, Dictation
-mode, shortcut key, aliases/providers used, installed voices, elapsed setup time,
+The finished Shortcut must contain only `Dictate Text` followed by
+`Run Shell Script`. It must pass `Dictated Text` to stdin, and the shell action
+must invoke the absolute installed path to `llm-now --voice`. No `--input`,
+marker parser, clipboard action, separate `Speak Text` action, or Python/uv
+launcher may remain.
+
+Complete the guide's exact, configured-phrase, unique-fuzzy, poor, and ambiguous
+routes; optional/omitted/configured wake words; per-alias voice/rate/pitch;
+clipboard sentinel and clean-answer checks; audible pitch A/B; one local and one
+hosted alias; provider and configuration failures; permissions; and recovery.
+A successful process exit alone is not evidence that an installed voice honored
+the pitch setting. Confirm failed or ambiguous routing preserves the sentinel,
+successful copying contains no pitch command, and a speech failure after copy
+does not remove the answer.
+
+For cancellation, start a slow request and use the Shortcut's stop control. The
+command must handle its root interrupt, reap the active operation, exit `130`,
+report `voice request cancelled`, and start no later notice, copy, or speech.
+An answer copied before cancellation is not rolled back. Run only one invocation
+at a time; overlapping invocations are unsupported because global clipboard and
+speech effects can interleave.
+
+Record the macOS version, Dictation mode, shortcut key, absolute binary path,
+aliases/providers and their prerequisites, installed voices, elapsed setup time,
 pitch values and audible comparison, clean-clipboard result, clipboard sentinel
-result, cancellation result, and any permission prompts in the test report below.
+result, cancellation exit/diagnostic, and permission prompts. Also record that
+Dictation may use Apple services, hosted aliases send accepted question content
+to their provider, speech is audible, and clipboard contents persist until
+replaced.
 
 ## Automation-backed coverage
 
