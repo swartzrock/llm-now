@@ -27,6 +27,7 @@ jobs:
         with:
           version: "0.11.16"
       - run: bun install --frozen-lockfile
+      - run: bun scripts/release-validate.ts packages
       - run: bun run check
       - run: uv run --project examples/macos-voice-router --locked python -m unittest discover -s examples/macos-voice-router/tests
 
@@ -62,6 +63,8 @@ jobs:
           bun-version: 1.3.14
           bun-download-url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-windows-x64-baseline.zip
       - run: bun install --frozen-lockfile
+      - if: startsWith(matrix.target, 'macos-')
+        run: bun run runtime:smoke
       - if: contains(fromJSON('["macos-arm64","linux-x64","linux-arm64","windows-x64"]'), matrix.target) && (matrix.target == 'linux-x64' || matrix.target == 'linux-arm64')
         run: sudo apt-get update && sudo apt-get install --yes dbus-x11 gnome-keyring libsecret-1-0
       - if: contains(fromJSON('["macos-arm64","linux-x64","linux-arm64","windows-x64"]'), matrix.target) && matrix.target != 'linux-x64' && matrix.target != 'linux-arm64'

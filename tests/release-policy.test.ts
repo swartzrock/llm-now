@@ -170,6 +170,7 @@ describe("release workflow policy", () => {
     );
     expect(sourceJob).toContain('python-version: "3.11"');
     expect(sourceJob).toContain('version: "0.11.16"');
+    expect(sourceJob).toContain("run: bun scripts/release-validate.ts packages");
     expect(sourceJob).toContain("run: bun run check");
     expect(sourceJob).toContain(
       "run: uv run --project examples/macos-voice-router --locked python -m unittest discover -s examples/macos-voice-router/tests",
@@ -177,6 +178,19 @@ describe("release workflow policy", () => {
     expect(nativeJob).not.toContain("setup-python");
     expect(nativeJob).not.toContain("setup-uv");
     expect(nativeJob).not.toContain("macos-voice-router");
+    expect(nativeJob).toContain("if: startsWith(matrix.target, 'macos-')");
+    expect(nativeJob).toContain("run: bun run runtime:smoke");
+    expect(nativeJob.indexOf("run: bun run runtime:smoke")).toBeLessThan(
+      nativeJob.indexOf("run: bun scripts/build.ts --target"),
+    );
+
+    const releaseAssetsJob = ciWorkflow.slice(ciWorkflow.indexOf("\n  release-assets:"));
+    expect(releaseAssetsJob).not.toContain("setup-python");
+    expect(releaseAssetsJob).not.toContain("setup-uv");
+    expect(releaseAssetsJob).not.toContain("macos-voice-router");
+    expect(releaseWorkflow).not.toContain("setup-python");
+    expect(releaseWorkflow).not.toContain("setup-uv");
+    expect(releaseWorkflow).not.toContain("macos-voice-router");
   });
 
   test("maintains one version-only release PR with narrow cancelable permissions", () => {
