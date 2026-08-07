@@ -1,10 +1,14 @@
 import { BYOK_API_KEY_ENV_VARS, type ByokEnvironment } from "@swartzrock/byok-runtime";
 import { caseFold } from "unicode-case-folding";
 import { constants } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import type { AliasDocument } from "./aliases.ts";
-import { createSensitiveValueRegistry } from "./credentials.ts";
+import {
+  createSensitiveValueRegistry,
+  type SensitiveValueRegistry,
+} from "./credentials.ts";
 import { InvalidUtf8Error, resolveInputSource, type PromptInput } from "./io.ts";
+import { stripTerminalSequences } from "./prompts.ts";
 import type { RuntimeGateway } from "./runtime.ts";
 import {
   formatTrustedPitchCommand,
@@ -21,6 +25,7 @@ const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
 const DEFAULT_INVENTORY_TIMEOUT_MS = 5_000;
 const DEFAULT_CLIPBOARD_TIMEOUT_MS = 5_000;
 const DEFAULT_SPEECH_TIMEOUT_MS = 120_000;
+const DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS = 500;
 const FORCE_KILL_DELAY_MS = 250;
 
 export const RETRY_NOTICE = "I couldn't match an alias and question. Please try again.";
@@ -218,6 +223,7 @@ export interface VoiceDependencies {
   readonly inputFlag: string | undefined;
   readonly stdin: PromptInput;
   readonly runtime: RuntimeGateway;
+  readonly sensitive: SensitiveValueRegistry;
   readonly env: ByokEnvironment;
   readonly home: string;
   readonly aliasPath: string;
@@ -227,6 +233,7 @@ export interface VoiceDependencies {
   readonly signal: AbortSignal;
   readonly diagnostic: (detail: string) => void;
   readonly generationTimeoutMs?: number;
+  readonly generationCleanupTimeoutMs?: number;
   readonly inventoryTimeoutMs?: number;
   readonly clipboardTimeoutMs?: number;
   readonly speechTimeoutMs?: number;
@@ -236,7 +243,7 @@ export type VoiceExitCode = 0 | 1 | 130;
 
 async function readVoiceConfig(path: string): Promise<Uint8Array | null> {
   try {
-    return new Uint8Array(await readFile(path));
+    return new Uint8Array(await Bun.file(path).arrayBuffer());
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
@@ -264,6 +271,25 @@ function redactRequestValues(value: string, requestValues: readonly string[]): s
   return createSensitiveValueRegistry(requestValues.flatMap(redactionVariants)).redact(value);
 }
 
+function canonicalizeDiagnostic(value: string): string {
+  return stripTerminalSequences(value.replace(/\r\n?|\u2028|\u2029/g, "\n"))
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
+}
+
+async function waitForSettlement(
+  operation: Promise<unknown>,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    operation.then(() => undefined, () => undefined),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+  if (timer !== undefined) clearTimeout(timer);
+}
+
 function childDetail(outcome: Exclude<VoiceProcessOutcome, { kind: "completed" | "cancelled" }>): string {
   return outcome.detail;
 }
@@ -272,6 +298,8 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
   const requestValues: string[] = [];
   const childEnv = filteredEnvironment(deps.env);
   const generationTimeoutMs = deps.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS;
+  const generationCleanupTimeoutMs = deps.generationCleanupTimeoutMs
+    ?? DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS;
   const inventoryTimeoutMs = deps.inventoryTimeoutMs ?? DEFAULT_INVENTORY_TIMEOUT_MS;
   const clipboardTimeoutMs = deps.clipboardTimeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS;
   const speechTimeoutMs = deps.speechTimeoutMs ?? DEFAULT_SPEECH_TIMEOUT_MS;
@@ -279,7 +307,10 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
 
   const diagnostic = (category: string, value?: unknown): void => {
     const suffix = value === undefined ? "" : `: ${detail(value)}`;
-    deps.diagnostic(redactRequestValues(`${category}${suffix}`, requestValues));
+    deps.diagnostic(redactRequestValues(
+      canonicalizeDiagnostic(`${category}${suffix}`),
+      requestValues,
+    ));
   };
   const cancelled = (): VoiceExitCode => {
     if (!cancellationReported) {
@@ -336,10 +367,11 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
   let transcript = "";
   let invalidTranscript: unknown;
   try {
-    transcript = await resolveInputSource(deps.inputFlag, deps.stdin);
+    transcript = await resolveInputSource(deps.inputFlag, deps.stdin, deps.signal);
     requestValues.push(transcript);
     if (transcript.trim().length === 0) invalidTranscript = "dictated transcript is blank";
   } catch (error) {
+    if (deps.signal.aborted) return cancelled();
     if (!(error instanceof InvalidUtf8Error)) throw error;
     invalidTranscript = error;
   }
@@ -411,6 +443,7 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
     return await configFailure("selected alias is missing from the loaded snapshot", true);
   }
   const profile = config.profiles[route.alias];
+  requestValues.push(route.question);
 
   let installedVoice: string | undefined;
   if (profile?.voice !== undefined) {
@@ -437,37 +470,68 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
   const prompt = `${VOICE_PROMPT}\n\n${route.question}`;
   requestValues.push(prompt);
   const generationController = new AbortController();
-  let generationTimedOut = false;
-  const abortGeneration = () => generationController.abort(deps.signal.reason);
+  type GenerationOutcome =
+    | Readonly<{ kind: "completed"; answer: string }>
+    | Readonly<{ kind: "failed"; error: unknown }>
+    | Readonly<{ kind: "timed_out" }>
+    | Readonly<{ kind: "cancelled" }>;
+  let interruptGeneration: (outcome: GenerationOutcome) => void = () => undefined;
+  const interruptedGeneration = new Promise<GenerationOutcome>((resolve) => {
+    interruptGeneration = resolve;
+  });
+  const abortGeneration = () => {
+    generationController.abort(deps.signal.reason);
+    interruptGeneration({ kind: "cancelled" });
+  };
   deps.signal.addEventListener("abort", abortGeneration, { once: true });
   const generationTimer = setTimeout(() => {
-    generationTimedOut = true;
     generationController.abort(new Error("generation timed out"));
+    interruptGeneration({ kind: "timed_out" });
   }, generationTimeoutMs);
+  const generation = Promise.resolve().then(() => deps.runtime.generate(
+    selection.provider,
+    selection.model,
+    prompt,
+    generationController.signal,
+    selection.instructions,
+  )).then<GenerationOutcome, GenerationOutcome>(
+    (answer) => ({ kind: "completed", answer }),
+    (error) => ({ kind: "failed", error }),
+  );
   if (deps.signal.aborted) abortGeneration();
+  const generationOutcome = await Promise.race([generation, interruptedGeneration]);
+  clearTimeout(generationTimer);
+  deps.signal.removeEventListener("abort", abortGeneration);
 
-  let answer: string;
-  try {
-    answer = await deps.runtime.generate(
-      selection.provider,
-      selection.model,
-      prompt,
-      generationController.signal,
-      selection.instructions,
-    );
-  } catch (error) {
-    if (deps.signal.aborted) return cancelled();
-    diagnostic(generationTimedOut ? "voice generation timed out" : "voice generation failed", error);
+  if (generationOutcome.kind === "cancelled" || generationOutcome.kind === "timed_out") {
+    if (selection.provider === "codex-cli" || selection.provider === "claude-cli") {
+      await generation;
+    } else {
+      await waitForSettlement(generation, generationCleanupTimeoutMs);
+    }
+    if (deps.signal.aborted || generationOutcome.kind === "cancelled") return cancelled();
+    diagnostic("voice generation timed out");
     return await speakNotice(REQUEST_FAILED_NOTICE, 0);
-  } finally {
-    clearTimeout(generationTimer);
-    deps.signal.removeEventListener("abort", abortGeneration);
+  }
+  if (generationOutcome.kind === "failed") {
+    if (deps.signal.aborted) return cancelled();
+    diagnostic("voice generation failed", generationOutcome.error);
+    return await speakNotice(REQUEST_FAILED_NOTICE, 0);
   }
   if (deps.signal.aborted) return cancelled();
+  const answer = generationOutcome.answer;
   requestValues.push(answer);
   const validation = validateSpeechAnswer(answer);
   if (!validation.valid) {
     diagnostic(`voice generation returned ${validation.reason} text`);
+    return await speakNotice(REQUEST_FAILED_NOTICE, 0);
+  }
+  const terminalAnswer = stripTerminalSequences(answer);
+  if (
+    deps.sensitive.redact(answer) !== answer
+    || deps.sensitive.redact(terminalAnswer) !== terminalAnswer
+  ) {
+    diagnostic("voice generation returned credential-bearing text");
     return await speakNotice(REQUEST_FAILED_NOTICE, 0);
   }
 

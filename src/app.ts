@@ -1427,6 +1427,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           inputFlag: parsed.input,
           stdin: deps.stdin,
           runtime: deps.runtime,
+          sensitive: deps.sensitive,
           env: deps.env,
           home: deps.home,
           aliasPath: applicationAliasPath(deps),

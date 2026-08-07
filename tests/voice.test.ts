@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BYOK_API_KEY_ENV_VARS, type ByokEnvironment } from "@swartzrock/byok-runtime";
 import type { AliasDocument } from "../src/aliases.ts";
+import { createSensitiveValueRegistry } from "../src/credentials.ts";
 import type { PromptInput } from "../src/io.ts";
 import type { RuntimeGateway } from "../src/runtime.ts";
 import {
@@ -60,6 +61,7 @@ class FakeRunner implements VoiceProcessRunner {
 
 interface HarnessOptions {
   transcript?: string | Uint8Array;
+  stdin?: PromptInput;
   inputFlag?: string;
   aliases?: AliasDocument;
   config?: string | Uint8Array | null;
@@ -69,6 +71,8 @@ interface HarnessOptions {
   signal?: AbortSignal;
   generate?: RuntimeGateway["generate"];
   generationTimeoutMs?: number;
+  generationCleanupTimeoutMs?: number;
+  sensitiveValues?: readonly string[];
   onReadConfig?: () => void;
   onLoadAliases?: () => void;
 }
@@ -117,8 +121,10 @@ function harness(options: HarnessOptions = {}) {
     configReads: () => configReads,
     run: () => runVoice({
       inputFlag: options.inputFlag,
-      stdin: input(options.transcript ?? "Hey haiku, write about brisket", options.inputFlag !== undefined),
+      stdin: options.stdin
+        ?? input(options.transcript ?? "Hey haiku, write about brisket", options.inputFlag !== undefined),
       runtime,
+      sensitive: createSensitiveValueRegistry(options.sensitiveValues),
       env: options.env ?? {},
       home: "/Users/test",
       aliasPath: "/config/aliases.json",
@@ -139,6 +145,7 @@ function harness(options: HarnessOptions = {}) {
       signal: options.signal ?? new AbortController().signal,
       diagnostic: (detail) => diagnostics.push(detail),
       generationTimeoutMs: options.generationTimeoutMs,
+      generationCleanupTimeoutMs: options.generationCleanupTimeoutMs,
     }),
   };
 }
@@ -355,6 +362,63 @@ describe("native voice coordinator", () => {
     expect(decoder.decode(runner.requests.at(-1)?.stdin)).toBe(speech);
   });
 
+  test("canonicalizes diagnostics before redacting the derived question", async () => {
+    const question = "write about brisket";
+    const app = harness({
+      generate: async () => {
+        throw new Error([
+          "write\u001b[31m about brisket",
+          "write\u0000 about brisket",
+          question,
+        ].join(" | "));
+      },
+    });
+
+    expect(await app.run()).toBe(0);
+    expect(app.diagnostics).toHaveLength(1);
+    expect(app.diagnostics[0]).toContain("[REDACTED]");
+    expect(app.diagnostics[0]).not.toContain(question);
+    expect(decoder.decode(app.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
+  });
+
+  test("withholds registered credentials before clipboard and answer speech", async () => {
+    const app = harness({
+      answer: "Never expose registered-secret in an answer.",
+      sensitiveValues: ["registered-secret"],
+    });
+
+    expect(await app.run()).toBe(0);
+    expect(app.diagnostics).toEqual(["voice generation returned credential-bearing text"]);
+    expect(app.runner.requests.map((request) => request.executable)).toEqual(["/usr/bin/say"]);
+    expect(decoder.decode(app.runner.requests[0]?.stdin)).toBe(REQUEST_FAILED_NOTICE);
+  });
+
+  test("cancels a stalled stdin iterator and requests cleanup", async () => {
+    const root = new AbortController();
+    let returned = false;
+    const stdin: PromptInput = {
+      isTTY: false,
+      [Symbol.asyncIterator]() {
+        return {
+          next() {
+            root.abort();
+            return new Promise<IteratorResult<string | Uint8Array>>(() => undefined);
+          },
+          async return() {
+            returned = true;
+            return { done: true, value: undefined };
+          },
+        };
+      },
+    };
+    const app = harness({ signal: root.signal, stdin });
+
+    expect(await app.run()).toBe(130);
+    expect(returned).toBeTrue();
+    expect(app.runner.accesses).toEqual([]);
+    expect(app.diagnostics).toEqual(["voice request cancelled"]);
+  });
+
   test("external cancellation wins before work and during generation or child stages", async () => {
     const before = new AbortController();
     before.abort();
@@ -448,6 +512,19 @@ describe("native voice coordinator", () => {
     expect(await copy.run()).toBe(1);
     expect(decoder.decode(timedOutCopy.requests.at(-1)?.stdin)).toBe(COPY_FAILED_NOTICE);
   });
+
+  test("enforces the generation deadline when a runtime ignores its signal", async () => {
+    const app = harness({
+      generationTimeoutMs: 1,
+      generationCleanupTimeoutMs: 1,
+      generate: async () => await new Promise<string>(() => undefined),
+    });
+
+    expect(await app.run()).toBe(0);
+    expect(app.diagnostics).toEqual(["voice generation timed out"]);
+    expect(app.runner.requests.map((request) => request.executable)).toEqual(["/usr/bin/say"]);
+    expect(decoder.decode(app.runner.requests[0]?.stdin)).toBe(REQUEST_FAILED_NOTICE);
+  });
 });
 
 describe("voice process and signal adapters", () => {
@@ -539,6 +616,54 @@ describe("voice process and signal adapters", () => {
       signal: new AbortController().signal,
       timeoutMs: 1,
     })).toEqual({ kind: "timed_out", detail: "timed out after 1ms" });
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(state.exitCode).toBe(137);
+  });
+
+  test("Bun adapter terminates, force-kills, and reaps a cancelled child", async () => {
+    const root = new AbortController();
+    let resolveExit: (code: number) => void = () => undefined;
+    const state: { exitCode: number | null } = { exitCode: null };
+    const signals: NodeJS.Signals[] = [];
+    const exited = new Promise<number>((resolve) => {
+      resolveExit = resolve;
+    });
+    const emptyStream = () => new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+    const runner = createBunVoiceProcessRunner({
+      forceKillDelayMs: 1,
+      spawn: () => {
+        queueMicrotask(() => root.abort());
+        return {
+          stdin: { write: () => undefined, end: () => undefined },
+          stdout: emptyStream(),
+          stderr: emptyStream(),
+          exited,
+          get exitCode() {
+            return state.exitCode;
+          },
+          kill(signal) {
+            signals.push(signal);
+            if (signal === "SIGKILL") {
+              state.exitCode = 137;
+              resolveExit(137);
+            }
+          },
+        };
+      },
+    });
+
+    expect(await runner.run({
+      executable: "/usr/bin/say",
+      args: [],
+      stdin: encoder.encode("notice"),
+      env: {},
+      signal: root.signal,
+      timeoutMs: 1_000,
+    })).toEqual({ kind: "cancelled" });
     expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
     expect(state.exitCode).toBe(137);
   });

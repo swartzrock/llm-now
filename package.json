@@ -32,5 +32,8 @@
     "@swartzrock/byok-runtime": "2.2.0",
     "picocolors": "1.1.1",
     "unicode-case-folding": "1.1.1"
+  },
+  "patchedDependencies": {
+    "@swartzrock/byok-runtime@2.2.0": "patches/@swartzrock%2Fbyok-runtime@2.2.0.patch"
   }
 }
