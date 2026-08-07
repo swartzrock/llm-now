@@ -1,5 +1,11 @@
 # llm-now
 
+## 2.3.0
+
+### Minor Changes
+
+- 57c6768: Add request-scoped behavioral instructions for alias and explicit provider/model runs.
+
 ## 2.2.0
 
 ### Minor Changes
