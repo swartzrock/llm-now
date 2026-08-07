@@ -3,6 +3,7 @@ import { caseFold } from "unicode-case-folding";
 import { constants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import type { AliasDocument } from "./aliases.ts";
+import { createSensitiveValueRegistry } from "./credentials.ts";
 import { InvalidUtf8Error, resolveInputSource, type PromptInput } from "./io.ts";
 import type { RuntimeGateway } from "./runtime.ts";
 import {
@@ -260,12 +261,7 @@ function redactionVariants(value: string): readonly string[] {
 }
 
 function redactRequestValues(value: string, requestValues: readonly string[]): string {
-  const variants = [...new Set(requestValues.flatMap(redactionVariants))]
-    .filter((candidate) => candidate.length > 0)
-    .sort((left, right) => right.length - left.length);
-  let redacted = value;
-  for (const candidate of variants) redacted = redacted.replaceAll(candidate, "[REDACTED]");
-  return redacted;
+  return createSensitiveValueRegistry(requestValues.flatMap(redactionVariants)).redact(value);
 }
 
 function childDetail(outcome: Exclude<VoiceProcessOutcome, { kind: "completed" | "cancelled" }>): string {
