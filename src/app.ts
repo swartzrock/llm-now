@@ -66,6 +66,12 @@ import {
   type SearchablePrompter,
 } from "./prompts.ts";
 import { RuntimeStageError, type RuntimeGateway } from "./runtime.ts";
+import {
+  createBunVoiceProcessRunner,
+  runVoice as runNativeVoice,
+  type VoiceCancellation,
+  type VoiceProcessRunner,
+} from "./voice.ts";
 
 const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
 const DEFAULT_MODEL_LIST_TIMEOUT_MS = 10_000;
@@ -107,7 +113,10 @@ export interface ApplicationDependencies {
   credentialResolver: CredentialResolver;
   sensitive: SensitiveValueRegistry;
   nativeVaultEnabled: boolean;
-  runVoice?: (inputFlag: string | undefined, stdin: PromptInput) => Promise<number>;
+  runVoice?: typeof runNativeVoice;
+  installVoiceCancellation: () => VoiceCancellation;
+  voiceRunner?: VoiceProcessRunner;
+  readVoiceConfig?: (path: string) => Promise<Uint8Array | null>;
   credentialMutationLock?: CredentialMutationLock;
 }
 
@@ -1412,11 +1421,25 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         diagnostic("voice: llm-now --voice currently supports macOS only.");
         return 1;
       }
-      if (deps.runVoice === undefined) {
-        diagnostic("voice: native voice routing is unavailable in this build.");
-        return 1;
+      const cancellation = deps.installVoiceCancellation();
+      try {
+        return await (deps.runVoice ?? runNativeVoice)({
+          inputFlag: parsed.input,
+          stdin: deps.stdin,
+          runtime: deps.runtime,
+          env: deps.env,
+          home: deps.home,
+          aliasPath: applicationAliasPath(deps),
+          loadAliases: deps.loadAliases ?? loadStoredAliases,
+          readConfig: deps.readVoiceConfig,
+          runner: deps.voiceRunner ?? createBunVoiceProcessRunner(),
+          signal: cancellation.signal,
+          diagnostic,
+          generationTimeoutMs: deps.generationTimeoutMs,
+        });
+      } finally {
+        cancellation.dispose();
       }
-      return await deps.runVoice(parsed.input, deps.stdin);
     }
     if (parsed.kind === "aliases") {
       const aliases = (await (deps.loadAliases ?? loadStoredAliases)(

@@ -204,6 +204,54 @@ describe("runtime gateway", () => {
     ]);
   });
 
+  test("rejects a pre-aborted generation before provider setup", async () => {
+    let providerCalls = 0;
+    const gateway = createTestGateway({
+      env: {},
+      createProvider: () => {
+        providerCalls += 1;
+        return runtime();
+      },
+    });
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+
+    await expect(
+      gateway.generate("ollama", "qwen", "prompt", controller.signal),
+    ).rejects.toThrow("cancelled");
+    expect(providerCalls).toBe(0);
+  });
+
+  test("re-checks generation cancellation after async credential setup", async () => {
+    let providerCalls = 0;
+    let generationCalls = 0;
+    const controller = new AbortController();
+    const gateway = createTestGateway({
+      env: {},
+      credentialResolver: {
+        resolve: async () => {
+          controller.abort(new Error("cancelled after setup"));
+          return { source: "environment", apiKey: "secret", envName: "OPENAI_API_KEY" };
+        },
+      },
+      createProvider: () => {
+        providerCalls += 1;
+        return runtime({
+          generateText: async () => {
+            generationCalls += 1;
+            return { text: "unexpected" };
+          },
+        });
+      },
+    });
+
+    await expect(
+      gateway.generate("openai", "gpt-test", "prompt", controller.signal),
+    ).rejects.toThrow("cancelled after setup");
+    expect(providerCalls).toBe(1);
+    expect(generationCalls).toBe(0);
+  });
+
   test("redacts raw and JSON-escaped instructions only from generation failures", async () => {
     const instructions = 'First instruction line.\n  Use "quotes" and \\slashes.  ';
     const jsonEscaped = JSON.stringify(instructions).slice(1, -1);
