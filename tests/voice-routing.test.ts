@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parseConfigDocument, projectVoiceConfig } from "../src/config-schema.ts";
 import {
   VoiceRouterError,
   compactKey,
@@ -40,6 +41,12 @@ interface RouteCase {
   transcript: string;
   aliases: string[];
   config_toml?: string;
+  expected_config?: {
+    wake_words: string[];
+    min_fuzzy_phrase_length: number;
+    min_similarity: number;
+    min_margin: number;
+  };
   expected: RouteExpectation;
 }
 
@@ -73,8 +80,19 @@ describe("shared routing parity corpus", () => {
 
   test("matches route decisions and Unicode-scalar question offsets", () => {
     for (const fixture of corpus.routes) {
-      const config = parseVoiceConfig(fixture.config_toml ?? null, fixture.aliases);
+      const config = fixture.config_toml === undefined
+        ? parseVoiceConfig(null, fixture.aliases)
+        : projectVoiceConfig(parseConfigDocument(fixture.config_toml));
       const result = routeTranscript(fixture.transcript, fixture.aliases, config);
+
+      if (fixture.expected_config !== undefined) {
+        expect({
+          wake_words: config.wakeWords,
+          min_fuzzy_phrase_length: config.minFuzzyPhraseLength,
+          min_similarity: config.minSimilarity,
+          min_margin: config.minMargin,
+        }, fixture.id).toEqual(fixture.expected_config);
+      }
 
       expect(result.alias, fixture.id).toBe(fixture.expected.alias);
       expect(result.question, fixture.id).toBe(fixture.expected.question);

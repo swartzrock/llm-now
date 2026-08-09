@@ -19,6 +19,7 @@ from llm_now_voice.cli import (
     parse_config,
     parse_inventory,
     parse_voice_inventory,
+    resolve_config_path,
     route_transcript,
     run_voice_router,
 )
@@ -30,6 +31,29 @@ PARITY_CORPUS = json.loads(
         encoding="utf-8"
     )
 )
+
+
+def unified_config(
+    *,
+    aliases: tuple[str, ...] = ALIASES,
+    voice_fields: tuple[str, ...] = (),
+    profile_fields: dict[str, tuple[str, ...]] | None = None,
+) -> bytes:
+    profiles = profile_fields or {}
+    lines = ["version = 1"]
+    if voice_fields:
+        lines.extend(("", "[voice]", *voice_fields))
+    for alias in sorted(set(aliases) | set(profiles)):
+        lines.extend(
+            (
+                "",
+                f"[aliases.{alias}]",
+                'provider = "codex-cli"',
+                'model = "default"',
+                *profiles.get(alias, ()),
+            )
+        )
+    return ("\n".join(lines) + "\n").encode()
 
 
 class RoutingParityCorpusTests(unittest.TestCase):
@@ -60,6 +84,16 @@ class RoutingParityCorpusTests(unittest.TestCase):
                 )
                 result = route_transcript(case["transcript"], aliases, config)
                 expected = case["expected"]
+
+                expected_config = case.get("expected_config")
+                if expected_config is not None:
+                    self.assertEqual(list(config.wake_words), expected_config["wake_words"])
+                    self.assertEqual(
+                        config.min_fuzzy_phrase_length,
+                        expected_config["min_fuzzy_phrase_length"],
+                    )
+                    self.assertEqual(config.min_similarity, expected_config["min_similarity"])
+                    self.assertEqual(config.min_margin, expected_config["min_margin"])
 
                 self.assertEqual(result.alias, expected["alias"])
                 self.assertEqual(result.question, expected["question"])
@@ -119,32 +153,50 @@ class ConfigTests(unittest.TestCase):
         config = parse_config(None, ALIASES)
 
         self.assertEqual(config.wake_words, ("hey",))
+        self.assertEqual(config.min_fuzzy_phrase_length, 4)
+        self.assertEqual(config.min_similarity, 65)
+        self.assertEqual(config.min_margin, 15)
         self.assertEqual(config.profiles, {})
 
-    def test_parses_flat_alias_profiles(self) -> None:
+    def test_resolves_unified_path_and_ignores_relative_xdg_roots(self) -> None:
+        home = Path("/Users/test")
+        self.assertEqual(
+            resolve_config_path(home, "/private/config"),
+            Path("/private/config/llm-now/config.toml"),
+        )
+        self.assertEqual(
+            resolve_config_path(home, "relative"),
+            Path("/Users/test/.config/llm-now/config.toml"),
+        )
+
+    def test_parses_unified_voice_and_alias_overrides(self) -> None:
         config = parse_config(
-            b'''wake_words = ["hey", "computer"]
-
-[terra]
-match_phrases = ["tara"]
-voice = "Samantha"
-rate = 205
-pitch = 50
-
-[opus47]
-match_phrases = ["op 47"]
-pitch = 50.5
-
-[haiku]
-pitch = 1
-
-[fred]
-pitch = 127
-''',
+            unified_config(
+                voice_fields=(
+                    'wake_words = ["hey", "computer"]',
+                    "min_fuzzy_phrase_length = 3",
+                    "min_similarity = 72",
+                    "min_margin = 9",
+                ),
+                profile_fields={
+                    "terra": (
+                        'match_phrases = ["tara"]',
+                        'voice = "Samantha"',
+                        "rate = 205",
+                        "pitch = 50",
+                    ),
+                    "opus47": ('match_phrases = ["op 47"]', "pitch = 50.5"),
+                    "haiku": ("pitch = 1",),
+                    "fred": ("pitch = 127",),
+                },
+            ),
             ALIASES,
         )
 
         self.assertEqual(config.wake_words, ("hey", "computer"))
+        self.assertEqual(config.min_fuzzy_phrase_length, 3)
+        self.assertEqual(config.min_similarity, 72)
+        self.assertEqual(config.min_margin, 9)
         self.assertEqual(config.profiles["terra"].match_phrases, ("tara",))
         self.assertEqual(config.profiles["terra"].voice, "Samantha")
         self.assertEqual(config.profiles["terra"].rate, 205)
@@ -170,42 +222,60 @@ pitch = 127
             with self.subTest(data=data), self.assertRaisesRegex(
                 VoiceRouterError, "terra.pitch"
             ):
-                parse_config(data, ALIASES)
+                parse_config(
+                    unified_config(profile_fields={"terra": (data.decode().splitlines()[-1],)}),
+                    ALIASES,
+                )
 
     def test_rejects_invalid_pitch_in_stale_profile_and_raw_speech_fields(self) -> None:
         with self.assertRaisesRegex(VoiceRouterError, "retired.pitch"):
-            parse_config(b"[retired]\npitch = 200\n", ALIASES)
+            parse_config(
+                unified_config(profile_fields={"retired": ("pitch = 200",)}),
+                ALIASES,
+            )
 
-        with self.assertRaisesRegex(VoiceRouterError, "unknown profile field"):
-            parse_config(b"[terra]\nspeech_prefix = '[[pbas 50]]'\n", ALIASES)
+        with self.assertRaisesRegex(VoiceRouterError, "unknown configuration field"):
+            parse_config(
+                unified_config(
+                    profile_fields={"terra": ("speech_prefix = '[[pbas 50]]'",)}
+                ),
+                ALIASES,
+            )
 
-    def test_stale_profiles_are_inert_but_still_structurally_validated(self) -> None:
+    def test_config_aliases_outside_the_inventory_are_inert_but_validated(self) -> None:
         config = parse_config(
-            b'''[retired]
-match_phrases = ["terra"]
-voice = "Old Voice"
-rate = 180
-''',
+            unified_config(
+                profile_fields={
+                    "retired": (
+                        'match_phrases = ["old terra"]',
+                        'voice = "Old Voice"',
+                        "rate = 180",
+                    )
+                }
+            ),
             ALIASES,
         )
 
         self.assertIn("retired", config.profiles)
 
-        with self.assertRaisesRegex(VoiceRouterError, "unknown profile field"):
-            parse_config(b"[retired]\nvolume = 10\n", ALIASES)
+        with self.assertRaisesRegex(VoiceRouterError, "unknown configuration field"):
+            parse_config(
+                unified_config(profile_fields={"retired": ("volume = 10",)}),
+                ALIASES,
+            )
 
     def test_rejects_invalid_root_profile_and_phrase_values(self) -> None:
         invalid = (
-            b"enabled = true\n",
-            b'wake_words = "hey"\n',
-            b'wake_words = [""]\n',
-            b"[terra]\nmatch_phrases = 'tara'\n",
-            b"[terra]\nmatch_phrases = ['...']\n",
-            b"[terra]\nvoice = ''\n",
-            b"[terra]\nrate = 79\n",
-            b"[terra]\nrate = 501\n",
-            b"[terra]\nrate = true\n",
-            b"[wake_words]\nvoice = 'Samantha'\n",
+            b"version = 1\nenabled = true\n[aliases]\n",
+            b'version = 1\n[voice]\nwake_words = "hey"\n[aliases]\n',
+            b'version = 1\n[voice]\nwake_words = [""]\n[aliases]\n',
+            unified_config(profile_fields={"terra": ("match_phrases = 'tara'",)}),
+            unified_config(profile_fields={"terra": ("match_phrases = ['...']",)}),
+            unified_config(profile_fields={"terra": ("voice = ''",)}),
+            unified_config(profile_fields={"terra": ("rate = 79",)}),
+            unified_config(profile_fields={"terra": ("rate = 501",)}),
+            unified_config(profile_fields={"terra": ("rate = true",)}),
+            b"version = 1\n[voice.wake_words]\nvoice = 'Samantha'\n[aliases]\n",
         )
 
         for data in invalid:
@@ -215,12 +285,35 @@ rate = 180
     def test_rejects_active_duplicate_and_canonical_phrase_collisions(self) -> None:
         with self.assertRaisesRegex(VoiceRouterError, "match phrase"):
             parse_config(
-                b"[terra]\nmatch_phrases = ['tara']\n[fred]\nmatch_phrases = ['tara']\n",
+                unified_config(
+                    profile_fields={
+                        "terra": ("match_phrases = ['tara']",),
+                        "fred": ("match_phrases = ['tara']",),
+                    }
+                ),
                 ALIASES,
             )
 
         with self.assertRaisesRegex(VoiceRouterError, "canonical alias"):
-            parse_config(b"[qwen]\nmatch_phrases = ['terra']\n", ALIASES)
+            parse_config(
+                unified_config(profile_fields={"qwen": ("match_phrases = ['terra']",)}),
+                ALIASES,
+            )
+
+    def test_rejects_version_ranges_alias_collisions_and_malformed_shapes(self) -> None:
+        invalid = (
+            b"version = 2\n[aliases]\n",
+            b"version = 1\n[voice]\nmin_fuzzy_phrase_length = 0\n[aliases]\n",
+            b"version = 1\n[voice]\nmin_similarity = 101\n[aliases]\n",
+            b"version = 1\n[voice]\nmin_margin = -1\n[aliases]\n",
+            b"version = 1\n[aliases.deep-seek]\nprovider = 'codex-cli'\nmodel = 'default'\n[aliases.deep_seek]\nprovider = 'codex-cli'\nmodel = 'default'\n",
+            b"version = 1\naliases = []\n",
+            b"version = 1\n[aliases.terra]\nprovider = []\nmodel = 'default'\n",
+        )
+
+        for data in invalid:
+            with self.subTest(data=data), self.assertRaises(VoiceRouterError):
+                parse_config(data, ALIASES)
 
 
 class RoutingTests(unittest.TestCase):
@@ -274,7 +367,9 @@ class RoutingTests(unittest.TestCase):
             "opus47",
             "explain this chord",
             "configured",
-            config_data=b"[opus47]\nmatch_phrases = ['op 47']\n",
+            config_data=unified_config(
+                profile_fields={"opus47": ("match_phrases = ['op 47']",)}
+            ),
         )
 
     def test_unique_fuzzy_variants_match_with_similarity_diagnostics(self) -> None:
@@ -322,7 +417,9 @@ class RoutingTests(unittest.TestCase):
                     "terra",
                     "answer this",
                     "canonical",
-                    config_data=b'wake_words = ["hey", "computer"]\n',
+                    config_data=unified_config(
+                        voice_fields=('wake_words = ["hey", "computer"]',)
+                    ),
                 )
 
     def test_literal_wake_word_alias_falls_back_to_original_view(self) -> None:
@@ -440,7 +537,11 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual([call[2] for call in runner.calls], [5, 50, 5, 120])
 
     def test_selected_voice_and_rate_are_validated_before_generation(self) -> None:
-        config = b"[terra]\nvoice = 'samantha'\nrate = 205\npitch = 50\n"
+        config = unified_config(
+            profile_fields={
+                "terra": ("voice = 'samantha'", "rate = 205", "pitch = 50")
+            }
+        )
         voices = b"Samantha en_US    # Hello\nAlex en_US    # Hello\n"
         answer = b"Answer"
         code, runner, _ = self.run_router(
@@ -464,7 +565,12 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(runner.calls[4][1], b"[[pbas 50]]" + answer)
 
     def test_each_alias_uses_its_own_fractional_or_integer_pitch(self) -> None:
-        config = b"[haiku]\npitch = 50.5\n[terra]\npitch = 70\n"
+        config = unified_config(
+            profile_fields={
+                "haiku": ("pitch = 50.5",),
+                "terra": ("pitch = 70",),
+            }
+        )
 
         for transcript, prefix in (
             (b"haiku, answer this", b"[[pbas 50.5]]"),
@@ -486,7 +592,9 @@ class OrchestrationTests(unittest.TestCase):
         code, runner, diagnostics = self.run_router(
             b"terra, answer this",
             [completed(INVENTORY), completed(b"Alex en_US    # Hello\n"), completed()],
-            config_data=b"[terra]\nvoice = 'Samantha'\n",
+            config_data=unified_config(
+                profile_fields={"terra": ("voice = 'Samantha'",)}
+            ),
         )
 
         self.assertEqual(code, 1)
@@ -498,7 +606,7 @@ class OrchestrationTests(unittest.TestCase):
         code, runner, _ = self.run_router(
             b"unknown, answer this",
             [completed(INVENTORY), completed()],
-            config_data=b"[haiku]\npitch = 50\n",
+            config_data=unified_config(profile_fields={"haiku": ("pitch = 50",)}),
         )
 
         self.assertEqual(code, 0)
@@ -532,7 +640,9 @@ class OrchestrationTests(unittest.TestCase):
                 code, runner, diagnostics = self.run_router(
                     b"haiku, answer this",
                     [completed(INVENTORY), failure, completed()],
-                    config_data=b"[haiku]\npitch = 50\n",
+                    config_data=unified_config(
+                        profile_fields={"haiku": ("pitch = 50",)}
+                    ),
                 )
                 self.assertEqual(code, 0)
                 self.assertNotIn(("/usr/bin/pbcopy",), [call[0] for call in runner.calls])
@@ -546,7 +656,7 @@ class OrchestrationTests(unittest.TestCase):
         code, runner, _ = self.run_router(
             b"haiku, answer this",
             [completed(INVENTORY), completed(answer), completed(returncode=1), completed()],
-            config_data=b"[haiku]\npitch = 50\n",
+            config_data=unified_config(profile_fields={"haiku": ("pitch = 50",)}),
         )
 
         self.assertEqual(code, 1)
@@ -558,7 +668,7 @@ class OrchestrationTests(unittest.TestCase):
         code, runner, diagnostics = self.run_router(
             b"haiku, answer this",
             [completed(INVENTORY), completed()],
-            config_data=b"[haiku]\npitch = 128\n",
+            config_data=unified_config(profile_fields={"haiku": ("pitch = 128",)}),
         )
 
         self.assertEqual(code, 1)
@@ -574,7 +684,7 @@ class OrchestrationTests(unittest.TestCase):
         code, runner, _ = self.run_router(
             b"haiku, answer this",
             [completed(INVENTORY), completed(answer), completed(), completed(returncode=1)],
-            config_data=b"[haiku]\npitch = 50\n",
+            config_data=unified_config(profile_fields={"haiku": ("pitch = 50",)}),
         )
 
         self.assertEqual(code, 1)

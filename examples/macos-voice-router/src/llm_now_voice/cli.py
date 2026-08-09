@@ -18,6 +18,25 @@ from rapidfuzz import fuzz
 
 
 ALIAS_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+STORED_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+PROVIDER_IDS = frozenset(
+    {
+        "anthropic",
+        "openai",
+        "google",
+        "xai",
+        "openrouter",
+        "groq",
+        "mistral",
+        "deepseek",
+        "deepinfra",
+        "ollama",
+        "lm-studio",
+        "codex-cli",
+        "claude-cli",
+    }
+)
+DEFAULT_MODEL_PROVIDERS = frozenset({"codex-cli", "claude-cli"})
 MIN_FUZZY_LENGTH = 4
 MIN_FUZZY_SIMILARITY = 65.0
 MIN_FUZZY_MARGIN = 15.0
@@ -162,6 +181,9 @@ class AliasProfile:
 @dataclass(frozen=True)
 class RouterConfig:
     wake_words: tuple[str, ...] = ("hey",)
+    min_fuzzy_phrase_length: int = MIN_FUZZY_LENGTH
+    min_similarity: int = int(MIN_FUZZY_SIMILARITY)
+    min_margin: int = int(MIN_FUZZY_MARGIN)
     profiles: dict[str, AliasProfile] = field(default_factory=dict)
 
 
@@ -186,13 +208,9 @@ class _Token:
 
 
 def resolve_config_path(home: Path, xdg_config_home: str | None) -> Path:
-    if xdg_config_home:
-        root = Path(xdg_config_home)
-        if not root.is_absolute():
-            raise VoiceRouterError("XDG_CONFIG_HOME must be an absolute path")
-    else:
-        root = home / ".config"
-    return root / "llm-now" / "voice-router.toml"
+    configured = Path(xdg_config_home) if xdg_config_home else None
+    root = configured if configured is not None and configured.is_absolute() else home / ".config"
+    return root / "llm-now" / "config.toml"
 
 
 def parse_inventory(text: str) -> tuple[str, ...]:
@@ -259,35 +277,116 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise VoiceRouterError(f"invalid voice router configuration: {error}") from error
 
-    wake_value = document.pop("wake_words", ["hey"])
-    wake_words = _string_list(wake_value, "wake_words")
+    unknown_root_fields = sorted(set(document) - {"version", "voice", "aliases"})
+    if unknown_root_fields:
+        raise VoiceRouterError(
+            f'unknown configuration field at root: {", ".join(unknown_root_fields)}'
+        )
+    if type(document.get("version")) is not int or document["version"] != 1:
+        raise VoiceRouterError("unsupported configuration version")
+
+    raw_voice = document.get("voice", {})
+    if not isinstance(raw_voice, dict):
+        raise VoiceRouterError("voice must be a TOML table")
+    unknown_voice_fields = sorted(
+        set(raw_voice)
+        - {"wake_words", "min_fuzzy_phrase_length", "min_similarity", "min_margin"}
+    )
+    if unknown_voice_fields:
+        raise VoiceRouterError(
+            f'unknown configuration field at voice: {", ".join(unknown_voice_fields)}'
+        )
+
+    wake_value = raw_voice.get("wake_words", ["hey"])
+    wake_words = _string_list(wake_value, "voice.wake_words")
     _validate_phrases(wake_words, "wake_words")
+    min_fuzzy_phrase_length = _integer_in_range(
+        raw_voice.get("min_fuzzy_phrase_length", MIN_FUZZY_LENGTH),
+        "voice.min_fuzzy_phrase_length",
+        1,
+        64,
+    )
+    min_similarity = _integer_in_range(
+        raw_voice.get("min_similarity", int(MIN_FUZZY_SIMILARITY)),
+        "voice.min_similarity",
+        0,
+        100,
+    )
+    min_margin = _integer_in_range(
+        raw_voice.get("min_margin", int(MIN_FUZZY_MARGIN)),
+        "voice.min_margin",
+        0,
+        100,
+    )
+
+    raw_aliases = document.get("aliases")
+    if not isinstance(raw_aliases, dict):
+        raise VoiceRouterError("aliases must be a TOML table")
 
     profiles: dict[str, AliasProfile] = {}
-    allowed_profile_fields = {"match_phrases", "voice", "rate", "pitch"}
-    for alias, raw_profile in document.items():
-        if not ALIAS_PATTERN.fullmatch(alias):
-            raise VoiceRouterError(f'invalid profile alias: "{alias}"')
-        if not isinstance(raw_profile, dict):
-            raise VoiceRouterError(f'profile "{alias}" must be a TOML table')
+    canonical_names: dict[str, str] = {}
+    routing_names: dict[str, str] = {}
+    allowed_alias_fields = {
+        "provider",
+        "model",
+        "instructions",
+        "match_phrases",
+        "voice",
+        "rate",
+        "pitch",
+    }
+    for original_alias, raw_profile in raw_aliases.items():
+        if not isinstance(original_alias, str) or not STORED_ALIAS_PATTERN.fullmatch(
+            original_alias
+        ):
+            raise VoiceRouterError("invalid alias name")
+        alias = original_alias.lower()
+        if alias in canonical_names:
+            raise VoiceRouterError(f'duplicate case-insensitive alias: "{alias}"')
+        routing_name = compact_key(alias)
+        collision = routing_names.get(routing_name)
+        if collision is not None:
+            raise VoiceRouterError(
+                f'aliases "{collision}" and "{alias}" collide after routing normalization'
+            )
+        canonical_names[alias] = original_alias
+        routing_names[routing_name] = alias
 
-        unknown = sorted(set(raw_profile) - allowed_profile_fields)
+        if not isinstance(raw_profile, dict):
+            raise VoiceRouterError(f'alias "{alias}" must be a TOML table')
+
+        unknown = sorted(set(raw_profile) - allowed_alias_fields)
         if unknown:
             raise VoiceRouterError(
-                f'unknown profile field for "{alias}": {", ".join(unknown)}'
+                f'unknown configuration field at aliases.{alias}: {", ".join(unknown)}'
             )
+
+        provider = raw_profile.get("provider")
+        if not isinstance(provider, str) or provider not in PROVIDER_IDS:
+            raise VoiceRouterError(f"aliases.{alias}.provider is unsupported")
+        model = raw_profile.get("model")
+        if not isinstance(model, str) or not model.strip():
+            raise VoiceRouterError(f"aliases.{alias}.model must be a nonempty string")
+        if model == "default" and provider not in DEFAULT_MODEL_PROVIDERS:
+            raise VoiceRouterError(
+                f"aliases.{alias}.model cannot use default for this provider"
+            )
+
+        instructions = raw_profile.get("instructions")
+        if instructions is not None:
+            _validate_instructions(instructions)
 
         phrases = _string_list(
             raw_profile.get("match_phrases", []),
-            f'{alias}.match_phrases',
+            f"aliases.{alias}.match_phrases",
         )
-        _validate_phrases(phrases, f'{alias}.match_phrases')
+        _validate_phrases(phrases, f"aliases.{alias}.match_phrases")
 
         voice_value = raw_profile.get("voice")
         if voice_value is not None and (
             not isinstance(voice_value, str) or not voice_value.strip()
         ):
-            raise VoiceRouterError(f'{alias}.voice must be a nonempty string')
+            raise VoiceRouterError(f"aliases.{alias}.voice must be a nonempty string")
 
         rate_value = raw_profile.get("rate")
         if rate_value is not None and (
@@ -295,7 +394,9 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
             or not isinstance(rate_value, int)
             or not 80 <= rate_value <= 500
         ):
-            raise VoiceRouterError(f'{alias}.rate must be an integer from 80 through 500')
+            raise VoiceRouterError(
+                f"aliases.{alias}.rate must be an integer from 80 through 500"
+            )
 
         pitch_value = raw_profile.get("pitch")
         if pitch_value is not None and (
@@ -304,7 +405,9 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
             or (isinstance(pitch_value, float) and not math.isfinite(pitch_value))
             or not 1 <= pitch_value <= 127
         ):
-            raise VoiceRouterError(f'{alias}.pitch must be a number from 1 through 127')
+            raise VoiceRouterError(
+                f"aliases.{alias}.pitch must be a number from 1 through 127"
+            )
 
         profiles[alias] = AliasProfile(
             match_phrases=phrases,
@@ -313,8 +416,15 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
             pitch=pitch_value,
         )
 
+    _validate_active_phrases(profiles, tuple(profiles))
     _validate_active_phrases(profiles, active_aliases)
-    return RouterConfig(wake_words=wake_words, profiles=profiles)
+    return RouterConfig(
+        wake_words=wake_words,
+        min_fuzzy_phrase_length=min_fuzzy_phrase_length,
+        min_similarity=min_similarity,
+        min_margin=min_margin,
+        profiles=profiles,
+    )
 
 
 def route_transcript(
@@ -357,7 +467,7 @@ def route_transcript(
             saw_missing_question = True
             continue
 
-        fuzzy = _fuzzy_match(transcript, tokens, start, canonical_by_key)
+        fuzzy = _fuzzy_match(transcript, tokens, start, canonical_by_key, config)
         if fuzzy.accepted:
             return fuzzy
         if fuzzy.reason == "ambiguous":
@@ -394,6 +504,28 @@ def _string_list(value: object, field_name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise VoiceRouterError(f"{field_name} must be a list of strings")
     return tuple(value)
+
+
+def _integer_in_range(value: object, field_name: str, minimum: int, maximum: int) -> int:
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise VoiceRouterError(
+            f"{field_name} must be an integer from {minimum} through {maximum}"
+        )
+    return value
+
+
+def _validate_instructions(value: object) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise VoiceRouterError("instructions must be a nonempty string")
+    for character in value:
+        code_point = ord(character)
+        if (
+            code_point <= 9
+            or 11 <= code_point <= 31
+            or 127 <= code_point <= 159
+            or code_point in (0x2028, 0x2029)
+        ):
+            raise VoiceRouterError("instructions contain unsupported control characters")
 
 
 def _validate_phrases(phrases: Iterable[str], field_name: str) -> None:
@@ -510,6 +642,7 @@ def _fuzzy_match(
     tokens: tuple[_Token, ...],
     start: int,
     canonical_by_key: dict[str, str],
+    config: RouterConfig,
 ) -> RouteResult:
     per_alias: dict[str, tuple[float, int, str]] = {}
     candidate_key = ""
@@ -521,7 +654,7 @@ def _fuzzy_match(
             _digit_sequences(alias_key),
         )
         for alias_key, alias in canonical_by_key.items()
-        if len(alias_key) >= MIN_FUZZY_LENGTH
+        if len(alias_key) >= config.min_fuzzy_phrase_length
     )
     maximum_candidate_length = max(
         (len(alias_key) + max_difference for alias_key, _alias, max_difference, _digits in alias_metadata),
@@ -532,7 +665,7 @@ def _fuzzy_match(
         candidate_key += tokens[end - 1].key
         if len(candidate_key) > maximum_candidate_length:
             break
-        if end >= len(tokens) or len(candidate_key) < MIN_FUZZY_LENGTH:
+        if end >= len(tokens) or len(candidate_key) < config.min_fuzzy_phrase_length:
             continue
         question = transcript[tokens[end].start :]
         candidate_digits = _digit_sequences(candidate_key)
@@ -560,9 +693,9 @@ def _fuzzy_match(
     )
     best_score, best_alias, best_question = ranked[0]
     runner_up = ranked[1][0] if len(ranked) > 1 else None
-    if best_score < MIN_FUZZY_SIMILARITY:
+    if best_score < config.min_similarity:
         return RouteResult(None, None, "no_match", best_score, runner_up)
-    if runner_up is not None and best_score - runner_up < MIN_FUZZY_MARGIN:
+    if runner_up is not None and best_score - runner_up < config.min_margin:
         return RouteResult(None, None, "ambiguous", best_score, runner_up)
     return RouteResult(best_alias, best_question, "fuzzy", best_score, runner_up)
 
