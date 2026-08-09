@@ -17,6 +17,7 @@ import {
   loadAliases as loadLegacyAliases,
   normalizeAliasName,
   parseAliasDocument,
+  resolveAliasPath,
   sameAliasRecord,
   type AliasDocument,
   type AliasRecord,
@@ -136,26 +137,13 @@ interface BackupPublication {
 }
 
 export function resolveConfigPaths(options: ConfigPathOptions): ConfigPaths {
-  if (options.platform === "win32") {
-    const root = options.env.APPDATA && win32.isAbsolute(options.env.APPDATA)
-      ? options.env.APPDATA
-      : win32.join(options.home, "AppData", "Roaming");
-    const directory = win32.join(root, "llm-now");
-    return {
-      configPath: win32.join(directory, "config.toml"),
-      legacyAliasPath: win32.join(directory, "aliases.json"),
-      legacyVoicePath: win32.join(directory, "voice-router.toml"),
-    };
-  }
-
-  const root = options.env.XDG_CONFIG_HOME && posix.isAbsolute(options.env.XDG_CONFIG_HOME)
-    ? options.env.XDG_CONFIG_HOME
-    : posix.join(options.home, ".config");
-  const directory = posix.join(root, "llm-now");
+  const legacyAliasPath = resolveAliasPath(options);
+  const path = options.platform === "win32" ? win32 : posix;
+  const directory = path.dirname(legacyAliasPath);
   return {
-    configPath: posix.join(directory, "config.toml"),
-    legacyAliasPath: posix.join(directory, "aliases.json"),
-    legacyVoicePath: posix.join(directory, "voice-router.toml"),
+    configPath: path.join(directory, "config.toml"),
+    legacyAliasPath,
+    legacyVoicePath: path.join(directory, "voice-router.toml"),
   };
 }
 

@@ -1,9 +1,12 @@
 import { isByokProviderId, type ByokProviderId } from "@swartzrock/byok-runtime";
 import { stringify } from "smol-toml";
-import type { AliasRecord } from "./aliases.ts";
+import {
+  hasInvalidInstructionCharacters,
+  isValidAliasName,
+  type AliasRecord,
+} from "./aliases.ts";
 import { compactKey, type AliasProfile, type VoiceConfig } from "./voice-routing.ts";
 
-const ALIAS_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
 const ROOT_FIELDS = new Set(["version", "voice", "aliases"]);
 const VOICE_FIELDS = new Set([
@@ -122,16 +125,8 @@ function optionalPitch(value: unknown, field: string): number {
 
 function validateInstructions(value: unknown): string {
   const instructions = requiredString(value, "instructions");
-  for (const character of instructions) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    const invalid = codePoint <= 9
-      || (codePoint >= 11 && codePoint <= 31)
-      || (codePoint >= 127 && codePoint <= 159)
-      || codePoint === 0x2028
-      || codePoint === 0x2029;
-    if (invalid) {
-      throw new ConfigSchemaError("instructions contain unsupported control characters");
-    }
+  if (hasInvalidInstructionCharacters(instructions)) {
+    throw new ConfigSchemaError("instructions contain unsupported control characters");
   }
   return instructions;
 }
@@ -239,7 +234,7 @@ export function parseConfigDocument(text: string, path = "config.toml"): ConfigD
   const names = new Map<string, string>();
   const routingNames = new Map<string, string>();
   for (const [originalName, value] of Object.entries(raw.aliases)) {
-    if (!ALIAS_NAME.test(originalName)) throw new ConfigSchemaError("invalid alias name");
+    if (!isValidAliasName(originalName)) throw new ConfigSchemaError("invalid alias name");
     const name = originalName.toLowerCase();
     if (names.has(name)) throw new ConfigSchemaError(`duplicate case-insensitive alias: ${name}`);
     const routingName = compactKey(name);
