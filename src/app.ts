@@ -19,7 +19,6 @@ import {
   resolveAlias as resolveStoredAlias,
   resolveAliasPath,
   sameAliasRecord,
-  saveAlias as saveStoredAlias,
 } from "./aliases.ts";
 import {
   UsageError,
@@ -31,7 +30,9 @@ import {
 import {
   loadConfigSnapshot,
   loadUnifiedConfigSnapshot,
+  migrateConfig as migrateStoredConfig,
   resolveConfigPaths,
+  saveConfigAlias as saveStoredAlias,
   type ConfigSnapshot,
 } from "./config.ts";
 import {
@@ -115,6 +116,7 @@ export interface ApplicationDependencies {
   loadAliases?: typeof loadStoredAliases;
   resolveAlias?: typeof resolveStoredAlias;
   saveAlias?: typeof saveStoredAlias;
+  migrateConfig?: typeof migrateStoredConfig;
   generationTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault: CredentialVault;
@@ -600,8 +602,9 @@ async function prepareRequiredShortcut(
       let overwriteCancelled = false;
       let result: SaveAliasResult;
       try {
-        result = await save(applicationAliasPath(deps), name, pendingSelection, {
+        result = await save(applicationConfigPaths(deps), name, pendingSelection, {
           persistenceBlocker: capture.persistenceBlocker,
+          onStaleProfiles: staleProfileReporter(diagnostic),
           persistenceGuard: instructionPersistenceGuard(
             deps,
             capture.instructions,
@@ -680,6 +683,16 @@ function loadApplicationConfigSnapshot(
 
 function preflightUnifiedConfig(deps: ApplicationDependencies): Promise<ConfigSnapshot | null> {
   return loadUnifiedConfigSnapshot(applicationConfigPaths(deps).configPath);
+}
+
+function staleProfileReporter(
+  diagnostic: (text: string) => void,
+): (names: readonly string[]) => void {
+  return (names) => {
+    if (names.length > 0) {
+      diagnostic(`config: stale voice profiles not attached: ${[...names].sort().join(", ")}`);
+    }
+  };
 }
 
 function runWithCredentialMutationLock<T>(
@@ -865,8 +878,9 @@ async function offerAliasSave(
       const pendingSelection = withInstructions(selection, capture.instructions);
       const canonicalName = normalizeAliasName(name);
       try {
-        const result = await save(applicationAliasPath(deps), canonicalName, pendingSelection, {
+        const result = await save(applicationConfigPaths(deps), canonicalName, pendingSelection, {
           persistenceBlocker: capture.persistenceBlocker,
+          onStaleProfiles: staleProfileReporter(diagnostic),
           persistenceGuard: instructionPersistenceGuard(
             deps,
             capture.instructions,
@@ -1113,14 +1127,19 @@ async function runCredentialManagement(
       pendingAlias.persistenceBlocker,
     );
     const result = await saveAlias(
-      applicationAliasPath(deps),
+      applicationConfigPaths(deps),
       pendingAlias.name,
       pendingAlias.selection,
       pendingAlias.expectedCurrent === undefined
-        ? { persistenceBlocker: pendingAlias.persistenceBlocker, persistenceGuard }
+        ? {
+          persistenceBlocker: pendingAlias.persistenceBlocker,
+          persistenceGuard,
+          onStaleProfiles: staleProfileReporter(diagnostic),
+        }
         : {
           persistenceBlocker: pendingAlias.persistenceBlocker,
           persistenceGuard,
+          onStaleProfiles: staleProfileReporter(diagnostic),
           confirmOverwrite: async (_name, current) =>
             current !== undefined && sameAliasRecord(current, pendingAlias.expectedCurrent!),
         },
@@ -1458,6 +1477,23 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     }
     if (parsed.kind === "version") {
       deps.stdout.write(`${deps.version}\n`);
+      return 0;
+    }
+    if (parsed.kind === "config-path") {
+      deps.stdout.write(`${applicationConfigPaths(deps).configPath}\n`);
+      return 0;
+    }
+    if (parsed.kind === "migrate-config") {
+      const paths = applicationConfigPaths(deps);
+      const result = await (deps.migrateConfig ?? migrateStoredConfig)(paths);
+      staleProfileReporter(diagnostic)(result.staleProfiles);
+      deps.stdout.write(
+        result.kind === "already-unified"
+          ? `Configuration already unified at ${paths.configPath}.\n`
+          : result.kind === "created-empty"
+          ? `Created empty configuration at ${paths.configPath}.\n`
+          : `Migrated configuration to ${paths.configPath}.\n`,
+      );
       return 0;
     }
     if (parsed.kind === "voice") {

@@ -32,6 +32,8 @@ export function renderHelpText(
 ${heading("Usage:")}
   ${literal("llm-now")}
   ${literal("llm-now")} ${literal("--aliases")}
+  ${literal("llm-now")} ${literal("--config-path")}
+  ${literal("llm-now")} ${literal("--migrate-config")}
   ${literal("llm-now")} ${literal("--voice")} [${literal("--input")} ${metadata("<text>")}]
   ${literal("llm-now")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${metadata("<alias>")}
@@ -62,6 +64,8 @@ ${heading("Rules:")}
 
 ${heading("Options:")}
   ${literal("--aliases")}            List saved aliases
+  ${literal("--config-path")}        Print the unified configuration path
+  ${literal("--migrate-config")}     Migrate legacy configuration without changing aliases
   ${literal("--voice")}              Route one dictated transcript on macOS
   ${literal("--input")} ${metadata("<text>")}       Prompt text
   ${literal("--instruction")} ${metadata("<text>")} Request-scoped behavioral instruction
@@ -103,6 +107,8 @@ export type ParsedArguments =
   | { kind: "help" }
   | { kind: "version" }
   | { kind: "aliases" }
+  | { kind: "config-path" }
+  | { kind: "migrate-config" }
   | { kind: "voice"; input?: string }
   | { kind: "run"; input?: string; instruction?: string; selection: Selection };
 
@@ -132,6 +138,8 @@ export function parseArguments(args: string[]): ParsedArguments {
     provider?: string;
     model?: string;
     aliases?: boolean;
+    "config-path"?: boolean;
+    "migrate-config"?: boolean;
     voice?: boolean;
     help?: boolean;
     version?: boolean;
@@ -149,6 +157,8 @@ export function parseArguments(args: string[]): ParsedArguments {
         provider: { type: "string" },
         model: { type: "string" },
         aliases: { type: "boolean" },
+        "config-path": { type: "boolean" },
+        "migrate-config": { type: "boolean" },
         voice: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean" },
@@ -161,6 +171,12 @@ export function parseArguments(args: string[]): ParsedArguments {
   }
 
   const supplied = Object.entries(values).filter(([, value]) => value !== undefined && value !== false);
+  if (values["config-path"] || values["migrate-config"]) {
+    if (supplied.length !== 1 || positionals.length > 0) {
+      throw new UsageError("--config-path and --migrate-config must be used alone.");
+    }
+    return values["config-path"] ? { kind: "config-path" } : { kind: "migrate-config" };
+  }
   if (values.aliases) {
     if (supplied.length !== 1 || positionals.length > 0) {
       throw new UsageError("--aliases must be used without other options.");

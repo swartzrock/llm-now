@@ -24,6 +24,8 @@ const APPROVED_HELP_TEXT = `A tiny CLI to send text-generation prompts to the mo
 Usage:
   llm-now
   llm-now --aliases
+  llm-now --config-path
+  llm-now --migrate-config
   llm-now --voice [--input <text>]
   llm-now --input <text>
   llm-now <alias>
@@ -54,6 +56,8 @@ Rules:
 
 Options:
   --aliases            List saved aliases
+  --config-path        Print the unified configuration path
+  --migrate-config     Migrate legacy configuration without changing aliases
   --voice              Route one dictated transcript on macOS
   --input <text>       Prompt text
   --instruction <text> Request-scoped behavioral instruction
@@ -453,6 +457,19 @@ describe("arguments and input", () => {
     expect(() => parseArguments(["--aliases", "--instruction", "temporary"])).toThrow(
       UsageError,
     );
+  });
+
+  test("configuration maintenance flags are standalone and mutually exclusive", () => {
+    expect(parseArguments(["--config-path"])).toEqual({ kind: "config-path" });
+    expect(parseArguments(["--migrate-config"])).toEqual({ kind: "migrate-config" });
+    for (const args of [
+      ["--config-path", "daily"],
+      ["--config-path", "--aliases"],
+      ["--migrate-config", "--input", "prompt"],
+      ["--migrate-config", "--voice"],
+      ["--migrate-config", "--config-path"],
+      ["--migrate-config", "--provider", "ollama", "--model", "qwen"],
+    ]) expect(() => parseArguments(args)).toThrow(UsageError);
   });
 
   test("renders the exact approved compact plain help", () => {

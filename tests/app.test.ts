@@ -168,6 +168,7 @@ function dependencies(options: {
   }>;
   resolveAlias?: (path: string, name: string) => Promise<AliasRecord>;
   saveAlias?: (...args: Parameters<NonNullable<Parameters<typeof runApplication>[0]["saveAlias"]>>) => Promise<SaveAliasResult>;
+  migrateConfig?: NonNullable<Parameters<typeof runApplication>[0]["migrateConfig"]>;
   generationTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault?: CredentialVault;
@@ -220,6 +221,7 @@ function dependencies(options: {
       loadAliases: options.loadAliases,
       resolveAlias: options.resolveAlias,
       saveAlias: options.saveAlias,
+      migrateConfig: options.migrateConfig,
       generationTimeoutMs: options.generationTimeoutMs,
       modelListTimeoutMs: options.modelListTimeoutMs,
       credentialVault,
@@ -571,6 +573,164 @@ describe("unified read authority", () => {
     expect(childWork).toEqual([]);
     expect(app.runtime.calls.generate).toBe(0);
     expect(app.stderr.text()).not.toContain(sentinel);
+  });
+});
+
+describe("configuration maintenance", () => {
+  test("a default alias save migrates legacy sources only after the save boundary", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const aliasPath = join(directory, "aliases.json");
+    const voiceConfigPath = join(directory, "voice-router.toml");
+    const configPath = join(directory, "config.toml");
+    const aliases = '{"version":1,"aliases":{"legacy":{"provider":"ollama","model":"old"}}}\n';
+    const voice = "[fresh]\nvoice = 'Samantha'\n[stale]\nrate = 205\n";
+    await writeFile(aliasPath, aliases);
+    await writeFile(voiceConfigPath, voice);
+    const app = dependencies({
+      args: ["--provider", "ollama", "--model", "new", "--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { XDG_CONFIG_HOME: root, NO_COLOR: "1" },
+      aliasPath,
+      voiceConfigPath,
+      configPath,
+      prompter: prompts({ names: ["fresh"], instructions: [""] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    const parsed = Bun.TOML.parse(await Bun.file(configPath).text()) as {
+      aliases: Record<string, Record<string, unknown>>;
+    };
+    expect(parsed.aliases.legacy).toMatchObject({ provider: "ollama", model: "old" });
+    expect(parsed.aliases.fresh).toMatchObject({
+      provider: "ollama",
+      model: "new",
+      voice: "Samantha",
+    });
+    expect(parsed.aliases.stale).toBeUndefined();
+    expect(app.stderr.text()).toContain("config: stale voice profiles not attached: stale\n");
+    expect(await Bun.file(aliasPath).text()).toBe(aliases);
+    expect(await Bun.file(voiceConfigPath).text()).toBe(voice);
+    expect(await Bun.file(`${aliasPath}.pre-unified-v1.bak`).text()).toBe(aliases);
+    expect(await Bun.file(`${voiceConfigPath}.pre-unified-v1.bak`).text()).toBe(voice);
+  });
+
+  test("cancelling a default overwrite leaves legacy authority untouched", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const aliasPath = join(directory, "aliases.json");
+    const configPath = join(directory, "config.toml");
+    const aliases = '{"version":1,"aliases":{"daily":{"provider":"ollama","model":"old"}}}\n';
+    await writeFile(aliasPath, aliases);
+    const app = dependencies({
+      args: ["--provider", "ollama", "--model", "new", "--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { XDG_CONFIG_HOME: root, NO_COLOR: "1" },
+      aliasPath,
+      configPath,
+      voiceConfigPath: join(directory, "voice-router.toml"),
+      prompter: prompts({ names: ["daily"], instructions: [""], confirms: [null] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(await Bun.file(configPath).exists()).toBeFalse();
+    expect(await Bun.file(aliasPath).text()).toBe(aliases);
+    expect((await readdir(directory)).sort()).toEqual(["aliases.json"]);
+  });
+
+  test("prints the config path without reading stdin, config, providers, credentials, or voice", async () => {
+    const app = dependencies({
+      args: ["--config-path"],
+      stdin: {
+        isTTY: false,
+        async *[Symbol.asyncIterator]() {
+          throw new Error("stdin must stay closed");
+        },
+      },
+      configPath: "/chosen/config.toml",
+      loadAliases: async () => { throw new Error("aliases must not load"); },
+      saveAlias: async () => { throw new Error("aliases must not save"); },
+      migrateConfig: async () => { throw new Error("migration must not run"); },
+      runVoice: async () => { throw new Error("voice must not run"); },
+      installVoiceCancellation: () => { throw new Error("voice cancellation must not install"); },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("/chosen/config.toml\n");
+    expect(app.stderr.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("migrates without unrelated work and reports sorted stale profiles once", async () => {
+    const calls: string[] = [];
+    const app = dependencies({
+      args: ["--migrate-config"],
+      stdin: {
+        isTTY: false,
+        async *[Symbol.asyncIterator]() {
+          throw new Error("stdin must stay closed");
+        },
+      },
+      configPath: "/chosen/config.toml",
+      loadAliases: async () => { throw new Error("application aliases must not load"); },
+      saveAlias: async () => { throw new Error("alias save must not run"); },
+      migrateConfig: async (paths) => {
+        calls.push(paths.configPath);
+        return { kind: "migrated", staleProfiles: ["zed", "alpha"] };
+      },
+      runVoice: async () => { throw new Error("voice must not run"); },
+      installVoiceCancellation: () => { throw new Error("voice cancellation must not install"); },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(calls).toEqual(["/chosen/config.toml"]);
+    expect(app.stdout.text()).toBe("Migrated configuration to /chosen/config.toml.\n");
+    expect(app.stderr.text()).toBe("config: stale voice profiles not attached: alpha, zed\n");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("distinguishes already-unified and empty migration outcomes", async () => {
+    for (const [kind, outputText] of [
+      ["already-unified", "Configuration already unified at /chosen/config.toml.\n"],
+      ["created-empty", "Created empty configuration at /chosen/config.toml.\n"],
+    ] as const) {
+      const app = dependencies({
+        args: ["--migrate-config"],
+        configPath: "/chosen/config.toml",
+        migrateConfig: async () => ({ kind, staleProfiles: [] }),
+      });
+      expect(await runApplication(app.value)).toBe(0);
+      expect(app.stdout.text()).toBe(outputText);
+      expect(app.stderr.text()).toBe("");
+    }
+  });
+
+  test("redacts legacy values from explicit migration diagnostics", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const sentinel = "sk-live-MAINTENANCE-SENTINEL";
+    await writeFile(
+      join(directory, "voice-router.toml"),
+      `[stale]\nvoice = "${sentinel}"\nbroken =\n`,
+    );
+    const app = dependencies({
+      args: ["--migrate-config"],
+      env: { XDG_CONFIG_HOME: root },
+      aliasPath: join(directory, "aliases.json"),
+      configPath: join(directory, "config.toml"),
+      voiceConfigPath: join(directory, "voice-router.toml"),
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).not.toContain(sentinel);
+    expect(await Bun.file(join(directory, "config.toml")).exists()).toBeFalse();
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
   });
 });
 
