@@ -81,14 +81,14 @@ daily → OpenAI · gpt-5
 
 Inventory output has one uncolored, unpadded `alias → Provider Label · model`
 row per canonical lowercase alias, sorted by canonical alias, with no header. A
-null model is shown as `provider default`. A missing or empty alias store exits
+delegated model is shown as `provider default`. A missing or empty configuration exits
 `0` with zero stdout bytes. Successful inventory writes only to stdout and
 leaves stderr empty. Inventory intentionally reveals neither instruction text
 nor whether a shortcut has instructions.
 
 `--aliases` is standalone and ignores stdin. Combining it with any other option
 or positional value exits `2`, leaves stdout empty, and writes a `usage:`
-diagnostic to stderr. An invalid, unreadable, or case-conflicting alias store
+diagnostic to stderr. An invalid, unreadable, or case-conflicting configuration
 exits `1`, leaves stdout empty, and writes the existing `config:` diagnostic to
 stderr. Inventory returns before prompt handling, provider discovery or runtime
 calls, credential access, and alias mutation. The bare word `aliases` remains a
@@ -126,7 +126,7 @@ input. The prompt must still come from exactly one existing source: `--input`,
 stdin, or the alias-only terminal prompt. For an alias with saved instructions,
 the command-line value replaces the saved value for that request; omitting the
 option keeps the saved value. `llm-now` does not write the command-line value to
-the alias store or mutate the selected alias. If a fresh interactive selection
+`config.toml` or mutate the selected alias. If a fresh interactive selection
 later offers to save an alias, its instruction field starts independently and
 only a value entered in that save flow is persisted.
 
@@ -144,29 +144,170 @@ Arguments, `--input`, piped input, and noninteractive execution bypass the launc
 
 The launcher’s creation route saves a required shortcut before its first run. Existing direct interactive provider/model selection retains its established optional alias follow-up: after a successful unnamed call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`. Type a name, then optionally enter visible multiline instructions and use its `[ save ]` action, to save that provider/model pair; press Enter at the name field to exit. If the selected provider/model is already saved, it reports the existing alias and suggests an executable command such as `llm-now daily --input "<prompt>"` for next time instead of asking for a duplicate. A launcher run-once call and a call that selected an existing alias never offer this follow-up. Aliases contain no credentials and are available from every working directory.
 
-- macOS/Linux: `~/.config/llm-now/aliases.json`
-- Windows: `%APPDATA%\\llm-now\\aliases.json`, otherwise `%USERPROFILE%\\AppData\\Roaming\\llm-now\\aliases.json`
+All alias and voice settings share one versioned TOML file. Print its exact path
+without reading or changing configuration:
 
-Saving the same name, target, and instructions, in any capitalization, reports that it is already saved. Recreate a shortcut with the same name to add, change, or remove its instructions; any change to its target or instructions requires overwrite confirmation, defaulting to No. A stale alias fails without selecting a replacement.
+```bash
+llm-now --config-path
+```
 
-Instructions are stored as plaintext in `aliases.json`. Each shortcut invocation passes its saved instructions to the provider separately from that invocation’s prompt. Explicit provider/model calls and launcher “Run once…” calls do not inherit shortcut instructions. Provider behavior, retention, and precedence remain subject to the selected provider’s policies. For CLI-backed providers, instructions may be transmitted in child-process arguments and therefore may be visible to local process inspection or audit tools. Do not store secrets, credentials, or data you are not permitted to disclose as shortcut instructions. `llm-now` screens recognized credentials before saving and avoids echoing instruction-bearing child arguments in its own diagnostics and maintained fixtures, but those protections do not turn the plaintext field into a secret store.
+The platform paths are:
 
-Existing version 1 alias files need no eager migration. Case-only legacy entries
-that point to the same provider and model collapse to one lowercase alias in
-memory without rewriting the file; the next successful alias save persists all
-keys in lowercase. If case-only entries point to different targets, `llm-now`
-fails closed with a diagnostic naming the entries and alias-file path so you can
-keep the intended target. It never chooses between conflicting targets.
+- macOS/Linux: `$XDG_CONFIG_HOME/llm-now/config.toml` when
+  `XDG_CONFIG_HOME` is absolute, otherwise `~/.config/llm-now/config.toml`;
+- Windows: `%APPDATA%\llm-now\config.toml` when `APPDATA` is absolute,
+  otherwise `%USERPROFILE%\AppData\Roaming\llm-now\config.toml`.
 
-A version 1 file stays version 1 until an instruction-bearing shortcut is
-saved. That write upgrades the document to version 2, and later removing the
-last instruction does not automatically downgrade it. Before returning to a
-binary that predates version 2, prefer installing a compatible version. For
-manual recovery, first copy the version 2 file and preserve its original file
-mode; then create a restrictive-permission version 1 copy containing only each
-alias’s `provider` and `model`, intentionally dropping all instructions. Older
-binaries may reject alias operations while the version 2 file is active;
-explicit provider/model calls that do not depend on aliases remain available.
+Relative `XDG_CONFIG_HOME` and `APPDATA` values are ignored in favor of the
+platform fallback. `--config-path` must be used alone.
+
+### Configuration format
+
+The closed version 1 grammar has a required `version`, a required `[aliases]`
+table (which may be empty), an optional global `[voice]` table, and one
+`[aliases.<name>]` table per alias. This example shows every supported field;
+the values are examples, not generated defaults:
+
+```toml
+version = 1
+
+[voice]
+wake_words = ["hey", "computer"]
+min_fuzzy_phrase_length = 4
+min_similarity = 65
+min_margin = 15
+
+[aliases.daily]
+provider = "openai"
+model = "gpt-5"
+instructions = "Answer concisely."
+match_phrases = ["day lee"]
+voice = "Samantha"
+rate = 205
+pitch = 50.5
+
+[aliases.local]
+provider = "codex-cli"
+model = "default"
+```
+
+`provider` and a nonblank `model` are required for every alias. Valid provider
+IDs are `ollama`, `lm-studio`, `codex-cli`, `claude-cli`, `anthropic`,
+`openai`, `google`, `xai`, `openrouter`, `groq`, `mistral`, `deepseek`, and
+`deepinfra`. `model = "default"` means the authenticated CLI's delegated model
+and is valid only for `codex-cli` and `claude-cli`. Alias names are ASCII
+case-insensitive, at most 64 characters, start with a letter or digit, and
+otherwise use letters, digits, `_`, or `-`; llm-now saves them in lowercase.
+
+Every other field is optional:
+
+- `[voice].wake_words` is a list of unique, nonblank normalized strings. Omit
+  it to use `["hey"]`; set it to `[]` to disable wake-word stripping.
+- `[voice].min_fuzzy_phrase_length` is an integer from `1` through `64`; omit it
+  to use `4`.
+- `[voice].min_similarity` is an integer from `0` through `100`; omit it to use
+  `65`.
+- `[voice].min_margin` is an integer from `0` through `100`; omit it to use
+  `15`.
+- `instructions` is a nonblank plaintext string. Ordinary line breaks are
+  supported; tabs, other unsupported control characters, and Unicode line or
+  paragraph separators are rejected.
+- `match_phrases` is a list of unique, nonblank normalized strings. A phrase
+  cannot collide with another alias's canonical name or match phrase. Omit it
+  to use canonical and fuzzy matching only; set it to `[]` for no custom
+  phrases.
+- `voice` is a nonblank installed macOS voice name.
+- `rate` is an integer from `80` through `500`.
+- `pitch` is an integer or fractional number from `1` through `127`, inclusive.
+
+Omitting `voice`, `rate`, or `pitch` lets `/usr/bin/say` inherit the current
+system voice, speech rate, or that voice's normal baseline pitch independently.
+Voice fields are portable: macOS executes them, while Linux and Windows retain
+them across alias saves but continue to reject `--voice` execution.
+
+The router always tries canonical aliases, then configured phrases, then fuzzy
+matching. Configurable thresholds do not remove its safety gates: fuzzy
+candidates must have a compatible length, preserve digit sequences, clear the
+minimum similarity, and beat the runner-up by the configured margin. Weak or
+ambiguous input fails closed.
+
+Saving the same name, target, and instructions, in any capitalization, reports
+that it is already saved. Recreate a shortcut with the same name to add,
+change, or remove its instructions; any change to its target or instructions
+requires overwrite confirmation, defaulting to No. A stale alias fails without
+selecting a replacement.
+
+An alias save rewrites the complete TOML document canonically. It preserves all
+valid unrelated alias, routing, and speech values, sorts aliases, and may remove
+comments or custom formatting. Files generated by llm-now are deliberately
+sparse and comment-free: omitted wake-word, fuzzy-routing, speech, and example
+values are not written, so deleting an override resumes the documented compiled
+or system behavior instead of pinning today's value.
+
+Instructions are plaintext in `config.toml`. Migration backups are also exact
+plaintext copies and may contain legacy instructions. Protect the configuration
+directory accordingly. Each shortcut invocation passes its saved instructions
+to the provider separately from that invocation’s prompt. Explicit
+provider/model calls and launcher “Run once…” calls do not inherit shortcut
+instructions. Provider behavior, retention, and precedence remain subject to
+the selected provider’s policies. For CLI-backed providers, instructions may be
+transmitted in child-process arguments and therefore may be visible to local
+process inspection or audit tools. Do not store secrets, credentials, or data
+you are not permitted to disclose as shortcut instructions. Recognized
+credentials and provider authentication remain outside `config.toml`.
+
+### Migration and downgrade recovery
+
+Until `config.toml` exists, llm-now reads the legacy `aliases.json` and
+`voice-router.toml` files without changing them. The next successful alias save
+migrates both legacy stores after any overwrite approval. To migrate sooner
+without changing an alias, run this standalone command:
+
+```bash
+llm-now --migrate-config
+```
+
+Migration validates one snapshot, creates exact deterministic backups before
+publishing unified authority, and leaves the legacy source files in place. The
+backups are named `aliases.json.pre-unified-v1.bak` and
+`voice-router.toml.pre-unified-v1.bak`; a missing legacy source produces no
+backup. A valid voice profile for a removed alias is not invented as an
+incomplete alias: the command exits successfully and reports all such profile
+names once on stderr in sorted order. Repeating explicit migration is safe and
+reports that configuration is already unified.
+
+Once `config.toml` exists, it is the sole automatic authority. If it is
+malformed or unsupported, configuration-backed commands fail closed rather
+than falling back to legacy files or backups. `--config-path` and the early
+non-macOS `--voice` rejection do not read application configuration. On macOS,
+running `--voice` may read the selected authority but never creates
+`config.toml`, migrates legacy files, writes a backup, or changes configuration.
+Installed and packaged execution is native and requires no
+Python, uv, or repository checkout; the Python example remains a
+contributor-only independent parity oracle.
+
+An older binary may not understand `config.toml`, and changes made after
+migration are not mirrored into the legacy files or backups. Prefer installing
+a compatible version. If a deliberate downgrade is unavoidable, use the newer
+binary to print the path, close other llm-now processes, and recover in this
+order:
+
+1. Move `config.toml` to a new preserved filename outside the authoritative
+   path, such as `config.toml.pre-downgrade`. Do not overwrite an existing moved
+   copy.
+2. For each backup that exists, copy
+   `aliases.json.pre-unified-v1.bak` to `aliases.json` and
+   `voice-router.toml.pre-unified-v1.bak` to `voice-router.toml`. A missing
+   backup means that legacy source did not exist at migration time and should
+   remain absent.
+3. Keep the moved unified file: it is the only copy of any valid post-migration
+   aliases, instructions, routing thresholds, or speech changes. Verify the
+   restored files before installing the older binary.
+
+Backups are never restored automatically, and there is no first-class recovery
+command in this release. Moving `config.toml` out of authority must happen
+before copying legacy backups; otherwise the current binary continues to use
+the unified document.
 
 ## Secure API-key storage
 
@@ -176,7 +317,7 @@ Use bare `llm-now`, choose “Manage connections…”, then “Add or manage AP
 
 ### How secure storage works
 
-For each cloud provider, `llm-now` creates at most one native credential record under the service `llm-now`, using the non-secret record name `api-key:<provider>`. The API key itself is passed to the operating system's credential API; `llm-now` does not write it to the alias file or another configuration file. Encryption, locking, and access control are delegated to the native credential service for the logged-in user.
+For each cloud provider, `llm-now` creates at most one native credential record under the service `llm-now`, using the non-secret record name `api-key:<provider>`. The API key itself is passed to the operating system's credential API; `llm-now` does not write it to `config.toml` or another configuration file. Encryption, locking, and access control are delegated to the native credential service for the logged-in user.
 
 When resolving a provider credential, `llm-now` checks the provider's recognized environment variables first. It reads the native record only when no environment credential is present. A successful replacement is verified before the old native record changes, and deleting a native record does not affect an environment variable. There is no plaintext or self-encrypted fallback.
 
@@ -211,7 +352,11 @@ If no provider is found, stderr lists every checked provider class and manual se
 
 Exit codes:
 
-- `0`: successful generation or alias inventory, help, version, or a completed/declined setup action; cancellation after a durable key or shortcut write preserves that completed work and exits without generation
-- `1`: discovery, model-list, generation, configuration (including an invalid, unreadable, or case-conflicting alias store), credential-store, or post-credential alias failure
-- `2`: invalid usage, including combining `--aliases` with another option or positional value
+- `0`: successful generation, alias inventory, config-path discovery, migration,
+  help, version, or a completed/declined setup action; cancellation after a
+  durable key or shortcut write preserves that completed work and exits without
+  generation
+- `1`: discovery, model-list, generation, configuration (including an invalid, unreadable, or case-conflicting unified document), credential-store, or post-credential alias failure
+- `2`: invalid usage, including combining `--aliases`, `--config-path`, or
+  `--migrate-config` with another option or positional value
 - `130`: launcher, management, prompt, alias, provider, or model selection cancelled before a durable action
