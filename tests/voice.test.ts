@@ -19,6 +19,7 @@ import {
   type VoiceProcessRequest,
   type VoiceProcessRunner,
 } from "../src/voice.ts";
+import { parseVoiceConfig } from "../src/voice-routing.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -75,8 +76,6 @@ interface HarnessOptions {
   generationTimeoutMs?: number;
   generationCleanupTimeoutMs?: number;
   sensitiveValues?: readonly string[];
-  onReadConfig?: () => void;
-  onLoadAliases?: () => void;
   snapshot?: ConfigSnapshot;
 }
 
@@ -84,8 +83,6 @@ function harness(options: HarnessOptions = {}) {
   const runner = options.runner ?? new FakeRunner();
   const operations: string[] = [];
   const diagnostics: string[] = [];
-  let aliasLoads = 0;
-  let configReads = 0;
   const runtimeCalls: Parameters<RuntimeGateway["generate"]>[] = [];
   const aliases = options.aliases ?? {
     version: 2,
@@ -114,14 +111,25 @@ function harness(options: HarnessOptions = {}) {
     operations.push(`${request.executable}${request.args.length ? ` ${request.args.join(" ")}` : ""}`);
     return originalRun(request);
   };
+  const configText = options.config === null || options.config === undefined
+    ? null
+    : typeof options.config === "string"
+    ? options.config
+    : new TextDecoder("utf-8", { fatal: true }).decode(options.config);
+  const snapshot = options.snapshot ?? Object.freeze({
+    authority: "legacy" as const,
+    document: null,
+    aliases: Object.freeze({ ...aliases.aliases }),
+    voice: parseVoiceConfig(configText, Object.keys(aliases.aliases)),
+  });
 
   return {
     runner,
     operations,
     diagnostics,
     runtimeCalls,
-    aliasLoads: () => aliasLoads,
-    configReads: () => configReads,
+    aliasLoads: () => 0,
+    configReads: () => 0,
     run: () => runVoice({
       inputFlag: options.inputFlag,
       stdin: options.stdin
@@ -129,22 +137,7 @@ function harness(options: HarnessOptions = {}) {
       runtime,
       sensitive: createSensitiveValueRegistry(options.sensitiveValues),
       env: options.env ?? {},
-      home: "/Users/test",
-      aliasPath: "/config/aliases.json",
-      loadAliases: async () => {
-        operations.push("load aliases");
-        aliasLoads += 1;
-        options.onLoadAliases?.();
-        return aliases;
-      },
-      readConfig: async (path) => {
-        operations.push(`read config ${path}`);
-        configReads += 1;
-        options.onReadConfig?.();
-        if (options.config === null || options.config === undefined) return null;
-        return typeof options.config === "string" ? encoder.encode(options.config) : options.config;
-      },
-      snapshot: options.snapshot,
+      snapshot,
       runner,
       signal: options.signal ?? new AbortController().signal,
       diagnostic: (detail) => diagnostics.push(detail),
@@ -201,8 +194,8 @@ describe("native voice coordinator", () => {
     });
 
     expect(await app.run()).toBe(0);
-    expect(app.aliasLoads()).toBe(1);
-    expect(app.configReads()).toBe(1);
+    expect(app.aliasLoads()).toBe(0);
+    expect(app.configReads()).toBe(0);
     expect(app.runtimeCalls).toHaveLength(1);
     expect(app.runtimeCalls[0]?.slice(0, 3)).toEqual([
       "openai",
@@ -212,8 +205,6 @@ describe("native voice coordinator", () => {
     expect(app.runtimeCalls[0]?.[3]).toBeInstanceOf(AbortSignal);
     expect(app.runtimeCalls[0]?.[4]).toBeUndefined();
     expect(app.operations).toEqual([
-      "read config /Users/test/.config/llm-now/voice-router.toml",
-      "load aliases",
       "/usr/bin/say -v ?",
       "generate",
       "/usr/bin/pbcopy",
@@ -243,7 +234,7 @@ describe("native voice coordinator", () => {
 
     expect(await app.run()).toBe(0);
     expect(app.runtimeCalls[0]?.[4]).toBe("Keep the saved instructions unchanged.\nEven here.");
-    expect(app.aliasLoads()).toBe(1);
+    expect(app.aliasLoads()).toBe(0);
   });
 
   test("maps rejected and invalid UTF-8 transcripts to the unconfigured retry notice", async () => {
@@ -276,12 +267,6 @@ describe("native voice coordinator", () => {
   });
 
   test("maps config, generation, clipboard, and answer-speech failures to stable outcomes", async () => {
-    for (const config of ["[haiku]\npitch = 500\n", Uint8Array.of(0xff)]) {
-      const malformed = harness({ config });
-      expect(await malformed.run()).toBe(1);
-      expect(decoder.decode(malformed.runner.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
-    }
-
     for (const answer of ["", "unsafe [[slnc 100]]", "unsafe\x1b[31m", "unsafe\x00text"]) {
       const app = harness({ answer });
       expect(await app.run()).toBe(0);
@@ -493,16 +478,6 @@ describe("native voice coordinator", () => {
         runner.onAccess = () => root.abort();
         return { runner, signal: root.signal };
       },
-      (root, runner) => ({
-        runner,
-        signal: root.signal,
-        onReadConfig: () => root.abort(),
-      }),
-      (root, runner) => ({
-        runner,
-        signal: root.signal,
-        onLoadAliases: () => root.abort(),
-      }),
       (root, runner) => {
         runner.onRun = () => root.abort();
         runner.outcomes = [{ kind: "cancelled" }];

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import unittest
 import signal
 import subprocess
@@ -149,6 +150,30 @@ class InventoryTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_parses_native_typescript_serializer_output(self) -> None:
+        bun = shutil.which("bun")
+        if bun is None:
+            self.skipTest("Bun is required for the cross-reader compatibility test")
+        repository = Path(__file__).parents[3]
+        result = subprocess.run(
+            [bun, str(repository / "tests/fixtures/serialize-config-for-python.ts")],
+            cwd=repository,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        config = parse_config(result.stdout, ("terra",))
+
+        self.assertEqual(config.wake_words, ("hey", "computer"))
+        self.assertEqual(config.min_fuzzy_phrase_length, 3)
+        self.assertEqual(config.min_similarity, 72)
+        self.assertEqual(config.min_margin, 9)
+        self.assertEqual(config.profiles["terra"].match_phrases, ("tara",))
+        self.assertEqual(config.profiles["terra"].voice, "Samantha")
+        self.assertEqual(config.profiles["terra"].rate, 205)
+        self.assertEqual(config.profiles["terra"].pitch, 50.5)
+
     def test_missing_config_uses_default_wake_word_and_empty_profiles(self) -> None:
         config = parse_config(None, ALIASES)
 
@@ -303,17 +328,30 @@ class ConfigTests(unittest.TestCase):
     def test_rejects_version_ranges_alias_collisions_and_malformed_shapes(self) -> None:
         invalid = (
             b"version = 2\n[aliases]\n",
+            b"version = 1.0\n[aliases]\n",
             b"version = 1\n[voice]\nmin_fuzzy_phrase_length = 0\n[aliases]\n",
             b"version = 1\n[voice]\nmin_similarity = 101\n[aliases]\n",
+            b"version = 1\n[voice]\nmin_similarity = 65.0\n[aliases]\n",
             b"version = 1\n[voice]\nmin_margin = -1\n[aliases]\n",
             b"version = 1\n[aliases.deep-seek]\nprovider = 'codex-cli'\nmodel = 'default'\n[aliases.deep_seek]\nprovider = 'codex-cli'\nmodel = 'default'\n",
             b"version = 1\naliases = []\n",
             b"version = 1\n[aliases.terra]\nprovider = []\nmodel = 'default'\n",
+            b"version = 1\n[aliases.terra]\nprovider = 'codex-cli'\nmodel = 'default'\nrate = 205.0\n",
         )
 
         for data in invalid:
             with self.subTest(data=data), self.assertRaises(VoiceRouterError):
                 parse_config(data, ALIASES)
+
+    def test_does_not_reflect_unknown_toml_keys_into_diagnostics(self) -> None:
+        secret = "sk-live-KEY-SENTINEL"
+        with self.assertRaises(VoiceRouterError) as caught:
+            parse_config(
+                f'version = 1\n"{secret}" = true\n[aliases]\n'.encode(),
+                ALIASES,
+            )
+
+        self.assertNotIn(secret, str(caught.exception))
 
 
 class RoutingTests(unittest.TestCase):

@@ -557,7 +557,10 @@ function fuzzyMatch(
   if (best.score < config.minSimilarity) {
     return rejectedRoute("no_match", best.score, runnerUp?.score ?? null);
   }
-  if (runnerUp !== undefined && best.score - runnerUp.score < config.minMargin) {
+  if (
+    runnerUp !== undefined
+    && (best.score === runnerUp.score || best.score - runnerUp.score < config.minMargin)
+  ) {
     return rejectedRoute("ambiguous", best.score, runnerUp.score);
   }
   return acceptedRoute(

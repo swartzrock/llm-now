@@ -279,9 +279,7 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
 
     unknown_root_fields = sorted(set(document) - {"version", "voice", "aliases"})
     if unknown_root_fields:
-        raise VoiceRouterError(
-            f'unknown configuration field at root: {", ".join(unknown_root_fields)}'
-        )
+        raise VoiceRouterError("unknown configuration field at root")
     if type(document.get("version")) is not int or document["version"] != 1:
         raise VoiceRouterError("unsupported configuration version")
 
@@ -293,9 +291,7 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
         - {"wake_words", "min_fuzzy_phrase_length", "min_similarity", "min_margin"}
     )
     if unknown_voice_fields:
-        raise VoiceRouterError(
-            f'unknown configuration field at voice: {", ".join(unknown_voice_fields)}'
-        )
+        raise VoiceRouterError("unknown configuration field at voice")
 
     wake_value = raw_voice.get("wake_words", ["hey"])
     wake_words = _string_list(wake_value, "voice.wake_words")
@@ -357,9 +353,7 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
 
         unknown = sorted(set(raw_profile) - allowed_alias_fields)
         if unknown:
-            raise VoiceRouterError(
-                f'unknown configuration field at aliases.{alias}: {", ".join(unknown)}'
-            )
+            raise VoiceRouterError(f"unknown configuration field at aliases.{alias}")
 
         provider = raw_profile.get("provider")
         if not isinstance(provider, str) or provider not in PROVIDER_IDS:
@@ -695,7 +689,9 @@ def _fuzzy_match(
     runner_up = ranked[1][0] if len(ranked) > 1 else None
     if best_score < config.min_similarity:
         return RouteResult(None, None, "no_match", best_score, runner_up)
-    if runner_up is not None and best_score - runner_up < config.min_margin:
+    if runner_up is not None and (
+        best_score == runner_up or best_score - runner_up < config.min_margin
+    ):
         return RouteResult(None, None, "ambiguous", best_score, runner_up)
     return RouteResult(best_alias, best_question, "fuzzy", best_score, runner_up)
 

@@ -560,6 +560,37 @@ describe("configuration transactions", () => {
     }, { processIsAlive: () => false })).toBe("saved");
   });
 
+  test("serializes concurrent stale-lock reclaimers without losing either save", async () => {
+    const directory = await temporaryDirectory();
+    const paths = {
+      configPath: join(directory, "config.toml"),
+      legacyAliasPath: join(directory, "aliases.json"),
+      legacyVoicePath: join(directory, "voice-router.toml"),
+    };
+    const lockPath = `${paths.configPath}.lock`;
+    await writeFile(lockPath, `${JSON.stringify({ pid: 999_999, token: "dead" })}\n`, {
+      mode: 0o600,
+    });
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lockPath, old, old);
+    const options = {
+      lockTimeoutMs: 500,
+      retryDelayMs: 1,
+      staleLockMs: 1,
+    };
+    const dependencies = { processIsAlive: () => false };
+
+    expect(await Promise.all([
+      saveConfigAlias(paths, "first", { provider: "ollama", model: "a" }, options, dependencies),
+      saveConfigAlias(paths, "second", { provider: "ollama", model: "b" }, options, dependencies),
+    ])).toEqual(["saved", "saved"]);
+    expect(projectAliases((await loadConfig(paths.configPath))!)).toEqual({
+      first: { provider: "ollama", model: "a" },
+      second: { provider: "ollama", model: "b" },
+    });
+    expect(await Bun.file(`${lockPath}.removal`).exists()).toBeFalse();
+  });
+
   test("an old owner does not remove a replacement lock after an ABA sequence", async () => {
     const directory = await temporaryDirectory();
     const paths = {
@@ -743,12 +774,15 @@ Keep this on two lines."""
   test("rejects closed-schema, range, control, and collision failures", () => {
     const invalidDocuments = [
       "version = 2\n[aliases]",
+      "version = 1.0\n[aliases]",
       "version = 1\ncredential = 'secret'\n[aliases]",
       "version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='default'",
       "version = 1\n[voice]\nmin_fuzzy_phrase_length=0\n[aliases]",
       "version = 1\n[voice]\nmin_similarity=101\n[aliases]",
       "version = 1\n[voice]\nmin_margin=-1\n[aliases]",
+      "version = 1\n[voice]\nmin_similarity=65.0\n[aliases]",
       "version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\nrate=79",
+      "version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\nrate=205.0",
       "version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\npitch=128",
       "version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\ninstructions=\"bad\\u0000value\"",
       "version = 1\n[aliases.Slug]\nprovider='ollama'\nmodel='x'\n[aliases.slug]\nprovider='ollama'\nmodel='x'",
@@ -788,11 +822,36 @@ Keep this on two lines."""
     expect(String((error as ConfigSchemaError).cause ?? "")).not.toContain(instruction);
   });
 
+  test("does not reflect unknown TOML keys into diagnostics", () => {
+    for (const key of ["sk-live-KEY-SENTINEL", "line\\ninjected"]) {
+      let error: unknown;
+      try {
+        parseConfigDocument(`version = 1\n"${key}" = true\n[aliases]\n`);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(ConfigSchemaError);
+      expect(String(error)).toContain("unknown configuration field at root");
+      expect(String(error)).not.toContain("sk-live");
+      expect(String(error)).not.toContain("injected");
+      expect(String(error).split("\n")).toHaveLength(1);
+    }
+  });
+
   test("loads a valid file and treats absence as empty authority", async () => {
     const directory = await temporaryDirectory();
     const path = join(directory, "config.toml");
     expect(await loadConfig(path)).toBeNull();
     await writeFile(path, "version = 1\n[aliases]\n");
     expect(await loadConfig(path)).toEqual({ version: 1, aliases: {} });
+  });
+
+  test("rejects invalid UTF-8 before parsing unified authority", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "config.toml");
+    const valid = new TextEncoder().encode("version = 1\n[aliases]\n");
+    await writeFile(path, new Uint8Array([0x23, 0xff, 0x0a, ...valid]));
+
+    await expect(loadConfig(path)).rejects.toThrow("not valid UTF-8");
   });
 });

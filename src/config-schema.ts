@@ -1,5 +1,5 @@
 import { isByokProviderId, type ByokProviderId } from "@swartzrock/byok-runtime";
-import { stringify } from "smol-toml";
+import { parse as parseToml, stringify } from "smol-toml";
 import {
   hasInvalidInstructionCharacters,
   isValidAliasName,
@@ -83,7 +83,27 @@ function rejectUnknownFields(
 ): void {
   const unknown = Object.keys(value).filter((field) => !allowed.has(field)).sort();
   if (unknown.length > 0) {
-    throw new ConfigSchemaError(`unknown configuration field at ${location}: ${unknown.join(", ")}`);
+    throw new ConfigSchemaError(`unknown configuration field at ${location}`);
+  }
+}
+
+function assertIntegerKinds(value: unknown): void {
+  if (!isRecord(value)) return;
+  if (Object.hasOwn(value, "version") && typeof value.version !== "bigint") {
+    throw new ConfigSchemaError("version must be an integer");
+  }
+  if (isRecord(value.voice)) {
+    for (const field of ["min_fuzzy_phrase_length", "min_similarity", "min_margin"] as const) {
+      if (Object.hasOwn(value.voice, field) && typeof value.voice[field] !== "bigint") {
+        throw new ConfigSchemaError(`voice.${field} must be an integer`);
+      }
+    }
+  }
+  if (!isRecord(value.aliases)) return;
+  for (const alias of Object.values(value.aliases)) {
+    if (isRecord(alias) && Object.hasOwn(alias, "rate") && typeof alias.rate !== "bigint") {
+      throw new ConfigSchemaError("alias rate must be an integer");
+    }
   }
 }
 
@@ -215,8 +235,10 @@ function sourceLine(error: unknown): number | undefined {
 
 export function parseConfigDocument(text: string, path = "config.toml"): ConfigDocumentV1 {
   let raw: unknown;
+  let typedNumbers: unknown;
   try {
     raw = Bun.TOML.parse(text);
+    typedNumbers = parseToml(text, { integersAsBigInt: true });
   } catch (error) {
     const line = sourceLine(error);
     throw new ConfigSchemaError(
@@ -225,6 +247,7 @@ export function parseConfigDocument(text: string, path = "config.toml"): ConfigD
       { line, cause: new Error("TOML parse failed") },
     );
   }
+  assertIntegerKinds(typedNumbers);
   if (!isRecord(raw)) throw new ConfigSchemaError("configuration root must be a TOML table");
   rejectUnknownFields(raw, ROOT_FIELDS, "root");
   if (raw.version !== 1) throw new ConfigSchemaError("unsupported configuration version");

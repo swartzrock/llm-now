@@ -453,6 +453,26 @@
       }
     },
     {
+      "id": "zero_margin_alias_tie",
+      "transcript": "terri, question",
+      "aliases": ["terry", "terra"],
+      "config_toml": "version = 1\n\n[voice]\nmin_margin = 0\n\n[aliases.terry]\nprovider = \"codex-cli\"\nmodel = \"default\"\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\n",
+      "expected_config": {
+        "wake_words": ["hey"],
+        "min_fuzzy_phrase_length": 4,
+        "min_similarity": 65,
+        "min_margin": 0
+      },
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "ambiguous",
+        "similarity": 80,
+        "runner_up_similarity": 80
+      }
+    },
+    {
       "id": "shortest_span_tie",
       "transcript": "abcdx eyy question",
       "aliases": ["abcdefg"],

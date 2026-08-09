@@ -6,7 +6,6 @@ import {
   lstat,
   mkdir,
   open,
-  readFile,
   rename,
   unlink,
 } from "node:fs/promises";
@@ -153,7 +152,14 @@ function hasErrorCode(error: unknown, code: string): boolean {
 
 export async function loadConfig(path: string): Promise<ConfigDocumentV1 | null> {
   try {
-    return parseConfigDocument(await Bun.file(path).text(), path);
+    const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new ConfigSchemaError(`configuration is not valid UTF-8: ${path}`);
+    }
+    return parseConfigDocument(text, path);
   } catch (error) {
     if (hasErrorCode(error, "ENOENT")) return null;
     if (error instanceof ConfigSchemaError) throw error;
@@ -240,7 +246,8 @@ function mutationDependencies(
     lstat: overrides.lstat ?? lstat,
     mkdir: overrides.mkdir ?? mkdir,
     open: overrides.open ?? open,
-    readFile: overrides.readFile ?? (async (path) => readFile(path)),
+    readFile: overrides.readFile ?? (async (path) =>
+      new Uint8Array(await Bun.file(path).arrayBuffer())),
     rename: overrides.rename ?? rename,
     unlink: overrides.unlink ?? unlink,
     randomToken: overrides.randomToken ?? randomUUID,
@@ -379,12 +386,29 @@ async function acquireLock(
         Date.now() - lock.mtimeMs > options.staleLockMs
         && !dependencies.processIsAlive(owner.pid)
       ) {
-        const current = await readOptionalBytes(lockPath, dependencies);
-        if (current !== null && bytesEqual(current, existing)) {
+        await withLockRemovalGuard(lockPath, options, dependencies, async () => {
+          let currentLock;
+          try {
+            currentLock = await dependencies.lstat(lockPath);
+          } catch (inspectionError) {
+            if (hasErrorCode(inspectionError, "ENOENT")) return;
+            throw inspectionError;
+          }
+          if (!currentLock.isFile()) {
+            throw new ConfigTransactionError(`invalid configuration lock: ${lockPath}`);
+          }
+          const current = await readOptionalBytes(lockPath, dependencies);
+          if (current === null) return;
+          const currentOwner = parseLockContents(current);
+          if (
+            Date.now() - currentLock.mtimeMs <= options.staleLockMs
+            || currentOwner === null
+            || dependencies.processIsAlive(currentOwner.pid)
+          ) return;
           await dependencies.unlink(lockPath).catch((unlinkError: unknown) => {
             if (!hasErrorCode(unlinkError, "ENOENT")) throw unlinkError;
           });
-        }
+        });
         continue;
       }
       if (Date.now() - startedAt >= options.lockTimeoutMs) {
@@ -395,17 +419,57 @@ async function acquireLock(
   }
 }
 
-async function releaseLock(
+async function withLockRemovalGuard<T>(
+  lockPath: string,
+  options: LockOptions,
+  dependencies: ReturnType<typeof mutationDependencies>,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const guardPath = `${lockPath}.removal`;
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      const handle = await dependencies.open(guardPath, "wx", 0o600);
+      await handle.close();
+      break;
+    } catch (error) {
+      if (!hasErrorCode(error, "EEXIST")) throw error;
+      if (Date.now() - startedAt >= options.lockTimeoutMs) {
+        throw new ConfigTransactionError(`timed out waiting for configuration lock removal: ${guardPath}`);
+      }
+      await dependencies.delay(options.retryDelayMs);
+    }
+  }
+
+  try {
+    return await operation();
+  } finally {
+    await dependencies.unlink(guardPath).catch(() => undefined);
+  }
+}
+
+async function removeLockIfOwned(
   owner: LockOwner,
+  options: LockOptions,
   dependencies: ReturnType<typeof mutationDependencies>,
 ): Promise<void> {
-  const current = await readOptionalBytes(owner.path, dependencies);
-  if (current === null || !bytesEqual(current, owner.bytes)) return;
-  const parsed = parseLockContents(current);
-  if (parsed?.token !== owner.token || parsed.pid !== owner.pid) return;
-  await dependencies.unlink(owner.path).catch((error: unknown) => {
-    if (!hasErrorCode(error, "ENOENT")) throw error;
+  await withLockRemovalGuard(owner.path, options, dependencies, async () => {
+    const current = await readOptionalBytes(owner.path, dependencies);
+    if (current === null || !bytesEqual(current, owner.bytes)) return;
+    const parsed = parseLockContents(current);
+    if (parsed?.token !== owner.token || parsed.pid !== owner.pid) return;
+    await dependencies.unlink(owner.path).catch((error: unknown) => {
+      if (!hasErrorCode(error, "ENOENT")) throw error;
+    });
   });
+}
+
+async function releaseLock(
+  owner: LockOwner,
+  options: LockOptions,
+  dependencies: ReturnType<typeof mutationDependencies>,
+): Promise<void> {
+  await removeLockIfOwned(owner, options, dependencies);
 }
 
 async function ensureOwnerDirectory(
@@ -740,9 +804,10 @@ export async function migrateConfig(
   overrides: ConfigMutationDependencies = {},
 ): Promise<MigrationResult> {
   const dependencies = mutationDependencies(overrides);
+  const locks = lockOptions(options);
   const directory = dirname(paths.configPath);
   await ensureOwnerDirectory(directory, dependencies);
-  const configOwner = await acquireLock(`${paths.configPath}.lock`, lockOptions(options), dependencies);
+  const configOwner = await acquireLock(`${paths.configPath}.lock`, locks, dependencies);
   let legacyOwner: LockOwner | undefined;
   try {
     const existing = await currentUnifiedDocument(paths.configPath, dependencies);
@@ -750,7 +815,7 @@ export async function migrateConfig(
 
     legacyOwner = await acquireLock(
       `${paths.legacyAliasPath}.lock`,
-      lockOptions(options),
+      locks,
       dependencies,
     );
     const snapshot = await readLegacySnapshot(paths, dependencies);
@@ -766,8 +831,8 @@ export async function migrateConfig(
       staleProfiles: projection.staleProfiles,
     });
   } finally {
-    if (legacyOwner !== undefined) await releaseLock(legacyOwner, dependencies);
-    await releaseLock(configOwner, dependencies);
+    if (legacyOwner !== undefined) await releaseLock(legacyOwner, locks, dependencies);
+    await releaseLock(configOwner, locks, dependencies);
   }
 }
 
@@ -822,9 +887,10 @@ async function attemptSaveConfigAlias(
   options: SaveConfigAliasOptions,
   dependencies: ReturnType<typeof mutationDependencies>,
 ): Promise<SaveAttempt> {
+  const locks = lockOptions(options);
   const configOwner = await acquireLock(
     `${paths.configPath}.lock`,
-    lockOptions(options),
+    locks,
     dependencies,
   );
   let legacyOwner: LockOwner | undefined;
@@ -854,7 +920,7 @@ async function attemptSaveConfigAlias(
 
     legacyOwner = await acquireLock(
       `${paths.legacyAliasPath}.lock`,
-      lockOptions(options),
+      locks,
       dependencies,
     );
     const snapshot = await readLegacySnapshot(paths, dependencies);
@@ -874,7 +940,7 @@ async function attemptSaveConfigAlias(
     };
     return options.persistenceGuard === undefined ? persist() : options.persistenceGuard(persist);
   } finally {
-    if (legacyOwner !== undefined) await releaseLock(legacyOwner, dependencies);
-    await releaseLock(configOwner, dependencies);
+    if (legacyOwner !== undefined) await releaseLock(legacyOwner, locks, dependencies);
+    await releaseLock(configOwner, locks, dependencies);
   }
 }

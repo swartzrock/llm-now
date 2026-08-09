@@ -2,7 +2,7 @@ import { BYOK_API_KEY_ENV_VARS, type ByokEnvironment } from "@swartzrock/byok-ru
 import { caseFold } from "unicode-case-folding";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import type { AliasDocument, AliasRecord } from "./aliases.ts";
+import type { AliasRecord } from "./aliases.ts";
 import type { ConfigSnapshot } from "./config.ts";
 import {
   createSensitiveValueRegistry,
@@ -13,9 +13,7 @@ import { stripTerminalSequences } from "./prompts.ts";
 import type { RuntimeGateway } from "./runtime.ts";
 import {
   formatTrustedPitchCommand,
-  parseVoiceConfig,
   parseVoiceInventory,
-  resolveVoiceConfigPath,
   routeTranscript,
   validateSpeechAnswer,
   type VoiceConfig,
@@ -227,11 +225,7 @@ export interface VoiceDependencies {
   readonly runtime: RuntimeGateway;
   readonly sensitive: SensitiveValueRegistry;
   readonly env: ByokEnvironment;
-  readonly home: string;
-  readonly aliasPath: string;
-  readonly loadAliases: (path: string) => Promise<AliasDocument>;
-  readonly readConfig?: (path: string) => Promise<Uint8Array | null>;
-  readonly snapshot?: ConfigSnapshot;
+  readonly snapshot: ConfigSnapshot;
   readonly runner: VoiceProcessRunner;
   readonly signal: AbortSignal;
   readonly diagnostic: (detail: string) => void;
@@ -244,23 +238,14 @@ export interface VoiceDependencies {
 
 export type VoiceExitCode = 0 | 1 | 130;
 
-async function readVoiceConfig(path: string): Promise<Uint8Array | null> {
-  try {
-    return new Uint8Array(await Bun.file(path).arrayBuffer());
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-function strictUtf8(value: Uint8Array): string {
-  return new TextDecoder("utf-8", { fatal: true }).decode(value);
-}
-
 function filteredEnvironment(env: ByokEnvironment): ByokEnvironment {
   const filtered = { ...env };
   for (const name of BYOK_API_KEY_ENV_VARS) delete filtered[name];
   return filtered;
+}
+
+function strictUtf8(value: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(value);
 }
 
 function redactionVariants(value: string): readonly string[] {
@@ -405,36 +390,8 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
     return await speakNotice(RETRY_NOTICE, 0);
   }
 
-  let aliases: Readonly<Record<string, AliasRecord>>;
-  let config: VoiceConfig;
-  if (deps.snapshot !== undefined) {
-    aliases = deps.snapshot.aliases;
-    config = deps.snapshot.voice;
-  } else {
-    let configText: string | null;
-    try {
-      const path = resolveVoiceConfigPath(deps.home, deps.env.XDG_CONFIG_HOME);
-      const configBytes = await (deps.readConfig ?? readVoiceConfig)(path);
-      configText = configBytes === null ? null : strictUtf8(configBytes);
-    } catch (error) {
-      return await configFailure(error, true);
-    }
-    if (deps.signal.aborted) return cancelled();
-
-    let document: AliasDocument;
-    try {
-      document = await deps.loadAliases(deps.aliasPath);
-    } catch (error) {
-      return await configFailure(error, true);
-    }
-    if (deps.signal.aborted) return cancelled();
-    aliases = document.aliases;
-    try {
-      config = parseVoiceConfig(configText, Object.keys(aliases));
-    } catch (error) {
-      return await configFailure(error, true);
-    }
-  }
+  const aliases: Readonly<Record<string, AliasRecord>> = deps.snapshot.aliases;
+  const config: VoiceConfig = deps.snapshot.voice;
 
   const aliasNames = Object.keys(aliases);
   if (aliasNames.length === 0) {
