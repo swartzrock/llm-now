@@ -29,6 +29,12 @@ import {
   type Selection,
 } from "./args.ts";
 import {
+  loadConfigSnapshot,
+  loadUnifiedConfigSnapshot,
+  resolveConfigPaths,
+  type ConfigSnapshot,
+} from "./config.ts";
+import {
   isInteractive,
   promptValidationMessage,
   resolvePrompt,
@@ -104,6 +110,8 @@ export interface ApplicationDependencies {
   home: string;
   version: string;
   aliasPath?: string;
+  configPath?: string;
+  voiceConfigPath?: string;
   loadAliases?: typeof loadStoredAliases;
   resolveAlias?: typeof resolveStoredAlias;
   saveAlias?: typeof saveStoredAlias;
@@ -645,6 +653,35 @@ function applicationAliasPath(deps: ApplicationDependencies): string {
   });
 }
 
+function applicationConfigPaths(deps: ApplicationDependencies) {
+  const paths = resolveConfigPaths({
+    platform: deps.platform,
+    home: deps.home,
+    env: deps.env,
+  });
+  return {
+    ...paths,
+    configPath: deps.configPath ?? paths.configPath,
+    legacyAliasPath: applicationAliasPath(deps),
+    legacyVoicePath: deps.voiceConfigPath ?? paths.legacyVoicePath,
+  };
+}
+
+function loadApplicationConfigSnapshot(
+  deps: ApplicationDependencies,
+  includeLegacyVoice = false,
+): Promise<ConfigSnapshot> {
+  return loadConfigSnapshot(applicationConfigPaths(deps), {
+    loadLegacyAliases: deps.loadAliases ?? loadStoredAliases,
+    readLegacyVoiceConfig: deps.readVoiceConfig,
+    includeLegacyVoice,
+  });
+}
+
+function preflightUnifiedConfig(deps: ApplicationDependencies): Promise<ConfigSnapshot | null> {
+  return loadUnifiedConfigSnapshot(applicationConfigPaths(deps).configPath);
+}
+
 function runWithCredentialMutationLock<T>(
   deps: ApplicationDependencies,
   provider: ByokCloudProviderId,
@@ -714,16 +751,26 @@ async function withStageTimeout<T>(
 async function resolveSelection(
   deps: ApplicationDependencies,
   selection: Selection,
+  snapshot: ConfigSnapshot | null,
   interactive: boolean,
   diagnostic: (text: string) => void,
 ): Promise<ResolvedSelection | number> {
   const deterministic = requireDeterministicSelection(selection, interactive);
   if (deterministic.kind === "alias") {
+    if (snapshot === null || (snapshot.authority === "legacy" && deps.resolveAlias !== undefined)) {
+      if (deps.resolveAlias === undefined) {
+        throw new AliasStoreError(`alias not found: ${deterministic.alias}`);
+      }
+      return {
+        selection: await deps.resolveAlias(applicationAliasPath(deps), deterministic.alias),
+        shortcutFollowUp: "none",
+      };
+    }
+    const canonicalName = normalizeAliasName(deterministic.alias);
+    const resolved = snapshot.aliases[canonicalName];
+    if (resolved === undefined) throw new AliasStoreError(`alias not found: ${deterministic.alias}`);
     return {
-      selection: await (deps.resolveAlias ?? resolveStoredAlias)(
-        applicationAliasPath(deps),
-        deterministic.alias,
-      ),
+      selection: resolved,
       shortcutFollowUp: "none",
     };
   }
@@ -734,9 +781,8 @@ async function resolveSelection(
     };
   }
 
-  const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
-    applicationAliasPath(deps),
-  )).aliases;
+  if (snapshot === null) throw new AliasStoreError("alias configuration snapshot is unavailable");
+  const aliases = snapshot.aliases;
   if (Object.keys(aliases).length > 0) {
     const aliasResult = await selectAliasOrFresh(aliases, deps.prompter);
     if (aliasResult.kind === "cancelled") return aliasResult.exitCode;
@@ -1296,11 +1342,9 @@ async function runManagement(
 
 async function runLauncher(
   deps: ApplicationDependencies,
+  aliases: Readonly<Record<string, AliasRecord>>,
   diagnostic: (text: string) => void,
 ): Promise<LauncherWork | number> {
-  const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
-    applicationAliasPath(deps),
-  )).aliases;
   const hasAliases = Object.keys(aliases).length > 0;
   const selected = await deps.prompter.select(
     "What would you like to do?",
@@ -1421,6 +1465,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         diagnostic("voice: llm-now --voice currently supports macOS only.");
         return 1;
       }
+      const snapshot = await loadApplicationConfigSnapshot(deps, true);
       const cancellation = deps.installVoiceCancellation();
       try {
         return await (deps.runVoice ?? runNativeVoice)({
@@ -1433,6 +1478,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           aliasPath: applicationAliasPath(deps),
           loadAliases: deps.loadAliases ?? loadStoredAliases,
           readConfig: deps.readVoiceConfig,
+          snapshot,
           runner: deps.voiceRunner ?? createBunVoiceProcessRunner(),
           signal: cancellation.signal,
           diagnostic,
@@ -1443,10 +1489,8 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       }
     }
     if (parsed.kind === "aliases") {
-      const aliases = (await (deps.loadAliases ?? loadStoredAliases)(
-        applicationAliasPath(deps),
-      )).aliases;
-      const roster = formatAliasInventory(aliases);
+      const snapshot = await loadApplicationConfigSnapshot(deps);
+      const roster = formatAliasInventory(snapshot.aliases);
       if (roster.length > 0) deps.stdout.write(`${roster}\n`);
       return 0;
     }
@@ -1455,7 +1499,8 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
     let prompt: string;
     let selection: ResolvedSelection;
     if (deps.args.length === 0 && interactive) {
-      const outcome = await runLauncher(deps, diagnostic);
+      const snapshot = await loadApplicationConfigSnapshot(deps);
+      const outcome = await runLauncher(deps, snapshot.aliases, diagnostic);
       if (typeof outcome === "number") return outcome;
       prompt = outcome.prompt;
       selection = outcome.selection;
@@ -1464,9 +1509,13 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       && parsed.input === undefined
       && interactive
     ) {
+      const snapshot = deps.resolveAlias === undefined
+        ? await loadApplicationConfigSnapshot(deps)
+        : await preflightUnifiedConfig(deps);
       const resolved = await resolveSelection(
         deps,
         parsed.selection,
+        snapshot,
         interactive,
         diagnostic,
       );
@@ -1479,10 +1528,19 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       if (entered === null) return 130;
       prompt = entered;
     } else {
+      if (!interactive && parsed.selection.kind === "interactive") {
+        requireDeterministicSelection(parsed.selection, false);
+      }
       prompt = await resolvePrompt(parsed.input, deps.stdin);
+      const snapshot = parsed.selection.kind === "explicit"
+        ? await preflightUnifiedConfig(deps)
+        : parsed.selection.kind === "alias" && deps.resolveAlias !== undefined
+        ? await preflightUnifiedConfig(deps)
+        : await loadApplicationConfigSnapshot(deps);
       const resolved = await resolveSelection(
         deps,
         parsed.selection,
+        snapshot,
         interactive,
         diagnostic,
       );

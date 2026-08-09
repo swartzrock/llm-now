@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BYOK_API_KEY_ENV_VARS, type ByokEnvironment } from "@swartzrock/byok-runtime";
 import type { AliasDocument } from "../src/aliases.ts";
+import type { ConfigSnapshot } from "../src/config.ts";
 import { createSensitiveValueRegistry } from "../src/credentials.ts";
 import type { PromptInput } from "../src/io.ts";
 import type { RuntimeGateway } from "../src/runtime.ts";
@@ -10,6 +11,7 @@ import {
   CREATE_ALIAS_NOTICE,
   REQUEST_FAILED_NOTICE,
   RETRY_NOTICE,
+  VOICE_PROMPT,
   createBunVoiceProcessRunner,
   installVoiceCancellation,
   runVoice,
@@ -75,6 +77,7 @@ interface HarnessOptions {
   sensitiveValues?: readonly string[];
   onReadConfig?: () => void;
   onLoadAliases?: () => void;
+  snapshot?: ConfigSnapshot;
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -141,6 +144,7 @@ function harness(options: HarnessOptions = {}) {
         if (options.config === null || options.config === undefined) return null;
         return typeof options.config === "string" ? encoder.encode(options.config) : options.config;
       },
+      snapshot: options.snapshot,
       runner,
       signal: options.signal ?? new AbortController().signal,
       diagnostic: (detail) => diagnostics.push(detail),
@@ -151,6 +155,33 @@ function harness(options: HarnessOptions = {}) {
 }
 
 describe("native voice coordinator", () => {
+  test("uses a provided immutable snapshot once with configurable fuzzy thresholds", async () => {
+    const snapshot: ConfigSnapshot = Object.freeze({
+      authority: "legacy",
+      document: null,
+      aliases: Object.freeze({
+        ai: Object.freeze({ provider: "ollama", model: "snapshot-model" }),
+      }),
+      voice: Object.freeze({
+        wakeWords: Object.freeze(["hey"]),
+        minFuzzyPhraseLength: 2,
+        minSimilarity: 0,
+        minMargin: 0,
+        profiles: Object.freeze({}),
+      }),
+    });
+    const app = harness({ transcript: "aj question", snapshot });
+
+    expect(await app.run()).toBe(0);
+    expect(app.aliasLoads()).toBe(0);
+    expect(app.configReads()).toBe(0);
+    expect(app.runtimeCalls[0]?.slice(0, 3)).toEqual([
+      "ollama",
+      "snapshot-model",
+      `${VOICE_PROMPT}\n\nquestion`,
+    ]);
+  });
+
   test("loads one snapshot, generates once, copies exact answer, then speaks configured bytes", async () => {
     const secrets = Object.fromEntries(
       BYOK_API_KEY_ENV_VARS.map((name) => [name, `${name}-secret`]),
@@ -322,8 +353,8 @@ describe("native voice coordinator", () => {
     expect(decoder.decode(inventoryTimeout.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
 
     const relativeConfig = harness({ env: { XDG_CONFIG_HOME: "relative" } });
-    expect(await relativeConfig.run()).toBe(1);
-    expect(decoder.decode(relativeConfig.runner.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
+    expect(await relativeConfig.run()).toBe(0);
+    expect(relativeConfig.diagnostics).toEqual([]);
   });
 
   test("keeps request payload sentinels and child credentials out of diagnostics and notices", async () => {

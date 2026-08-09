@@ -2,7 +2,8 @@ import { BYOK_API_KEY_ENV_VARS, type ByokEnvironment } from "@swartzrock/byok-ru
 import { caseFold } from "unicode-case-folding";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import type { AliasDocument } from "./aliases.ts";
+import type { AliasDocument, AliasRecord } from "./aliases.ts";
+import type { ConfigSnapshot } from "./config.ts";
 import {
   createSensitiveValueRegistry,
   type SensitiveValueRegistry,
@@ -17,6 +18,7 @@ import {
   resolveVoiceConfigPath,
   routeTranscript,
   validateSpeechAnswer,
+  type VoiceConfig,
 } from "./voice-routing.ts";
 
 const SAY = "/usr/bin/say";
@@ -229,6 +231,7 @@ export interface VoiceDependencies {
   readonly aliasPath: string;
   readonly loadAliases: (path: string) => Promise<AliasDocument>;
   readonly readConfig?: (path: string) => Promise<Uint8Array | null>;
+  readonly snapshot?: ConfigSnapshot;
   readonly runner: VoiceProcessRunner;
   readonly signal: AbortSignal;
   readonly diagnostic: (detail: string) => void;
@@ -402,35 +405,43 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
     return await speakNotice(RETRY_NOTICE, 0);
   }
 
-  let configText: string | null;
-  try {
-    const path = resolveVoiceConfigPath(deps.home, deps.env.XDG_CONFIG_HOME);
-    const configBytes = await (deps.readConfig ?? readVoiceConfig)(path);
-    configText = configBytes === null ? null : strictUtf8(configBytes);
-  } catch (error) {
-    return await configFailure(error, true);
-  }
-  if (deps.signal.aborted) return cancelled();
+  let aliases: Readonly<Record<string, AliasRecord>>;
+  let config: VoiceConfig;
+  if (deps.snapshot !== undefined) {
+    aliases = deps.snapshot.aliases;
+    config = deps.snapshot.voice;
+  } else {
+    let configText: string | null;
+    try {
+      const path = resolveVoiceConfigPath(deps.home, deps.env.XDG_CONFIG_HOME);
+      const configBytes = await (deps.readConfig ?? readVoiceConfig)(path);
+      configText = configBytes === null ? null : strictUtf8(configBytes);
+    } catch (error) {
+      return await configFailure(error, true);
+    }
+    if (deps.signal.aborted) return cancelled();
 
-  let document: AliasDocument;
-  try {
-    document = await deps.loadAliases(deps.aliasPath);
-  } catch (error) {
-    return await configFailure(error, true);
+    let document: AliasDocument;
+    try {
+      document = await deps.loadAliases(deps.aliasPath);
+    } catch (error) {
+      return await configFailure(error, true);
+    }
+    if (deps.signal.aborted) return cancelled();
+    aliases = document.aliases;
+    try {
+      config = parseVoiceConfig(configText, Object.keys(aliases));
+    } catch (error) {
+      return await configFailure(error, true);
+    }
   }
-  if (deps.signal.aborted) return cancelled();
-  const aliasNames = Object.keys(document.aliases);
+
+  const aliasNames = Object.keys(aliases);
   if (aliasNames.length === 0) {
     diagnostic("voice alias store is empty");
     return await speakNotice(CREATE_ALIAS_NOTICE, 1);
   }
 
-  let config;
-  try {
-    config = parseVoiceConfig(configText, aliasNames);
-  } catch (error) {
-    return await configFailure(error, true);
-  }
   if (deps.signal.aborted) return cancelled();
 
   const route = routeTranscript(transcript, aliasNames, config);
@@ -438,7 +449,7 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
     diagnostic("voice request rejected", route.reason);
     return await speakNotice(RETRY_NOTICE, 0);
   }
-  const selection = document.aliases[route.alias];
+  const selection = aliases[route.alias];
   if (selection === undefined) {
     return await configFailure("selected alias is missing from the loaded snapshot", true);
   }

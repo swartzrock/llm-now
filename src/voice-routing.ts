@@ -27,6 +27,9 @@ export interface AliasProfile {
 
 export interface VoiceConfig {
   readonly wakeWords: readonly string[];
+  readonly minFuzzyPhraseLength: number;
+  readonly minSimilarity: number;
+  readonly minMargin: number;
   readonly profiles: Readonly<Record<string, AliasProfile>>;
 }
 
@@ -249,7 +252,7 @@ export function routeTranscript(
       continue;
     }
 
-    const fuzzy = fuzzyMatch(transcript, tokens, start, canonicalByKey);
+    const fuzzy = fuzzyMatch(transcript, tokens, start, canonicalByKey, config);
     if (fuzzy.accepted) return fuzzy;
     if (fuzzy.reason === "ambiguous") strongestRejection = fuzzy;
   }
@@ -371,6 +374,9 @@ function freezeConfig(
 ): VoiceConfig {
   return Object.freeze({
     wakeWords: Object.freeze([...wakeWords]),
+    minFuzzyPhraseLength: MIN_FUZZY_LENGTH,
+    minSimilarity: MIN_FUZZY_SIMILARITY,
+    minMargin: MIN_FUZZY_MARGIN,
     profiles: Object.freeze(profiles),
   });
 }
@@ -480,12 +486,13 @@ function fuzzyMatch(
   tokens: readonly Token[],
   start: number,
   canonicalByKey: ReadonlyMap<string, string>,
+  config: VoiceConfig,
 ): RouteResult {
   const perAlias = new Map<string, FuzzyCandidate>();
   const aliases: FuzzyAliasMetadata[] = [];
   for (const [key, alias] of canonicalByKey) {
     const length = scalarLength(key);
-    if (length < MIN_FUZZY_LENGTH) continue;
+    if (length < config.minFuzzyPhraseLength) continue;
     aliases.push({
       key,
       alias,
@@ -508,7 +515,7 @@ function fuzzyMatch(
     candidateKey += token.key;
     const candidateLength = scalarLength(candidateKey);
     if (candidateLength > maximumCandidateLength) break;
-    if (end >= tokens.length || candidateLength < MIN_FUZZY_LENGTH) continue;
+    if (end >= tokens.length || candidateLength < config.minFuzzyPhraseLength) continue;
     const questionToken = tokens[end];
     if (questionToken === undefined) continue;
     const candidateDigits = digitSequences(candidateKey);
@@ -547,10 +554,10 @@ function fuzzyMatch(
   const best = ranked[0];
   if (best === undefined) return rejectedRoute("no_match");
   const runnerUp = ranked[1];
-  if (best.score < MIN_FUZZY_SIMILARITY) {
+  if (best.score < config.minSimilarity) {
     return rejectedRoute("no_match", best.score, runnerUp?.score ?? null);
   }
-  if (runnerUp !== undefined && best.score - runnerUp.score < MIN_FUZZY_MARGIN) {
+  if (runnerUp !== undefined && best.score - runnerUp.score < config.minMargin) {
     return rejectedRoute("ambiguous", best.score, runnerUp.score);
   }
   return acceptedRoute(

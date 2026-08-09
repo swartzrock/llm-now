@@ -129,6 +129,9 @@ describe("voice router configuration", () => {
 
     expect(config).toEqual({
       wakeWords: ["hey", "computer"],
+      minFuzzyPhraseLength: 4,
+      minSimilarity: 65,
+      minMargin: 15,
       profiles: {
         terra: {
           matchPhrases: ["tara"],
@@ -189,6 +192,52 @@ describe("voice router configuration", () => {
       .toThrow("retired.pitch");
     expect(() => parseVoiceConfig("[retired]\nunknown = true", aliases))
       .toThrow("unknown profile field");
+  });
+
+  test("applies configurable fuzzy thresholds without changing the safety gates", () => {
+    const shortAliases = ["ai"];
+    const shortDefaults = parseVoiceConfig(null, shortAliases);
+    expect(routeTranscript("aj question", shortAliases, shortDefaults).reason).toBe("no_match");
+    expect(routeTranscript("aj question", shortAliases, {
+      ...shortDefaults,
+      minFuzzyPhraseLength: 2,
+      minSimilarity: 0,
+    }).reason).toBe("fuzzy");
+
+    const thresholdAliases = ["abcdefghijklmnopqrst"];
+    const thresholdDefaults = parseVoiceConfig(null, thresholdAliases);
+    expect(routeTranscript(
+      "abcdefghijklmuuuuuuu question",
+      thresholdAliases,
+      thresholdDefaults,
+    ).reason).toBe("fuzzy");
+    expect(routeTranscript("abcdefghijklmuuuuuuu question", thresholdAliases, {
+      ...thresholdDefaults,
+      minSimilarity: 66,
+    }).reason).toBe("no_match");
+
+    const marginAliases = ["abcdefghijklmnopuuuu", "abcdefghijklmnvvvvvv"];
+    const marginDefaults = parseVoiceConfig(null, marginAliases);
+    expect(routeTranscript(
+      "abcdefghijklmnopqrst question",
+      marginAliases,
+      marginDefaults,
+    ).reason).toBe("ambiguous");
+    expect(routeTranscript("abcdefghijklmnopqrst question", marginAliases, {
+      ...marginDefaults,
+      minMargin: 10,
+    }).reason).toBe("fuzzy");
+
+    expect(routeTranscript("opus48 question", ["opus47"], {
+      ...parseVoiceConfig(null, ["opus47"]),
+      minSimilarity: 0,
+      minMargin: 0,
+    }).reason).toBe("no_match");
+    expect(routeTranscript("terraxx question", ["terra"], {
+      ...parseVoiceConfig(null, ["terra"]),
+      minSimilarity: 0,
+      minMargin: 0,
+    }).reason).toBe("no_match");
   });
 
   test("rejects duplicate and active canonical phrase collisions", () => {

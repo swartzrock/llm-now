@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ConfigSchemaError,
@@ -8,7 +8,7 @@ import {
   projectVoiceConfig,
   serializeConfigDocument,
 } from "../src/config-schema.ts";
-import { loadConfig, resolveConfigPaths } from "../src/config.ts";
+import { loadConfig, loadConfigSnapshot, resolveConfigPaths } from "../src/config.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -47,6 +47,94 @@ describe("unified configuration paths", () => {
       legacyAliasPath: "C:\\Users\\test\\AppData\\Roaming\\llm-now\\aliases.json",
       legacyVoicePath: "C:\\Users\\test\\AppData\\Roaming\\llm-now\\voice-router.toml",
     });
+  });
+});
+
+describe("configuration read authority", () => {
+  test("uses valid unified values over conflicting legacy stores in one frozen snapshot", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const paths = {
+      configPath: join(directory, "config.toml"),
+      legacyAliasPath: join(directory, "aliases.json"),
+      legacyVoicePath: join(directory, "voice-router.toml"),
+    };
+    await writeFile(paths.configPath, `
+      version = 1
+      [voice]
+      min_similarity = 72
+      [aliases.unified]
+      provider = "ollama"
+      model = "unified-model"
+      match_phrases = ["primary"]
+    `);
+    await writeFile(paths.legacyAliasPath, JSON.stringify({
+      version: 1,
+      aliases: { legacy: { provider: "ollama", model: "legacy-model" } },
+    }));
+    await writeFile(paths.legacyVoicePath, "[legacy]\nmatch_phrases = ['secondary']\n");
+
+    const snapshot = await loadConfigSnapshot(paths, { includeLegacyVoice: true });
+
+    expect(snapshot.authority).toBe("unified");
+    expect(snapshot.aliases).toEqual({
+      unified: { provider: "ollama", model: "unified-model" },
+    });
+    expect(snapshot.voice).toEqual({
+      wakeWords: ["hey"],
+      minFuzzyPhraseLength: 4,
+      minSimilarity: 72,
+      minMargin: 15,
+      profiles: { unified: { matchPhrases: ["primary"] } },
+    });
+    expect(Object.isFrozen(snapshot)).toBeTrue();
+    expect(Object.isFrozen(snapshot.aliases)).toBeTrue();
+    expect(Object.isFrozen(snapshot.voice)).toBeTrue();
+  });
+
+  test("fails closed on malformed unified content instead of reading valid legacy data", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const paths = {
+      configPath: join(directory, "config.toml"),
+      legacyAliasPath: join(directory, "aliases.json"),
+      legacyVoicePath: join(directory, "voice-router.toml"),
+    };
+    await writeFile(paths.configPath, "version = 2\n[aliases]\n");
+    await writeFile(paths.legacyAliasPath, JSON.stringify({ version: 1, aliases: {} }));
+
+    expect(loadConfigSnapshot(paths)).rejects.toBeInstanceOf(ConfigSchemaError);
+  });
+
+  test("keeps missing-unified legacy reads compatible and performs no writes", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const paths = {
+      configPath: join(directory, "config.toml"),
+      legacyAliasPath: join(directory, "aliases.json"),
+      legacyVoicePath: join(directory, "voice-router.toml"),
+    };
+    await writeFile(paths.legacyAliasPath, JSON.stringify({
+      version: 2,
+      aliases: { legacy: { provider: "ollama", model: "legacy-model" } },
+    }));
+    await writeFile(paths.legacyVoicePath, "[legacy]\nmatch_phrases = ['secondary']\nrate = 205\n");
+    const before = await readdir(directory);
+
+    const snapshot = await loadConfigSnapshot(paths, { includeLegacyVoice: true });
+
+    expect(snapshot.authority).toBe("legacy");
+    expect(snapshot.aliases).toEqual({
+      legacy: { provider: "ollama", model: "legacy-model" },
+    });
+    expect(snapshot.voice.profiles.legacy).toEqual({
+      matchPhrases: ["secondary"],
+      rate: 205,
+    });
+    expect(await readdir(directory)).toEqual(before);
   });
 });
 
