@@ -169,7 +169,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.min_fuzzy_phrase_length, 3)
         self.assertEqual(config.min_similarity, 72)
         self.assertEqual(config.min_margin, 9)
-        self.assertEqual(config.profiles["terra"].match_phrases, ("tara",))
+        self.assertEqual(config.profiles["terra"].spoken_names, ("tara",))
         self.assertEqual(config.profiles["terra"].voice, "Samantha")
         self.assertEqual(config.profiles["terra"].rate, 205)
         self.assertEqual(config.profiles["terra"].pitch, 50.5)
@@ -205,12 +205,12 @@ class ConfigTests(unittest.TestCase):
                 ),
                 profile_fields={
                     "terra": (
-                        'match_phrases = ["tara"]',
+                        'spoken_names = ["tara"]',
                         'voice = "Samantha"',
                         "rate = 205",
                         "pitch = 50",
                     ),
-                    "opus47": ('match_phrases = ["op 47"]', "pitch = 50.5"),
+                    "opus47": ('spoken_names = ["op 47"]', "pitch = 50.5"),
                     "haiku": ("pitch = 1",),
                     "fred": ("pitch = 127",),
                 },
@@ -222,7 +222,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.min_fuzzy_phrase_length, 3)
         self.assertEqual(config.min_similarity, 72)
         self.assertEqual(config.min_margin, 9)
-        self.assertEqual(config.profiles["terra"].match_phrases, ("tara",))
+        self.assertEqual(config.profiles["terra"].spoken_names, ("tara",))
         self.assertEqual(config.profiles["terra"].voice, "Samantha")
         self.assertEqual(config.profiles["terra"].rate, 205)
         self.assertEqual(config.profiles["terra"].pitch, 50)
@@ -272,7 +272,7 @@ class ConfigTests(unittest.TestCase):
             unified_config(
                 profile_fields={
                     "retired": (
-                        'match_phrases = ["old terra"]',
+                        'spoken_names = ["old terra"]',
                         'voice = "Old Voice"',
                         "rate = 180",
                     )
@@ -289,13 +289,13 @@ class ConfigTests(unittest.TestCase):
                 ALIASES,
             )
 
-    def test_rejects_invalid_root_profile_and_phrase_values(self) -> None:
+    def test_rejects_invalid_root_profile_and_spoken_name_values(self) -> None:
         invalid = (
             b"version = 1\nenabled = true\n[aliases]\n",
             b'version = 1\n[voice]\nwake_words = "hey"\n[aliases]\n',
             b'version = 1\n[voice]\nwake_words = [""]\n[aliases]\n',
-            unified_config(profile_fields={"terra": ("match_phrases = 'tara'",)}),
-            unified_config(profile_fields={"terra": ("match_phrases = ['...']",)}),
+            unified_config(profile_fields={"terra": ("spoken_names = 'tara'",)}),
+            unified_config(profile_fields={"terra": ("spoken_names = ['...']",)}),
             unified_config(profile_fields={"terra": ("voice = ''",)}),
             unified_config(profile_fields={"terra": ("rate = 79",)}),
             unified_config(profile_fields={"terra": ("rate = 501",)}),
@@ -307,13 +307,13 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(data=data), self.assertRaises(VoiceRouterError):
                 parse_config(data, ALIASES)
 
-    def test_rejects_active_duplicate_and_canonical_phrase_collisions(self) -> None:
-        with self.assertRaisesRegex(VoiceRouterError, "match phrase"):
+    def test_rejects_active_duplicate_and_canonical_spoken_name_collisions(self) -> None:
+        with self.assertRaisesRegex(VoiceRouterError, "spoken name"):
             parse_config(
                 unified_config(
                     profile_fields={
-                        "terra": ("match_phrases = ['tara']",),
-                        "fred": ("match_phrases = ['tara']",),
+                        "terra": ("spoken_names = ['tara']",),
+                        "fred": ("spoken_names = ['tara']",),
                     }
                 ),
                 ALIASES,
@@ -321,7 +321,7 @@ class ConfigTests(unittest.TestCase):
 
         with self.assertRaisesRegex(VoiceRouterError, "canonical alias"):
             parse_config(
-                unified_config(profile_fields={"qwen": ("match_phrases = ['terra']",)}),
+                unified_config(profile_fields={"qwen": ("spoken_names = ['terra']",)}),
                 ALIASES,
             )
 
@@ -406,7 +406,7 @@ class RoutingTests(unittest.TestCase):
             "explain this chord",
             "configured",
             config_data=unified_config(
-                profile_fields={"opus47": ("match_phrases = ['op 47']",)}
+                profile_fields={"opus47": ("spoken_names = ['op 47']",)}
             ),
         )
 

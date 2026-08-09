@@ -457,13 +457,13 @@ describe("unified read authority", () => {
       [aliases.primary]
       provider = "ollama"
       model = "unified-model"
-      match_phrases = ["chosen"]
+      spoken_names = ["chosen"]
     `);
     await writeFile(aliasPath, JSON.stringify({
       version: 1,
       aliases: { chosen: { provider: "ollama", model: "legacy-model" } },
     }));
-    await writeFile(voiceConfigPath, "[chosen]\nmatch_phrases = ['primary']\n");
+    await writeFile(voiceConfigPath, "[chosen]\nspoken_names = ['primary']\n");
     const before = await Promise.all([
       Bun.file(configPath).text(),
       Bun.file(aliasPath).text(),
@@ -547,7 +547,7 @@ describe("unified read authority", () => {
     }));
     await writeFile(
       join(directory, "voice-router.toml"),
-      `[legacy]\nmatch_phrases = ["${sentinel}"]\nbroken =`,
+      `[legacy]\nspoken_names = ["${sentinel}"]\nbroken =`,
     );
     const childWork: string[] = [];
     const app = dependencies({

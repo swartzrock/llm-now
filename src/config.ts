@@ -544,7 +544,7 @@ function storedAlias(record: AliasRecord, current?: StoredAliasConfig): StoredAl
     provider: AliasRecord["provider"];
     model: string;
     instructions?: string;
-    matchPhrases?: readonly string[];
+    spokenNames?: readonly string[];
     voice?: string;
     rate?: number;
     pitch?: number;
@@ -553,7 +553,7 @@ function storedAlias(record: AliasRecord, current?: StoredAliasConfig): StoredAl
     model: record.model ?? "default",
   };
   if (record.instructions !== undefined) stored.instructions = record.instructions;
-  if (current?.matchPhrases !== undefined) stored.matchPhrases = current.matchPhrases;
+  if (current?.spokenNames !== undefined) stored.spokenNames = current.spokenNames;
   if (current?.voice !== undefined) stored.voice = current.voice;
   if (current?.rate !== undefined) stored.rate = current.rate;
   if (current?.pitch !== undefined) stored.pitch = current.pitch;
@@ -644,7 +644,7 @@ function projectLegacySnapshot(
     const source = rawProfile as Record<string, unknown>;
     mergedAliases[name] = {
       ...mergedAliases[name]!,
-      ...(Object.hasOwn(source, "match_phrases") ? { matchPhrases: profile.matchPhrases } : {}),
+      ...(Object.hasOwn(source, "spoken_names") ? { spokenNames: profile.spokenNames } : {}),
       ...(profile.voice === undefined ? {} : { voice: profile.voice }),
       ...(profile.rate === undefined ? {} : { rate: profile.rate }),
       ...(profile.pitch === undefined ? {} : { pitch: profile.pitch }),

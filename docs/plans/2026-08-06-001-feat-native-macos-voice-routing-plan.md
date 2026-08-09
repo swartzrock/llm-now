@@ -87,8 +87,8 @@ The Python example proves the interaction, but it asks end users to install uv, 
 
 | ID | Requirement | Covered by |
 |----|----|----|
-| R5. | Voice configuration must remain at absolute `$XDG_CONFIG_HOME/llm-now/voice-router.toml` or `~/.config/llm-now/voice-router.toml`, with default `wake_words = ["hey"]` and the closed per-alias fields `match_phrases`, `voice`, `rate`, and `pitch`. | U2, AE3, AE4 |
-| R6. | Routing must use NFKC plus Unicode Default Case Folding and Unicode token boundaries, then preserve the leading-token flow: optional wake phrase, longest normalized canonical alias, longest configured phrase, then fuzzy canonical-alias fallback; every accepted route must preserve the original question substring. | U2, AE1-AE3 |
+| R5. | Voice configuration must remain at absolute `$XDG_CONFIG_HOME/llm-now/voice-router.toml` or `~/.config/llm-now/voice-router.toml`, with default `wake_words = ["hey"]` and the closed per-alias fields `spoken_names`, `voice`, `rate`, and `pitch`. | U2, AE3, AE4 |
+| R6. | Routing must use NFKC plus Unicode Default Case Folding and Unicode token boundaries, then preserve the leading-token flow: optional wake phrase, longest normalized canonical alias, longest configured spoken name, then fuzzy canonical-alias fallback; every accepted route must preserve the original question substring. | U2, AE1-AE3 |
 | R7. | Fuzzy routing must require a compact key of at least 4 Unicode scalar values, a candidate length difference no greater than `ceil(aliasLength × 0.2)` using scalar-value counts, identical digit sequences when either side has digits, a score of at least 65, and a runner-up margin of at least 15; score ties use the shorter span and deterministic alias order. | U2, U4, AE2 |
 | R8. | The 0–100 ratio score must come only from exactly pinned `@3leaps/string-metrics-wasm@0.3.11`; documentation and diagnostics must call it similarity, never probability, and no package normalization, extraction, or ranking helper may change R6-R7. | U1, U2, U4 |
 | R9. | Blank, invalid-UTF-8, alias-only, wake-only, punctuation-only, valid-empty-roster, weak, digit-mismatched, and ambiguous requests must not generate or mutate the clipboard; malformed or unreadable alias storage is a configuration failure, and normal typed CLI alias selection remains exact. | U1-U3, AE6, AE9 |
@@ -144,7 +144,7 @@ The Python example proves the interaction, but it asks end users to install uv, 
 |----|----|
 | AE1. | **Covers R1, R3, R6, R11.** Given alias `deepseek32`, `Deep seek 32, explain mixture of experts` selects that record from one loaded snapshot and passes `explain mixture of experts` to the existing runtime without spawning `llm-now`. |
 | AE2. | **Covers R7-R8, R18.** `Tara, write a haiku` selects `terra` only when the raw ratio is at least 65 and leads the runner-up by at least 15; Bun and Python agree on the decision without rounding the score first. |
-| AE3. | **Covers R5-R6.** With configured phrase `op 47` and wake words `hey`/`computer`, requests with either wake word and requests without one preserve the same alias/question boundary. |
+| AE3. | **Covers R5-R6.** With configured spoken name `op 47` and wake words `hey`/`computer`, requests with either wake word and requests without one preserve the same alias/question boundary. |
 | AE4. | **Covers R5, R10, R14.** An unknown profile field, invalid pitch/rate, relative XDG path, or unavailable configured voice fails before generation and leaves the clipboard unchanged. |
 | AE5. | **Covers R11, R13-R14.** A valid answer for an alias with voice, rate, and `pitch = 50` is copied without markup, then spoken with the configured arguments and exactly one router-authored `[[pbas 50]]` prefix. |
 | AE6. | **Covers R9, R12, R15.** Ambiguous input or model output containing `[[pbas 90]]` preserves a clipboard sentinel and speaks only the appropriate stable unconfigured notice. |

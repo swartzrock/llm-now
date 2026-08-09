@@ -16,7 +16,7 @@ const document: ConfigDocumentV1 = {
       provider: "codex-cli",
       model: "default",
       instructions: "Answer concisely.",
-      matchPhrases: ["tara"],
+      spokenNames: ["tara"],
       voice: "Samantha",
       rate: 205,
       pitch: 50.5,

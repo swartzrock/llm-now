@@ -127,7 +127,7 @@ editing the Shortcut or copying an alias roster into another file.
 The router examines only the leading spoken phrase and tries these stages:
 
 1. normalized canonical alias;
-2. configured `match_phrases`; and
+2. configured `spoken_names`; and
 3. conservative native similarity scoring.
 
 Normalization is case-insensitive and removes punctuation and spacing for the
@@ -144,11 +144,11 @@ follows:
 | --- | --- | --- |
 | `Deep seek 32, explain mixture of experts` | `deepseek32` | normalized canonical |
 | `haiku, write a love poem` | `haiku` | canonical |
-| `Tara, write a haiku about smoked brisket` | `terra` | unique fuzzy |
-| `Op. 47, explain this chord` | `opus47` | configured phrase |
+| `Tara, write a haiku about smoked brisket` | `terra` | configured spoken name |
+| `Op. 47, explain this chord` | `opus47` | configured spoken name |
 | `Kwen, explain perfect chords` | `qwen` | unique fuzzy |
 
-`Tara` and `Kwen` work only when no competing alias makes the result ambiguous.
+`Kwen` works only when no competing alias makes the fuzzy result ambiguous.
 
 ## Optional names, routing, and speech
 
@@ -179,14 +179,14 @@ min_margin = 15
 [aliases.terra]
 provider = "openai"
 model = "gpt-5"
-match_phrases = ["tara"]
+spoken_names = ["tara"]
 voice = "Samantha"
 rate = 205
 
 [aliases.opus47]
 provider = "claude-cli"
 model = "default"
-match_phrases = ["op 47"]
+spoken_names = ["op 47"]
 
 [aliases.slug]
 provider = "ollama"
@@ -212,19 +212,20 @@ Omission applies independently to every optional voice field:
   through 100;
 - omit `min_margin` to use `15`; configured values must be integers from 0
   through 100;
-- omit `match_phrases` to rely on canonical and fuzzy matching, or set it to
-  `[]` for no configured phrases;
+- `spoken_names` lists additional exact spoken names that select this alias
+  during voice routing; omit it to rely on canonical and fuzzy matching, or
+  set it to `[]` for no additional spoken names;
 - omit `voice`, `rate`, or `pitch` to inherit the current macOS system voice,
   system speech rate, or selected voice's normal baseline pitch independently;
 - keep `rate` at an integer from 80 through 500; and
 - keep `pitch` between 1 and 127, inclusive. Integers and fractional values such
   as `50.5` are accepted.
 
-Routing always checks the canonical alias, configured phrases, and then fuzzy
-similarity in that order. Threshold changes do not disable the digit-equality,
-candidate-length, minimum-score, or runner-up-margin safety gates; ambiguous
-input remains rejected. Empty or duplicate normalized phrases and phrase
-collisions between aliases are invalid.
+Routing always checks the canonical alias, configured spoken names, and then
+fuzzy similarity in that order. Threshold changes do not disable the
+digit-equality, candidate-length, minimum-score, or runner-up-margin safety
+gates; ambiguous input remains rejected. Empty or duplicate normalized spoken
+names and spoken-name collisions between aliases are invalid.
 
 `pitch` uses Apple's legacy unsigned, absolute baseline-pitch (`pbas`) scale; it
 is not a percentage or a relative adjustment. The router turns `pitch = 50`
@@ -339,9 +340,9 @@ unsafe restore.
 ### Text works but Dictate Text returns the retry notice
 
 Use the temporary Show Result check above and inspect the leading words macOS
-actually produced. Add a narrow `match_phrases` entry for a repeatable
-transcription. Do not add broad phrases just to force a match; rejection is the
-safe outcome.
+actually produced. Add a narrow `spoken_names` entry for a repeatable
+transcription. Do not add broad spoken names just to force a match; rejection
+is the safe outcome.
 
 ### The shell action fails immediately
 

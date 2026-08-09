@@ -19,7 +19,7 @@ const ALIAS_FIELDS = new Set([
   "provider",
   "model",
   "instructions",
-  "match_phrases",
+  "spoken_names",
   "voice",
   "rate",
   "pitch",
@@ -36,7 +36,7 @@ export interface StoredAliasConfig {
   readonly provider: ByokProviderId;
   readonly model: string;
   readonly instructions?: string;
-  readonly matchPhrases?: readonly string[];
+  readonly spokenNames?: readonly string[];
   readonly voice?: string;
   readonly rate?: number;
   readonly pitch?: number;
@@ -195,14 +195,14 @@ function parseAlias(name: string, value: unknown): StoredAliasConfig {
     provider: ByokProviderId;
     model: string;
     instructions?: string;
-    matchPhrases?: readonly string[];
+    spokenNames?: readonly string[];
     voice?: string;
     rate?: number;
     pitch?: number;
   } = { provider: value.provider, model };
   if (Object.hasOwn(value, "instructions")) alias.instructions = validateInstructions(value.instructions);
-  if (Object.hasOwn(value, "match_phrases")) {
-    alias.matchPhrases = optionalStringList(value.match_phrases, `aliases.${name}.match_phrases`);
+  if (Object.hasOwn(value, "spoken_names")) {
+    alias.spokenNames = optionalStringList(value.spoken_names, `aliases.${name}.spoken_names`);
   }
   if (Object.hasOwn(value, "voice")) {
     alias.voice = requiredString(value.voice, `aliases.${name}.voice`).trim();
@@ -270,19 +270,19 @@ export function parseConfigDocument(text: string, path = "config.toml"): ConfigD
     aliases[name] = parseAlias(name, value);
   }
 
-  const phraseOwners = new Map<string, string>();
+  const spokenNameOwners = new Map<string, string>();
   for (const [name, alias] of Object.entries(aliases)) {
-    for (const phrase of alias.matchPhrases ?? []) {
-      const key = compactKey(phrase);
+    for (const spokenName of alias.spokenNames ?? []) {
+      const key = compactKey(spokenName);
       const canonicalOwner = routingNames.get(key);
       if (canonicalOwner !== undefined && canonicalOwner !== name) {
-        throw new ConfigSchemaError(`match phrase for ${name} collides with canonical alias`);
+        throw new ConfigSchemaError(`spoken name for ${name} collides with canonical alias`);
       }
-      const phraseOwner = phraseOwners.get(key);
-      if (phraseOwner !== undefined && phraseOwner !== name) {
-        throw new ConfigSchemaError(`match phrase is shared by ${phraseOwner} and ${name}`);
+      const spokenNameOwner = spokenNameOwners.get(key);
+      if (spokenNameOwner !== undefined && spokenNameOwner !== name) {
+        throw new ConfigSchemaError(`spoken name is shared by ${spokenNameOwner} and ${name}`);
       }
-      phraseOwners.set(key, name);
+      spokenNameOwners.set(key, name);
     }
   }
 
@@ -312,8 +312,8 @@ export function projectAliases(document: ConfigDocumentV1): Readonly<Record<stri
 export function projectVoiceConfig(document: ConfigDocumentV1): EffectiveVoiceConfig {
   const profiles: Record<string, AliasProfile> = {};
   for (const [name, stored] of Object.entries(document.aliases)) {
-    const profile: { matchPhrases: readonly string[]; voice?: string; rate?: number; pitch?: number } = {
-      matchPhrases: Object.freeze([...(stored.matchPhrases ?? [])]),
+    const profile: { spokenNames: readonly string[]; voice?: string; rate?: number; pitch?: number } = {
+      spokenNames: Object.freeze([...(stored.spokenNames ?? [])]),
     };
     if (stored.voice !== undefined) profile.voice = stored.voice;
     if (stored.rate !== undefined) profile.rate = stored.rate;
@@ -338,7 +338,7 @@ export function serializeConfigDocument(document: ConfigDocumentV1): string {
       provider: stored.provider,
       model: stored.model,
       ...(stored.instructions === undefined ? {} : { instructions: stored.instructions }),
-      ...(stored.matchPhrases === undefined ? {} : { match_phrases: [...stored.matchPhrases] }),
+      ...(stored.spokenNames === undefined ? {} : { spoken_names: [...stored.spokenNames] }),
       ...(stored.voice === undefined ? {} : { voice: stored.voice }),
       ...(stored.rate === undefined ? {} : { rate: stored.rate }),
       ...(stored.pitch === undefined ? {} : { pitch: stored.pitch }),

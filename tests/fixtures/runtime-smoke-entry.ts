@@ -63,7 +63,7 @@ const freshText = await Bun.file(freshPaths.configPath).text();
 if (serializeConfigDocument(freshDocument) !== freshText) {
   throw new Error("compiled fresh config is not canonical after reload");
 }
-if (/wake_words|min_fuzzy_phrase_length|min_similarity|min_margin|match_phrases|voice\s*=|rate\s*=|pitch\s*=/.test(freshText)) {
+if (/wake_words|min_fuzzy_phrase_length|min_similarity|min_margin|spoken_names|voice\s*=|rate\s*=|pitch\s*=/.test(freshText)) {
   throw new Error("compiled fresh config materialized omitted voice defaults");
 }
 const freshSnapshot = await loadConfigSnapshot(freshPaths);
@@ -91,7 +91,7 @@ const legacyVoice = [
   'wake_words = ["computer"]',
   "",
   "[terra]",
-  'match_phrases = ["tara"]',
+  'spoken_names = ["tara"]',
   'voice = "Samantha"',
   "rate = 205",
   "pitch = 50",
@@ -115,7 +115,7 @@ if (serializeConfigDocument(migratedDocument) !== migratedText) {
 const migratedProfile = migratedSnapshot.voice.profiles.terra;
 if (
   migratedSnapshot.voice.wakeWords.join("\n") !== "computer"
-  || migratedProfile?.matchPhrases.join("\n") !== "tara"
+  || migratedProfile?.spokenNames.join("\n") !== "tara"
   || migratedProfile.voice !== "Samantha"
   || migratedProfile.rate !== 205
   || migratedProfile.pitch !== 50

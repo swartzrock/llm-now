@@ -67,9 +67,9 @@ The earlier shell-only workflow also asked each model to produce a marked spoken
 **Alias matching and rejection**
 
 - R4. Matching must first case-fold and remove spacing and punctuation so a dictated phrase can exactly match the canonical alias without fuzzy selection; when multiple exact or configured leading spans match, the longest span owns the question boundary.
-- R5. If normalized exact matching fails, the router must try configured `match_phrases`, then a character-similarity fallback across discovered aliases, in that order.
+- R5. If normalized exact matching fails, the router must try configured `spoken_names`, then a character-similarity fallback across discovered aliases, in that order.
 - R6. Fuzzy matching must select an alias only when the best result satisfies a documented minimum similarity and beats the runner-up by a documented margin; the final thresholds must preserve every acceptance and rejection example in this contract.
-- R7. An optional TOML profile must use one section per canonical alias and allow `match_phrases`, `voice`, and `rate` in that section; the canonical alias remains recognized when no section exists.
+- R7. An optional TOML profile must use one section per canonical alias and allow `spoken_names`, `voice`, and `rate` in that section; the canonical alias remains recognized when no section exists.
 - R8. Missing questions, an empty or unavailable alias inventory, low-similarity inputs, and ambiguous results must not invoke a model or replace the clipboard; the router must speak a short retry message and keep technical diagnostics local.
 
 **Model request and response**
@@ -97,12 +97,12 @@ The optional profile governed by R3, R7, R13, and R14 stays flat and can be as s
 wake_words = ["hey"]
 
 [terra]
-match_phrases = ["tara"]
+spoken_names = ["tara"]
 voice = "Samantha"
 rate = 205
 
 [opus47]
-match_phrases = ["op 47"]
+spoken_names = ["op 47"]
 ```
 
 ### Matching Flow
@@ -112,7 +112,7 @@ flowchart TB
   A["Dictated transcript"] --> B["Remove optional wake word and identify a leading alias phrase"]
   B --> C{"Normalized exact alias?"}
   C -->|Yes| G["Use canonical alias"]
-  C -->|No| D{"Configured match phrase?"}
+  C -->|No| D{"Configured spoken name?"}
   D -->|Yes| G
   D -->|No| E{"One fuzzy result clears score and margin gates?"}
   E -->|Yes| G
@@ -128,7 +128,7 @@ flowchart TB
 - F1. Successful normalized or configured match
   - **Trigger:** A1 dictates a leading alias phrase and question.
   - **Actors:** A1-A5
-  - **Steps:** A3 discovers aliases, accepts a normalized exact alias or configured phrase, and sends one request through A4. A3 copies the answer and asks A5 to speak it.
+  - **Steps:** A3 discovers aliases, accepts a normalized exact alias or configured spoken name, and sends one request through A4. A3 copies the answer and asks A5 to speak it.
   - **Outcome:** The intended alias answers once, and the user hears the same text that is on the clipboard.
   - **Covered by:** R1-R5, R7, R9-R13
 - F2. Successful unique fuzzy match
@@ -155,7 +155,7 @@ flowchart TB
 - AE1. **Covers R2-R5 and R9-R13.** Given the supplied alias inventory, when the user dictates “Deep seek 32, explain mixture of experts,” normalization maps the leading phrase to `deepseek32`, and only that alias receives the question.
 - AE2. **Covers R2-R5 and R9-R13.** Given the supplied alias inventory, when the user dictates “haiku, write a love poem,” the exact alias `haiku` receives the question without fuzzy matching.
 - AE3. **Covers R2-R6 and R9-R13.** Given the supplied alias inventory, when the user dictates “Tara, write a haiku about smoked brisket,” the unique fuzzy match selects `terra`; a diagnostic may report similarity and matching reason but must not call the score a probability.
-- AE4. **Covers R2-R5, R7, and R9-R13.** Given `match_phrases = ["op 47"]` in the `opus47` section, when the user dictates “Op. 47, explain this chord,” the configured phrase selects `opus47`.
+- AE4. **Covers R2-R5, R7, and R9-R13.** Given `spoken_names = ["op 47"]` in the `opus47` section, when the user dictates “Op. 47, explain this chord,” the configured spoken name selects `opus47`.
 - AE5. **Covers R6 and R8.** Given a transcript whose leading phrase is a poor match for every alias, the router speaks a retry message, does not invoke `llm-now`, and leaves a clipboard sentinel unchanged.
 - AE6. **Covers R6 and R8.** Given two aliases whose top scores are inside the required runner-up margin, the router rejects the transcript rather than selecting the first or highest result.
 - AE7. **Covers R7 and R13-R14.** Given `terra` and `fred` point to the same provider and model but configure different voices, each alias uses its own voice; an unavailable voice produces a configuration failure rather than silently switching aliases.
@@ -241,7 +241,7 @@ Use standard-library `unittest` and mocks rather than adding a development test 
 
 Read `$XDG_CONFIG_HOME/llm-now/voice-router.toml`, falling back to `~/.config/llm-now/voice-router.toml`. A missing file is valid and supplies `wake_words = ["hey"]` with no alias customizations; this preserves a zero-configuration exact-alias path. There is no second config override in the initial version.
 
-The root accepts only `wake_words` plus tables named for canonical aliases. Each table accepts only `match_phrases`, `voice`, and `rate`. Reject malformed TOML, unknown fields, wrong types, blank normalized phrases, duplicate active phrases, or a configured phrase that collides with another active canonical alias. Profiles for aliases no longer present in the inventory are inert rather than fatal, so removing an alias does not break the remaining roster.
+The root accepts only `wake_words` plus tables named for canonical aliases. Each table accepts only `spoken_names`, `voice`, and `rate`. Reject malformed TOML, unknown fields, wrong types, blank normalized spoken names, duplicate active spoken names, or a configured spoken name that collides with another active canonical alias. Profiles for aliases no longer present in the inventory are inert rather than fatal, so removing an alias does not break the remaining roster.
 
 The confirmed flat shape reserves the root name `wake_words`. A canonical alias with that literal name remains routable with defaults but cannot receive a profile in this version. Document the limitation; do not introduce nesting to work around it.
 
@@ -254,7 +254,7 @@ Decode stdin as strict UTF-8 and tokenize a Unicode NFKC/case-folded view while 
 If the leading tokens equal one or more configured wake phrases, evaluate the longest wake-stripped interpretation first and the original interpretation second. This lets `Hey Terra …` prefer `terra` while preserving access to a literal `hey` alias when stripping does not produce a valid route. For each interpretation:
 
 1. Match compact canonical aliases and select the longest matching leading span.
-2. If none match, match configured phrases and select the longest matching leading span.
+2. If none match, match configured spoken names and select the longest matching leading span.
 3. If neither stage matches, enter KTD5's fuzzy gate.
 
 Remove only the winning leading span and its adjacent delimiter whitespace or punctuation. Preserve the remaining question text verbatim and require it to contain a non-whitespace character.
@@ -358,7 +358,7 @@ flowchart TB
   B --> C["Try wake-stripped view first when applicable; retain original view"]
   C --> D{"Longest compact canonical alias match?"}
   D -->|Yes| K["Commit alias and question boundary"]
-  D -->|No| E{"Longest configured phrase match?"}
+  D -->|No| E{"Longest configured spoken-name match?"}
   E -->|Yes| K
   E -->|No| F["Build eligible fuzzy prefix candidates"]
   F --> G{"Length, digit, score, and margin gates pass?"}
@@ -429,7 +429,7 @@ examples/
 
 1. Establish the locked packaged application and console entry point from KTD2.
 2. Separate parsing and validation into pure values for config, inventory rows, normalized transcript views, match candidates, and the final alias/question decision.
-3. Implement exact canonical, configured phrase, and fuzzy stages in the fixed order from KTD4-KTD5.
+3. Implement exact canonical, configured spoken-name, and fuzzy stages in the fixed order from KTD4-KTD5.
 4. Return structured internal outcomes that identify the canonical alias, original question, match reason, and similarity diagnostics without exposing provider/model presentation data.
 
 **Patterns to follow:** Mirror `src/aliases.ts` fail-closed validation and canonical lowercase behavior; mirror the deterministic output expectations in `tests/args.test.ts`, `tests/prompts.test.ts`, and `tests/app.test.ts`.
@@ -446,7 +446,7 @@ examples/
 - A canonical `wake_words` alias routes with defaults, while TOML cannot define both the reserved list and a same-name profile.
 - Exact-normalization collisions such as punctuation-distinct aliases fail inventory validation rather than selecting by row order.
 - Digit mismatches, candidates shorter than four characters, and candidates outside the length window never enter the score gate.
-- Missing config uses `hey` and default profiles; malformed TOML, unknown fields, invalid types, blank phrases, and active phrase collisions fail with actionable diagnostics.
+- Missing config uses `hey` and default profiles; malformed TOML, unknown fields, invalid types, blank spoken names, and active spoken-name collisions fail with actionable diagnostics.
 - A stale profile for an absent alias is inert, while an invalid field in any parsed profile remains a configuration error.
 - Empty stdin, wake-only input, alias-only input, and punctuation-only questions reject with no alias decision.
 
@@ -575,7 +575,7 @@ examples/
 |---|---|
 | Canonical normalization | Case, spaces, punctuation, Unicode compatibility forms, and longest leading span |
 | Wake handling | Default `hey`, configured multiword phrases, no wake word, wake phrase also present as an alias |
-| Configured phrases | `op 47`, duplicate/colliding phrases, stale profiles, invalid types and fields |
+| Configured spoken names | `op 47`, duplicate/colliding spoken names, stale profiles, invalid types and fields |
 | Fuzzy acceptance | `tara` → `terra`, `kwen` → `qwen`, one eligible alias, fixed reason and score diagnostics |
 | Fuzzy rejection | Below 65, margin below 15, equal scores, digit mismatch, short and length-window exclusions |
 | Inventory | Empty output, malformed rows, duplicates, normalization collisions, nonzero exit, successful stderr |

@@ -19,7 +19,7 @@ export class VoiceRouterError extends Error {
 }
 
 export interface AliasProfile {
-  readonly matchPhrases: readonly string[];
+  readonly spokenNames: readonly string[];
   readonly voice?: string;
   readonly rate?: number;
   readonly pitch?: number;
@@ -159,7 +159,7 @@ export function parseVoiceConfig(
       throw new VoiceRouterError(`profile "${alias}" must be a TOML table`);
     }
 
-    const allowedFields = new Set(["match_phrases", "voice", "rate", "pitch"]);
+    const allowedFields = new Set(["spoken_names", "voice", "rate", "pitch"]);
     const unknownFields = Object.keys(rawProfile)
       .filter((field) => !allowedFields.has(field))
       .sort();
@@ -169,15 +169,15 @@ export function parseVoiceConfig(
       );
     }
 
-    const matchPhrases = stringList(rawProfile.match_phrases ?? [], `${alias}.match_phrases`);
-    validatePhrases(matchPhrases, `${alias}.match_phrases`);
+    const spokenNames = stringList(rawProfile.spoken_names ?? [], `${alias}.spoken_names`);
+    validatePhrases(spokenNames, `${alias}.spoken_names`);
 
     const profile: {
-      matchPhrases: readonly string[];
+      spokenNames: readonly string[];
       voice?: string;
       rate?: number;
       pitch?: number;
-    } = { matchPhrases: Object.freeze([...matchPhrases]) };
+    } = { spokenNames: Object.freeze([...spokenNames]) };
 
     const voice = rawProfile.voice;
     if (voice !== undefined) {
@@ -204,7 +204,7 @@ export function parseVoiceConfig(
     profiles[alias] = Object.freeze(profile);
   }
 
-  validateActivePhrases(profiles, activeAliases);
+  validateActiveSpokenNames(profiles, activeAliases);
   return freezeConfig(wakeWords, profiles);
 }
 
@@ -220,11 +220,13 @@ export function routeTranscript(
   const canonicalByKey = new Map<string, string>();
   for (const alias of activeAliases) canonicalByKey.set(compactKey(alias), alias);
 
-  const phraseByKey = new Map<string, string>();
+  const spokenNameByKey = new Map<string, string>();
   for (const alias of activeAliases) {
     const profile = Object.hasOwn(config.profiles, alias) ? config.profiles[alias] : undefined;
     if (profile === undefined) continue;
-    for (const phrase of profile.matchPhrases) phraseByKey.set(compactKey(phrase), alias);
+    for (const spokenName of profile.spokenNames) {
+      spokenNameByKey.set(compactKey(spokenName), alias);
+    }
   }
 
   const views = transcriptViews(tokens, config.wakeWords);
@@ -243,7 +245,7 @@ export function routeTranscript(
       transcript,
       tokens,
       start,
-      phraseByKey,
+      spokenNameByKey,
       "configured",
     );
     if (configured !== null) {
@@ -338,32 +340,32 @@ function validatePitch(value: unknown, fieldName: string): asserts value is numb
   }
 }
 
-function validateActivePhrases(
+function validateActiveSpokenNames(
   profiles: Readonly<Record<string, AliasProfile>>,
   activeAliases: readonly string[],
 ): void {
   const canonicalByKey = new Map<string, string>();
   for (const alias of activeAliases) canonicalByKey.set(compactKey(alias), alias);
-  const phraseOwners = new Map<string, string>();
+  const spokenNameOwners = new Map<string, string>();
 
   for (const alias of activeAliases) {
     const profile = Object.hasOwn(profiles, alias) ? profiles[alias] : undefined;
     if (profile === undefined) continue;
-    for (const phrase of profile.matchPhrases) {
-      const key = compactKey(phrase);
+    for (const spokenName of profile.spokenNames) {
+      const key = compactKey(spokenName);
       const canonicalOwner = canonicalByKey.get(key);
       if (canonicalOwner !== undefined && canonicalOwner !== alias) {
         throw new VoiceRouterError(
-          `match phrase "${phrase}" for "${alias}" collides with canonical alias "${canonicalOwner}"`,
+          `spoken name "${spokenName}" for "${alias}" collides with canonical alias "${canonicalOwner}"`,
         );
       }
-      const phraseOwner = phraseOwners.get(key);
-      if (phraseOwner !== undefined && phraseOwner !== alias) {
+      const spokenNameOwner = spokenNameOwners.get(key);
+      if (spokenNameOwner !== undefined && spokenNameOwner !== alias) {
         throw new VoiceRouterError(
-          `match phrase "${phrase}" is shared by "${phraseOwner}" and "${alias}"`,
+          `spoken name "${spokenName}" is shared by "${spokenNameOwner}" and "${alias}"`,
         );
       }
-      phraseOwners.set(key, alias);
+      spokenNameOwners.set(key, alias);
     }
   }
 }

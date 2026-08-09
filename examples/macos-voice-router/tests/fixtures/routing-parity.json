@@ -168,7 +168,7 @@
       "id": "configured_longest",
       "transcript": "Op. 47, explain this chord",
       "aliases": ["opus47"],
-      "config_toml": "version = 1\n\n[aliases.opus47]\nprovider = \"codex-cli\"\nmodel = \"default\"\nmatch_phrases = [\"op\", \"op 47\"]\n",
+      "config_toml": "version = 1\n\n[aliases.opus47]\nprovider = \"codex-cli\"\nmodel = \"default\"\nspoken_names = [\"op\", \"op 47\"]\n",
       "expected_config": {
         "wake_words": ["hey"],
         "min_fuzzy_phrase_length": 4,
@@ -502,7 +502,7 @@
       "id": "greek_sigma_case_fold",
       "transcript": "ΟΣς, question",
       "aliases": ["terra"],
-      "config_toml": "version = 1\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\nmatch_phrases = [\"οσσ\"]\n",
+      "config_toml": "version = 1\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\nspoken_names = [\"οσσ\"]\n",
       "expected": {
         "alias": "terra",
         "question": "question",
@@ -516,7 +516,7 @@
       "id": "turkish_dotted_i_case_fold",
       "transcript": "İ, question",
       "aliases": ["terra"],
-      "config_toml": "version = 1\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\nmatch_phrases = [\"i\"]\n",
+      "config_toml": "version = 1\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\nspoken_names = [\"i\"]\n",
       "expected": {
         "alias": "terra",
         "question": "question",
@@ -543,7 +543,7 @@
       "id": "decomposed_combining_mark",
       "transcript": "Café, question",
       "aliases": ["terra"],
-      "config_toml": "version = 1\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\nmatch_phrases = [\"café\"]\n",
+      "config_toml": "version = 1\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\nspoken_names = [\"café\"]\n",
       "expected": {
         "alias": "terra",
         "question": "question",
@@ -557,7 +557,7 @@
       "id": "astral_scalar_offset",
       "transcript": "😀 𐐨, 🧠 Explain",
       "aliases": ["terra"],
-      "config_toml": "version = 1\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\nmatch_phrases = [\"𐐀\"]\n",
+      "config_toml": "version = 1\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\nspoken_names = [\"𐐀\"]\n",
       "expected": {
         "alias": "terra",
         "question": "Explain",

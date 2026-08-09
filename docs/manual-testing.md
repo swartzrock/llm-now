@@ -651,7 +651,7 @@ creates no backup for that source.
 ### MT-22B: Canonically rewrite without pinning defaults
 
 Manually edit valid `config.toml` to add comments, irregular spacing, two
-unsorted aliases, explicit empty `wake_words` and `match_phrases`, routing
+unsorted aliases, explicit empty `wake_words` and `spoken_names`, routing
 thresholds, instructions, and per-alias voice, rate, and pitch. Save one alias
 through llm-now. The result may remove every comment and normalize all spacing,
 but it must preserve every valid unrelated value, retain explicitly configured
@@ -660,7 +660,7 @@ unchanged rewrite must be byte-identical.
 
 Delete each optional field separately and verify only that field resumes its
 fallback: `wake_words = ["hey"]`, minimum fuzzy phrase length `4`, minimum
-similarity `65`, minimum runner-up margin `15`, empty configured match phrases,
+similarity `65`, minimum runner-up margin `15`, empty additional spoken names,
 and the current macOS system voice, speech rate, or selected voice's normal
 baseline pitch. Generated output must not materialize any of those omitted
 values, comments, or example aliases. Check the accepted boundaries
@@ -668,8 +668,8 @@ values, comments, or example aliases. Check the accepted boundaries
 `min_margin = 0` and `100`, `rate = 80` and `500`, and `pitch = 1` and `127`;
 each value just outside a boundary must fail before mutation.
 
-Confirm routing still tries canonical aliases before configured phrases and
-configured phrases before fuzzy matching. Threshold changes must not bypass
+Confirm routing still tries canonical aliases before configured spoken names
+and configured spoken names before fuzzy matching. Threshold changes must not bypass
 candidate-length compatibility, exact digit-sequence equality, the minimum
 score, or the runner-up margin; weak and ambiguous requests remain rejected.
 

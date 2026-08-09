@@ -49,7 +49,7 @@ The model response is untrusted because macOS speech synthesizers interpret `[[.
 **Configuration**
 
 - R1. The router must continue resolving `$XDG_CONFIG_HOME/llm-now/voice-router.toml` when XDG configuration is absolute and otherwise use `~/.config/llm-now/voice-router.toml`.
-- R2. Each canonical alias table may independently configure `match_phrases`, `voice`, `rate`, and optional `pitch`; a missing profile or pitch must preserve current behavior.
+- R2. Each canonical alias table may independently configure `spoken_names`, `voice`, `rate`, and optional `pitch`; a missing profile or pitch must preserve current behavior.
 - R3. `pitch` must accept finite TOML integers and floats from 1 through 127 inclusive and reject booleans, strings, non-finite values, relative syntax, and values outside that range.
 - R4. Unknown profile fields, including raw speech-prefix or embedded-command fields, must remain configuration errors.
 

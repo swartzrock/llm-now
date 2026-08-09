@@ -181,7 +181,7 @@ min_margin = 15
 provider = "openai"
 model = "gpt-5"
 instructions = "Answer concisely."
-match_phrases = ["day lee"]
+spoken_names = ["day lee"]
 voice = "Samantha"
 rate = 205
 pitch = 50.5
@@ -212,10 +212,11 @@ Every other field is optional:
 - `instructions` is a nonblank plaintext string. Ordinary line breaks are
   supported; tabs, other unsupported control characters, and Unicode line or
   paragraph separators are rejected.
-- `match_phrases` is a list of unique, nonblank normalized strings. A phrase
-  cannot collide with another alias's canonical name or match phrase. Omit it
-  to use canonical and fuzzy matching only; set it to `[]` for no custom
-  phrases.
+- `spoken_names` lists additional exact spoken names that select this alias
+  during voice routing. It is a list of unique, nonblank normalized strings;
+  a spoken name cannot collide with another alias's canonical name or spoken
+  name. Omit it to use canonical and fuzzy matching only; set it to `[]` for no
+  additional spoken names.
 - `voice` is a nonblank installed macOS voice name.
 - `rate` is an integer from `80` through `500`.
 - `pitch` is an integer or fractional number from `1` through `127`, inclusive.
@@ -225,8 +226,8 @@ system voice, speech rate, or that voice's normal baseline pitch independently.
 Voice fields are portable: macOS executes them, while Linux and Windows retain
 them across alias saves but continue to reject `--voice` execution.
 
-The router always tries canonical aliases, then configured phrases, then fuzzy
-matching. Configurable thresholds do not remove its safety gates: fuzzy
+The router always tries canonical aliases, then configured spoken names, then
+fuzzy matching. Configurable thresholds do not remove its safety gates: fuzzy
 candidates must have a compatible length, preserve digit sequences, clear the
 minimum similarity, and beat the runner-up by the configured margin. Weak or
 ambiguous input fails closed.

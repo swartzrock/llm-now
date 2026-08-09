@@ -172,7 +172,7 @@ class SubprocessRunner:
 
 @dataclass(frozen=True)
 class AliasProfile:
-    match_phrases: tuple[str, ...] = ()
+    spoken_names: tuple[str, ...] = ()
     voice: str | None = None
     rate: int | None = None
     pitch: int | float | None = None
@@ -326,7 +326,7 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
         "provider",
         "model",
         "instructions",
-        "match_phrases",
+        "spoken_names",
         "voice",
         "rate",
         "pitch",
@@ -370,11 +370,11 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
         if instructions is not None:
             _validate_instructions(instructions)
 
-        phrases = _string_list(
-            raw_profile.get("match_phrases", []),
-            f"aliases.{alias}.match_phrases",
+        spoken_names = _string_list(
+            raw_profile.get("spoken_names", []),
+            f"aliases.{alias}.spoken_names",
         )
-        _validate_phrases(phrases, f"aliases.{alias}.match_phrases")
+        _validate_phrases(spoken_names, f"aliases.{alias}.spoken_names")
 
         voice_value = raw_profile.get("voice")
         if voice_value is not None and (
@@ -404,14 +404,14 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
             )
 
         profiles[alias] = AliasProfile(
-            match_phrases=phrases,
+            spoken_names=spoken_names,
             voice=voice_value.strip() if isinstance(voice_value, str) else None,
             rate=rate_value,
             pitch=pitch_value,
         )
 
-    _validate_active_phrases(profiles, tuple(profiles))
-    _validate_active_phrases(profiles, active_aliases)
+    _validate_active_spoken_names(profiles, tuple(profiles))
+    _validate_active_spoken_names(profiles, active_aliases)
     return RouterConfig(
         wake_words=wake_words,
         min_fuzzy_phrase_length=min_fuzzy_phrase_length,
@@ -432,13 +432,13 @@ def route_transcript(
         return RouteResult(None, None, "missing_request")
 
     canonical_by_key = {compact_key(alias): alias for alias in active_aliases}
-    phrase_by_key: dict[str, str] = {}
+    spoken_name_by_key: dict[str, str] = {}
     for alias in active_aliases:
         profile = config.profiles.get(alias)
         if profile is None:
             continue
-        for phrase in profile.match_phrases:
-            phrase_by_key[compact_key(phrase)] = alias
+        for spoken_name in profile.spoken_names:
+            spoken_name_by_key[compact_key(spoken_name)] = alias
 
     views = _transcript_views(tokens, config.wake_words)
     saw_missing_question = False
@@ -453,7 +453,7 @@ def route_transcript(
             continue
 
         configured = _longest_stage_match(
-            transcript, tokens, start, phrase_by_key, "configured"
+            transcript, tokens, start, spoken_name_by_key, "configured"
         )
         if configured is not None:
             if configured.accepted:
@@ -533,29 +533,29 @@ def _validate_phrases(phrases: Iterable[str], field_name: str) -> None:
         seen.add(key)
 
 
-def _validate_active_phrases(
+def _validate_active_spoken_names(
     profiles: dict[str, AliasProfile], active_aliases: tuple[str, ...]
 ) -> None:
     canonical_by_key = {compact_key(alias): alias for alias in active_aliases}
-    phrase_owners: dict[str, str] = {}
+    spoken_name_owners: dict[str, str] = {}
     for alias in active_aliases:
         profile = profiles.get(alias)
         if profile is None:
             continue
-        for phrase in profile.match_phrases:
-            key = compact_key(phrase)
+        for spoken_name in profile.spoken_names:
+            key = compact_key(spoken_name)
             canonical_owner = canonical_by_key.get(key)
             if canonical_owner is not None and canonical_owner != alias:
                 raise VoiceRouterError(
-                    f'match phrase "{phrase}" for "{alias}" collides with canonical alias '
+                    f'spoken name "{spoken_name}" for "{alias}" collides with canonical alias '
                     f'"{canonical_owner}"'
                 )
-            phrase_owner = phrase_owners.get(key)
-            if phrase_owner is not None and phrase_owner != alias:
+            spoken_name_owner = spoken_name_owners.get(key)
+            if spoken_name_owner is not None and spoken_name_owner != alias:
                 raise VoiceRouterError(
-                    f'match phrase "{phrase}" is shared by "{phrase_owner}" and "{alias}"'
+                    f'spoken name "{spoken_name}" is shared by "{spoken_name_owner}" and "{alias}"'
                 )
-            phrase_owners[key] = alias
+            spoken_name_owners[key] = alias
 
 
 def _is_word_character(character: str) -> bool:

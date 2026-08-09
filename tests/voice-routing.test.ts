@@ -136,7 +136,7 @@ describe("voice router configuration", () => {
       wake_words = ["hey", "computer"]
 
       [terra]
-      match_phrases = ["tara"]
+      spoken_names = ["tara"]
       voice = " Samantha "
       rate = 205
       pitch = 50
@@ -152,12 +152,12 @@ describe("voice router configuration", () => {
       minMargin: 15,
       profiles: {
         terra: {
-          matchPhrases: ["tara"],
+          spokenNames: ["tara"],
           voice: "Samantha",
           rate: 205,
           pitch: 50,
         },
-        opus47: { matchPhrases: [], pitch: 50.5 },
+        opus47: { spokenNames: [], pitch: 50.5 },
       },
     });
     expect(Object.isFrozen(config)).toBeTrue();
@@ -171,8 +171,8 @@ describe("voice router configuration", () => {
       "enabled = true",
       'wake_words = "hey"',
       'wake_words = [""]',
-      "[terra]\nmatch_phrases = 'tara'",
-      "[terra]\nmatch_phrases = ['...']",
+      "[terra]\nspoken_names = 'tara'",
+      "[terra]\nspoken_names = ['...']",
       "[terra]\nvoice = ''",
       "[terra]\nrate = 79",
       "[terra]\nrate = 501",
@@ -190,17 +190,17 @@ describe("voice router configuration", () => {
     }
   });
 
-  test("validates stale profiles structurally but keeps their phrases inert", () => {
+  test("validates stale profiles structurally but keeps their spoken names inert", () => {
     const config = parseVoiceConfig(`
       [retired]
-      match_phrases = ["terra"]
+      spoken_names = ["terra"]
       voice = "Old Voice"
       rate = 180
       pitch = 70
     `, aliases);
 
     expect(config.profiles.retired).toEqual({
-      matchPhrases: ["terra"],
+      spokenNames: ["terra"],
       voice: "Old Voice",
       rate: 180,
       pitch: 70,
@@ -258,17 +258,17 @@ describe("voice router configuration", () => {
     }).reason).toBe("no_match");
   });
 
-  test("rejects duplicate and active canonical phrase collisions", () => {
+  test("rejects duplicate and active canonical spoken-name collisions", () => {
     expect(() => parseVoiceConfig(
-      "[terra]\nmatch_phrases = ['tara']\n[fred]\nmatch_phrases = ['tara']",
+      "[terra]\nspoken_names = ['tara']\n[fred]\nspoken_names = ['tara']",
       aliases,
-    )).toThrow("match phrase");
+    )).toThrow("spoken name");
     expect(() => parseVoiceConfig(
-      "[qwen]\nmatch_phrases = ['terra']",
+      "[qwen]\nspoken_names = ['terra']",
       aliases,
     )).toThrow("canonical alias");
     expect(() => parseVoiceConfig(
-      "[terra]\nmatch_phrases = ['tara', 'TARA']",
+      "[terra]\nspoken_names = ['tara', 'TARA']",
       aliases,
     )).toThrow("duplicate phrase");
   });

@@ -187,7 +187,7 @@ describe("native voice coordinator", () => {
     ];
     const app = harness({
       transcript: "Tara, keep punctuation?!",
-      config: "[terra]\nmatch_phrases = ['tara']\nvoice = 'samantha'\nrate = 205\npitch = 50\n",
+      config: "[terra]\nspoken_names = ['tara']\nvoice = 'samantha'\nrate = 205\npitch = 50\n",
       answer: "-v --flag '$HOME'\nsecond line",
       env: { ...secrets, PATH: "/trusted/path", ORDINARY: "kept" },
       runner,

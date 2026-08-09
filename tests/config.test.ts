@@ -87,13 +87,13 @@ describe("configuration read authority", () => {
       [aliases.unified]
       provider = "ollama"
       model = "unified-model"
-      match_phrases = ["primary"]
+      spoken_names = ["primary"]
     `);
     await writeFile(paths.legacyAliasPath, JSON.stringify({
       version: 1,
       aliases: { legacy: { provider: "ollama", model: "legacy-model" } },
     }));
-    await writeFile(paths.legacyVoicePath, "[legacy]\nmatch_phrases = ['secondary']\n");
+    await writeFile(paths.legacyVoicePath, "[legacy]\nspoken_names = ['secondary']\n");
 
     const snapshot = await loadConfigSnapshot(paths, { includeLegacyVoice: true });
 
@@ -106,7 +106,7 @@ describe("configuration read authority", () => {
       minFuzzyPhraseLength: 4,
       minSimilarity: 72,
       minMargin: 15,
-      profiles: { unified: { matchPhrases: ["primary"] } },
+      profiles: { unified: { spokenNames: ["primary"] } },
     });
     expect(Object.isFrozen(snapshot)).toBeTrue();
     expect(Object.isFrozen(snapshot.aliases)).toBeTrue();
@@ -141,7 +141,7 @@ describe("configuration read authority", () => {
       version: 2,
       aliases: { legacy: { provider: "ollama", model: "legacy-model" } },
     }));
-    await writeFile(paths.legacyVoicePath, "[legacy]\nmatch_phrases = ['secondary']\nrate = 205\n");
+    await writeFile(paths.legacyVoicePath, "[legacy]\nspoken_names = ['secondary']\nrate = 205\n");
     const before = await readdir(directory);
 
     const snapshot = await loadConfigSnapshot(paths, { includeLegacyVoice: true });
@@ -151,7 +151,7 @@ describe("configuration read authority", () => {
       legacy: { provider: "ollama", model: "legacy-model" },
     });
     expect(snapshot.voice.profiles.legacy).toEqual({
-      matchPhrases: ["secondary"],
+      spokenNames: ["secondary"],
       rate: 205,
     });
     expect(await readdir(directory)).toEqual(before);
@@ -172,7 +172,7 @@ describe("configuration transactions", () => {
         active: { provider: "ollama", model: "legacy", instructions: "Keep exact" },
       },
     }, null, 2)}\n`;
-    const voice = `wake_words = ["computer"]\n\n[active]\nmatch_phrases = ["primary"]\nvoice = "Samantha"\nrate = 205\n\n[zed]\nvoice = "Alex"\n\n[alpha]\npitch = 45\n`;
+    const voice = `wake_words = ["computer"]\n\n[active]\nspoken_names = ["primary"]\nvoice = "Samantha"\nrate = 205\n\n[zed]\nvoice = "Alex"\n\n[alpha]\npitch = 45\n`;
     await writeFile(paths.legacyAliasPath, aliases);
     await writeFile(paths.legacyVoicePath, voice);
 
@@ -191,7 +191,7 @@ describe("configuration transactions", () => {
           provider: "ollama",
           model: "legacy",
           instructions: "Keep exact",
-          matchPhrases: ["primary"],
+          spokenNames: ["primary"],
           voice: "Samantha",
           rate: 205,
         },
@@ -291,7 +291,7 @@ describe("configuration transactions", () => {
       legacyAliasPath: join(directory, "aliases.json"),
       legacyVoicePath: join(directory, "voice-router.toml"),
     };
-    await writeFile(paths.configPath, `# normalize me\nversion = 1\n[voice]\nwake_words = []\nmin_similarity = 72\n[aliases.keep]\nprovider = "ollama"\nmodel = "old"\nmatch_phrases = []\nvoice = "Alex"\nrate = 210\npitch = 48\n[aliases.change]\nprovider = "ollama"\nmodel = "before"\nvoice = "Samantha"\n`);
+    await writeFile(paths.configPath, `# normalize me\nversion = 1\n[voice]\nwake_words = []\nmin_similarity = 72\n[aliases.keep]\nprovider = "ollama"\nmodel = "old"\nspoken_names = []\nvoice = "Alex"\nrate = 210\npitch = 48\n[aliases.change]\nprovider = "ollama"\nmodel = "before"\nvoice = "Samantha"\n`);
 
     expect(await saveConfigAlias(paths, "change", { provider: "ollama", model: "after" }, {
       confirmOverwrite: async () => true,
@@ -305,7 +305,7 @@ describe("configuration transactions", () => {
         keep: {
           provider: "ollama",
           model: "old",
-          matchPhrases: [],
+          spokenNames: [],
           voice: "Alex",
           rate: 210,
           pitch: 48,
@@ -711,7 +711,7 @@ Keep this on two lines."""
     const serialized = serializeConfigDocument(document);
     expect(serialized).not.toContain("#");
     expect(serialized).not.toContain("wake_words");
-    expect(serialized).not.toContain("match_phrases");
+    expect(serialized).not.toContain("spoken_names");
     expect(serialized).not.toContain("voice =");
     expect(serialized).not.toContain("rate =");
     expect(serialized).not.toContain("pitch =");
@@ -728,7 +728,7 @@ Keep this on two lines."""
       [aliases.slug]
       provider = "ollama"
       model = "llama3"
-      match_phrases = []
+      spoken_names = []
       rate = 205
     `);
 
@@ -738,7 +738,7 @@ Keep this on two lines."""
       minSimilarity: 72,
       minMargin: 15,
       profiles: {
-        slug: { matchPhrases: [], rate: 205 },
+        slug: { spokenNames: [], rate: 205 },
       },
     });
     expect(serializeConfigDocument(document)).not.toContain("min_fuzzy_phrase_length");
@@ -752,7 +752,7 @@ Keep this on two lines."""
       pitch = 50
       rate = 205
       voice = "Samantha"
-      match_phrases = ["zee"]
+      spoken_names = ["zee"]
       instructions = "Zed"
       model = "z"
       provider = "ollama"
@@ -768,7 +768,7 @@ Keep this on two lines."""
     expect(first.indexOf('provider = "ollama"', first.indexOf("[aliases.zed]")))
       .toBeLessThan(first.indexOf('model = "z"'));
     expect(first.indexOf('model = "z"')).toBeLessThan(first.indexOf('instructions = "Zed"'));
-    expect(first.indexOf('instructions = "Zed"')).toBeLessThan(first.indexOf("match_phrases"));
+    expect(first.indexOf('instructions = "Zed"')).toBeLessThan(first.indexOf("spoken_names"));
   });
 
   test("rejects closed-schema, range, control, and collision failures", () => {
@@ -787,7 +787,7 @@ Keep this on two lines."""
       "version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\ninstructions=\"bad\\u0000value\"",
       "version = 1\n[aliases.Slug]\nprovider='ollama'\nmodel='x'\n[aliases.slug]\nprovider='ollama'\nmodel='x'",
       "version = 1\n[aliases.foo-bar]\nprovider='ollama'\nmodel='x'\n[aliases.foo_bar]\nprovider='ollama'\nmodel='x'",
-      "version = 1\n[aliases.one]\nprovider='ollama'\nmodel='x'\nmatch_phrases=['same']\n[aliases.two]\nprovider='ollama'\nmodel='y'\nmatch_phrases=['SAME']",
+      "version = 1\n[aliases.one]\nprovider='ollama'\nmodel='x'\nspoken_names=['same']\n[aliases.two]\nprovider='ollama'\nmodel='y'\nspoken_names=['SAME']",
     ];
 
     for (const text of invalidDocuments) {
