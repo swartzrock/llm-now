@@ -86,15 +86,9 @@ export function ratio(left: string, right: string): number {
 }
 
 export function resolveVoiceConfigPath(home: string, xdgConfigHome?: string): string {
-  let root: string;
-  if (xdgConfigHome) {
-    if (!posix.isAbsolute(xdgConfigHome)) {
-      throw new VoiceRouterError("XDG_CONFIG_HOME must be an absolute path");
-    }
-    root = xdgConfigHome;
-  } else {
-    root = posix.join(home, ".config");
-  }
+  const root = xdgConfigHome && posix.isAbsolute(xdgConfigHome)
+    ? xdgConfigHome
+    : posix.join(home, ".config");
   return posix.join(root, "llm-now", "voice-router.toml");
 }
 

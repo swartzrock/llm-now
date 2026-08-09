@@ -105,8 +105,8 @@ describe("voice router configuration", () => {
       .toBe("/Users/test/.config/llm-now/voice-router.toml");
     expect(resolveVoiceConfigPath("/Users/test", ""))
       .toBe("/Users/test/.config/llm-now/voice-router.toml");
-    expect(() => resolveVoiceConfigPath("/Users/test", "relative"))
-      .toThrow("XDG_CONFIG_HOME must be an absolute path");
+    expect(resolveVoiceConfigPath("/Users/test", "relative"))
+      .toBe("/Users/test/.config/llm-now/voice-router.toml");
   });
 
   test("uses defaults and parses the closed profile schema", () => {

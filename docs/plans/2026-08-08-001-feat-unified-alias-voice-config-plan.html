@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unified Alias and Voice Configuration - Plan</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f4f1e9;
+      --surface: #fffdf8;
+      --ink: #182229;
+      --muted: #5e696f;
+      --line: #d9d4c9;
+      --deep: #173a4b;
+      --deep-soft: #e2edf0;
+      --green: #176452;
+      --green-soft: #dceee7;
+      --amber: #825315;
+      --amber-soft: #f4e8cf;
+      --red: #8a3f46;
+      --red-soft: #f3e0e1;
+      --shadow: 0 14px 38px rgba(24, 34, 41, 0.08);
+      --radius: 17px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, rgba(23, 58, 75, 0.06), transparent 28rem), var(--page);
+      color: var(--ink);
+      font: 16px/1.62 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    code, .mono { font: 0.92em/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    a { color: var(--green); text-underline-offset: 0.18em; }
+    a:hover { color: var(--deep); }
+    strong { color: inherit; }
+    .page { width: min(94vw, 960px); margin: 0 auto; padding: 52px 0 70px; }
+    .hero {
+      padding: 38px 42px;
+      border-radius: 25px;
+      background: var(--deep);
+      color: #f8fbfb;
+      box-shadow: var(--shadow);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: #bfe4d9;
+      font-size: 0.74rem;
+      font-weight: 850;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3, h4 { line-height: 1.18; letter-spacing: -0.022em; }
+    h1 { max-width: 18ch; margin: 0; font-size: clamp(2.15rem, 5.6vw, 4.1rem); }
+    .dek { max-width: 68ch; margin: 20px 0 0; color: #dce9eb; font-size: 1.05rem; }
+    .metadata {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 9px;
+      margin: 27px 0 0;
+    }
+    .metadata div {
+      min-width: 0;
+      padding: 10px 11px;
+      border: 1px solid rgba(255, 255, 255, 0.17);
+      border-radius: 11px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .metadata dt { color: #bfe4d9; font-size: 0.66rem; font-weight: 850; letter-spacing: 0.09em; text-transform: uppercase; }
+    .metadata dd { overflow-wrap: anywhere; margin: 3px 0 0; color: #f8fbfb; font-size: 0.8rem; font-weight: 680; }
+    nav {
+      margin: 18px 0 0;
+      padding: 13px 17px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(255, 253, 248, 0.82);
+    }
+    nav ul { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; padding: 0; list-style: none; }
+    nav a { color: var(--deep); font-size: 0.84rem; font-weight: 780; text-decoration: none; }
+    section { margin-top: 42px; }
+    section > h2 { margin: 0 0 17px; color: var(--deep); font-size: 1.55rem; }
+    section section { margin-top: 29px; }
+    section section > h3 { margin: 0 0 13px; color: var(--deep); font-size: 1.22rem; }
+    .measure, p { max-width: 74ch; }
+    .goal-grid, .cards-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card, .decision, .flow, .acceptance, .scope-card, .question-card {
+      padding: 18px 19px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .card h3, .decision h4, .flow h4, .acceptance h4 { margin: 0 0 7px; color: var(--deep); }
+    .card p, .decision p, .flow p, .acceptance p, .scope-card p, .question-card p { margin: 0; }
+    .callout {
+      padding: 19px 21px;
+      border: 1px solid #b8d5cc;
+      border-radius: var(--radius);
+      background: var(--green-soft);
+      color: #164c40;
+    }
+    .callout p { margin: 0; }
+    .callout-label, .surface-label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--green);
+      font-size: 0.71rem;
+      font-weight: 850;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .decision-list, .flow-list, .acceptance-list { display: grid; gap: 11px; }
+    .decision { background: #f8f6f0; }
+    .decision p + p { margin-top: 7px; }
+    .settled { color: var(--muted); font-size: 0.88rem; }
+    .relationship-list { margin: 0; padding-left: 1.2rem; }
+    .relationship-list li { margin: 8px 0; }
+    .diagram {
+      margin: 19px 0 0;
+      padding: 15px;
+      overflow-x: auto;
+      border: 1px solid #cddbd6;
+      border-radius: 15px;
+      background: #eef3f1;
+    }
+    .diagram svg { display: block; width: 100%; min-width: 700px; height: auto; }
+    .diagram figcaption { margin-top: 8px; color: var(--muted); font-size: 0.78rem; }
+    .svg-title { font: 750 13px ui-sans-serif, -apple-system, sans-serif; fill: #173a4b; }
+    .svg-small { font: 620 11px ui-sans-serif, -apple-system, sans-serif; fill: #58686e; }
+    .svg-arrow { stroke: #176452; stroke-width: 2; fill: none; }
+    .requirement-groups { display: grid; gap: 19px; }
+    .requirement-group h4 { margin: 0 0 8px; color: var(--green); font-size: 0.86rem; letter-spacing: 0.07em; text-transform: uppercase; }
+    table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: var(--surface); font-size: 0.9rem; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--deep); color: #f8fbfb; font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .rid { width: 4.5rem; color: var(--green); font-weight: 850; white-space: nowrap; }
+    .flow h4, .acceptance h4 { font-size: 1rem; }
+    .flow p + p, .acceptance p + p { margin-top: 6px; }
+    .scope-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .scope-card.in { background: var(--green-soft); border-color: #b8d5cc; color: #164c40; }
+    .scope-card.out { background: var(--amber-soft); border-color: #ddc38d; color: #65400e; }
+    .scope-card .surface-label { color: inherit; }
+    .scope-card ul, .question-card ul { margin: 7px 0 0; padding-left: 1.15rem; }
+    .scope-card li, .question-card li { margin: 6px 0; }
+    .assumption-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .question-card.before { background: var(--red-soft); border-color: #d9afb3; color: #6f3036; }
+    .question-card.later { background: var(--deep-soft); border-color: #b9ccd3; color: #244955; }
+    .sources { padding-left: 1.2rem; }
+    .sources li { margin: 7px 0; }
+    footer {
+      margin-top: 52px;
+      padding-top: 17px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    @media (max-width: 760px) {
+      .page { width: min(92vw, 960px); padding-top: 24px; }
+      .hero { padding: 28px 24px; }
+      .metadata, .goal-grid, .cards-2, .scope-grid, .assumption-grid { grid-template-columns: 1fr; }
+    }
+    @media print {
+      body { background: #fff; }
+      .page { width: 100%; padding: 0; }
+      .hero { box-shadow: none; }
+      nav { display: none; }
+      .card, .decision, .flow, .acceptance, .scope-card, .question-card { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Requirements-only unified plan</p>
+      <h1>Unified Alias and Voice Configuration - Plan</h1>
+      <p class="dek">Replace two user-managed configuration files with one alias-centric TOML source of truth, while preserving alias workflows, voice safety behavior, recoverable migration, and the native/Python parity boundary.</p>
+      <dl class="metadata" aria-label="Plan metadata">
+        <div><dt>title</dt><dd>Unified Alias and Voice Configuration - Plan</dd></div>
+        <div><dt>type</dt><dd>feat</dd></div>
+        <div><dt>date</dt><dd><time datetime="2026-08-08">2026-08-08</time></dd></div>
+        <div><dt>topic</dt><dd class="mono">unified-alias-voice-config</dd></div>
+        <div><dt>artifact_contract</dt><dd class="mono">ce-unified-plan/v1</dd></div>
+        <div><dt>artifact_readiness</dt><dd>requirements-only</dd></div>
+        <div><dt>product_contract_source</dt><dd class="mono">ce-brainstorm</dd></div>
+        <div><dt>execution</dt><dd>code</dd></div>
+      </dl>
+    </header>
+
+    <nav aria-label="Plan navigation">
+      <ul>
+        <li><a href="#goal-capsule">Goal Capsule</a></li>
+        <li><a href="#product-contract">Product Contract</a></li>
+        <li><a href="#summary">Summary</a></li>
+        <li><a href="#key-decisions">Key Decisions</a></li>
+        <li><a href="#product-requirements">Requirements</a></li>
+        <li><a href="#key-flows">Key Flows</a></li>
+        <li><a href="#acceptance-examples">Acceptance Examples</a></li>
+        <li><a href="#scope-boundaries">Scope Boundaries</a></li>
+      </ul>
+    </nav>
+
+    <section id="goal-capsule">
+      <h2>Goal Capsule</h2>
+      <div class="goal-grid">
+        <article class="card">
+          <h3>Objective</h3>
+          <p>Give llm-now users one editable configuration file for aliases and voice behavior, with a recoverable path from the current split stores.</p>
+        </article>
+        <article class="card">
+          <h3>Product authority</h3>
+          <p>This Product Contract governs unified configuration ownership, migration, omission behavior, and portability. It supersedes the current native voice plan only where that plan requires separate alias and voice files or forbids changes to alias storage.</p>
+        </article>
+        <article class="card">
+          <h3>Open blockers</h3>
+          <p>None at the product level. Planning must choose the exact document grammar, serializer, filename, backup convention, and atomic-write mechanism without changing this contract.</p>
+        </article>
+        <article class="card">
+          <h3>Preserved authority</h3>
+          <p>Existing alias selection, overwrite confirmation, routing gates, macOS-only voice execution, release packaging, and Python-oracle independence remain authoritative unless an R-ID below changes them.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="product-contract">
+      <h2>Product Contract</h2>
+
+      <section id="summary">
+        <h3>Summary</h3>
+        <div class="callout">
+          <span class="callout-label">Proposed product shape</span>
+          <p>One alias-centric TOML document becomes llm-now's editable source of truth for aliases, optional per-alias voice settings, and global voice-routing controls. Legacy stores remain readable until an explicit migration or the next alias mutation creates the unified document.</p>
+        </div>
+      </section>
+
+      <section id="problem-frame">
+        <h3>Problem Frame</h3>
+        <p>Aliases currently live in a CLI-managed, versioned JSON document while voice routing uses a separate handwritten TOML file. A user who wants to adjust an alias's provider behavior and speech behavior must understand two formats, two paths, and two ownership models.</p>
+        <p>The split also hides omission semantics. Wake words and fuzzy-routing thresholds have compiled fallbacks, while per-alias speech settings inherit macOS defaults. Materializing those values would make them visible but would also pin today's behavior, so discoverability belongs in documentation rather than generated configuration.</p>
+      </section>
+
+      <section id="key-decisions">
+        <h3>Key Decisions</h3>
+        <div class="decision-list">
+          <article class="decision">
+            <h4>Alias-centric TOML is the source of truth</h4>
+            <p>One alias entry owns its provider, model, instructions, and optional routing or speech customization. Governs R1-R4.</p>
+            <p class="settled">(session-settled: user-directed — chosen over concern-separated TOML and expanded JSON: editing everything about an alias should require looking in one place.)</p>
+          </article>
+          <article class="decision">
+            <h4>Configuration is canonically rewritten</h4>
+            <p>Alias mutations need not preserve comments or user formatting, and generated files omit default values. Governs R5-R6, R15.</p>
+            <p class="settled">(session-settled: user-directed — chosen over comment-preserving writes and generated examples: documentation will teach customization without adding a comment-aware editing dependency.)</p>
+          </article>
+          <article class="decision">
+            <h4>Migration happens through an intentional save boundary</h4>
+            <p>The next alias mutation migrates legacy state; an explicit migration action provides an earlier path. Governs R7-R11.</p>
+            <p class="settled">(session-settled: user-directed — chosen over explicit-only migration and new-install-only adoption: existing users should naturally converge on one file.)</p>
+          </article>
+          <article class="decision">
+            <h4>The unified document is cross-platform</h4>
+            <p>Non-macOS systems accept and retain optional voice fields without enabling voice execution. Governs R4, R12.</p>
+            <p class="settled">(session-settled: user-approved — chosen over platform-specific removal or rejection: one portable configuration should survive movement between machines.)</p>
+          </article>
+          <article class="decision">
+            <h4>Voice execution remains read-only with respect to configuration</h4>
+            <p>Running <code>--voice</code> never creates or migrates the unified document. Governs R7, R13.</p>
+            <p class="settled">(session-settled: user-approved — chosen over first-voice-use materialization: invoking one prompt should not create or pin configuration.)</p>
+          </article>
+          <article class="decision">
+            <h4>The Python example remains an independent oracle</h4>
+            <p>Shared behavioral evidence expands while production and release execution stay native. Governs R16-R17.</p>
+            <p class="settled">(session-settled: user-directed — chosen over deleting the Python example: it remains useful for testing native parity.)</p>
+          </article>
+        </div>
+      </section>
+
+      <section data-ce-section="work-relationships" id="work-relationships">
+        <h3>How This Work Fits Together</h3>
+        <p>This plan owns configuration unification. It does not reopen the native voice router's selection or side-effect behavior.</p>
+        <ul class="relationship-list">
+          <li><strong>Depends on:</strong> the native voice router and existing alias store as the two legacy inputs.</li>
+          <li><strong>Supersedes:</strong> only the separate-file and unchanged-alias-store decisions in <code>docs/plans/2026-08-06-001-feat-native-macos-voice-routing-plan.md</code>.</li>
+          <li><strong>Shares:</strong> the current TypeScript/Python routing-parity boundary; configuration migration itself remains a native product responsibility.</li>
+          <li><strong>Can proceed independently of:</strong> future explain/replay diagnostics or non-macOS voice execution.</li>
+        </ul>
+
+        <figure class="diagram">
+          <svg viewBox="0 0 820 260" role="img" aria-label="Two legacy configuration files converge through migration into one alias-centric TOML document">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#176452"/></marker>
+            </defs>
+            <rect x="20" y="28" width="218" height="86" rx="15" fill="#ffffff" stroke="#9fb5bd"/>
+            <text x="129" y="58" text-anchor="middle" class="svg-title">aliases.json</text>
+            <text x="129" y="80" text-anchor="middle" class="svg-small">provider · model · instructions</text>
+            <text x="129" y="99" text-anchor="middle" class="svg-small">CLI-managed and versioned</text>
+            <rect x="20" y="146" width="218" height="86" rx="15" fill="#ffffff" stroke="#9fb5bd"/>
+            <text x="129" y="176" text-anchor="middle" class="svg-title">voice-router.toml</text>
+            <text x="129" y="198" text-anchor="middle" class="svg-small">wake words · match · speech</text>
+            <text x="129" y="217" text-anchor="middle" class="svg-small">handwritten and optional</text>
+            <path d="M238 71 H330 V111 H390" class="svg-arrow" marker-end="url(#arrow)"/>
+            <path d="M238 189 H330 V149 H390" class="svg-arrow" marker-end="url(#arrow)"/>
+            <rect x="392" y="91" width="164" height="78" rx="15" fill="#f4e8cf" stroke="#cda55c"/>
+            <text x="474" y="120" text-anchor="middle" class="svg-title">Safe migration</text>
+            <text x="474" y="143" text-anchor="middle" class="svg-small">validate · merge · back up</text>
+            <path d="M556 130 H620" class="svg-arrow" marker-end="url(#arrow)"/>
+            <rect x="622" y="69" width="178" height="122" rx="16" fill="#dceee7" stroke="#70aa98"/>
+            <text x="711" y="99" text-anchor="middle" class="svg-title">Unified TOML</text>
+            <text x="711" y="123" text-anchor="middle" class="svg-small">one entry per alias</text>
+            <text x="711" y="145" text-anchor="middle" class="svg-small">optional voice values</text>
+            <text x="711" y="167" text-anchor="middle" class="svg-small">global routing policy</text>
+          </svg>
+          <figcaption>The unified document becomes authoritative only after both legacy inputs validate and a recoverable migration succeeds.</figcaption>
+        </figure>
+      </section>
+
+      <section id="product-requirements">
+        <h3>Requirements</h3>
+        <div class="requirement-groups">
+          <div class="requirement-group">
+            <h4>Unified document and omission behavior</h4>
+            <table>
+              <thead><tr><th>ID</th><th>Requirement</th></tr></thead>
+              <tbody>
+                <tr id="r1"><td class="rid">R1.</td><td>llm-now must use one versioned TOML document as the authoritative store for aliases and voice configuration after migration.</td></tr>
+                <tr id="r2"><td class="rid">R2.</td><td>Each alias entry must contain its provider, model, and optional instructions together with any optional match phrases, voice, rate, or pitch customization for that alias.</td></tr>
+                <tr id="r3"><td class="rid">R3.</td><td>The document must provide one global voice-routing area for wake words, minimum fuzzy phrase length, minimum similarity, and minimum runner-up margin.</td></tr>
+                <tr id="r4"><td class="rid">R4.</td><td>Omitted voice fields must use compiled per-field fallbacks, including <code>hey</code>, <code>4</code>, <code>65</code>, and <code>15</code> for the current routing defaults and system speech behavior for omitted per-alias speech settings.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="requirement-group">
+            <h4>Editing and CLI ownership</h4>
+            <table>
+              <thead><tr><th>ID</th><th>Requirement</th></tr></thead>
+              <tbody>
+                <tr id="r5"><td class="rid">R5.</td><td>Existing alias listing, lookup, save, collision, and overwrite-confirmation behavior must operate on the unified document without changing the user's alias semantics.</td></tr>
+                <tr id="r6"><td class="rid">R6.</td><td>An alias mutation may canonically normalize the TOML document and remove comments or formatting, but it must preserve every valid unrelated configuration value.</td></tr>
+                <tr id="r7"><td class="rid">R7.</td><td>Generated or migrated documents must not materialize wake-word, fuzzy-routing, voice, rate, pitch, or example-alias defaults that the user did not explicitly configure.</td></tr>
+                <tr id="r8"><td class="rid">R8.</td><td>Malformed or unsupported unified configuration must fail before alias mutation, generation, clipboard changes, speech, or replacement of any valid on-disk document.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="requirement-group">
+            <h4>Migration and authority</h4>
+            <table>
+              <thead><tr><th>ID</th><th>Requirement</th></tr></thead>
+              <tbody>
+                <tr id="r9"><td class="rid">R9.</td><td>When the unified document is absent, llm-now must continue reading the current legacy alias and voice stores without mutating them.</td></tr>
+                <tr id="r10"><td class="rid">R10.</td><td>The next successful alias mutation must validate and merge both legacy stores, apply the requested alias change, create recoverable legacy backups, and make the unified document authoritative as one transaction.</td></tr>
+                <tr id="r11"><td class="rid">R11.</td><td>An explicit migration action must perform the same merge without requiring an alias change and must be safe to retry after an interrupted or failed attempt.</td></tr>
+                <tr id="r12"><td class="rid">R12.</td><td>A successful migration must preserve valid settings for active aliases, report any inert legacy voice profile it cannot attach, and retain the original profile in the backup.</td></tr>
+                <tr id="r13"><td class="rid">R13.</td><td>Once a valid unified document exists, it must be the sole automatic read/write authority; legacy backups are used only through explicit recovery.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="requirement-group">
+            <h4>Portability, documentation, and parity</h4>
+            <table>
+              <thead><tr><th>ID</th><th>Requirement</th></tr></thead>
+              <tbody>
+                <tr id="r14"><td class="rid">R14.</td><td>Windows and non-macOS Unix systems must accept, retain, and rewrite valid optional voice settings while continuing to reject voice execution where it is unsupported.</td></tr>
+                <tr id="r15"><td class="rid">R15.</td><td>User documentation must identify the unified path, migration and downgrade recovery behavior, canonical-rewrite policy, every supported optional voice setting, and the effective defaults omitted from the file.</td></tr>
+                <tr id="r16"><td class="rid">R16.</td><td>Native TypeScript and the retained Python example must independently prove equivalent routing and fallback outcomes for representative unified configuration cases.</td></tr>
+                <tr id="r17"><td class="rid">R17.</td><td>Installed and packaged llm-now execution must remain free of Python, uv, repository-checkout, or Python-config-parser requirements.</td></tr>
+                <tr id="r18"><td class="rid">R18.</td><td>Credentials and provider authentication material must remain outside the unified configuration document.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="key-flows">
+        <h3>Key Flows</h3>
+        <div class="flow-list">
+          <article class="flow" id="f1">
+            <h4>F1. Legacy read before migration</h4>
+            <p><strong>Trigger:</strong> A user invokes alias selection, alias inventory, or voice mode before a unified document exists.</p>
+            <p><strong>Outcome:</strong> llm-now reads the legacy stores without creating or changing either one. Covers R9, R17.</p>
+          </article>
+          <article class="flow" id="f2">
+            <h4>F2. Migration through alias save</h4>
+            <p><strong>Trigger:</strong> A user confirms an alias mutation while only legacy stores exist.</p>
+            <p><strong>Outcome:</strong> llm-now validates both stores, merges them with the requested change, preserves recoverable originals, and publishes one authoritative document; failure leaves legacy authority intact. Covers R5, R8, R10, R12-R13.</p>
+          </article>
+          <article class="flow" id="f3">
+            <h4>F3. Explicit migration</h4>
+            <p><strong>Trigger:</strong> A user asks to migrate before the next alias mutation.</p>
+            <p><strong>Outcome:</strong> The same validation, merge, backup, and authority transition occurs without changing alias content. Covers R11-R13.</p>
+          </article>
+          <article class="flow" id="f4">
+            <h4>F4. Unified edit and save</h4>
+            <p><strong>Trigger:</strong> A user manually edits valid TOML or later saves an alias through llm-now.</p>
+            <p><strong>Outcome:</strong> Reads honor the manual values; a later alias save may normalize formatting while preserving all valid unrelated settings. Covers R1-R8.</p>
+          </article>
+          <article class="flow" id="f5">
+            <h4>F5. Portable configuration</h4>
+            <p><strong>Trigger:</strong> A unified document containing voice fields is used on Windows or Linux.</p>
+            <p><strong>Outcome:</strong> Alias behavior remains available and subsequent saves retain voice settings; invoking unsupported voice execution still fails at the established platform boundary. Covers R14.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="acceptance-examples">
+        <h3>Acceptance Examples</h3>
+        <div class="acceptance-list">
+          <article class="acceptance" id="ae1"><h4>AE1. Fresh alias save</h4><p><strong>Covers R1-R7.</strong> With no legacy or unified files, saving alias <code>slug</code> creates a TOML document containing that alias's configured provider, model, and instructions but no voice defaults, example aliases, or generated comments.</p></article>
+          <article class="acceptance" id="ae2"><h4>AE2. Automatic two-file migration</h4><p><strong>Covers R9-R13.</strong> Given valid aliases plus wake words and speech settings for active aliases, the next confirmed alias save produces one equivalent unified document and recoverable copies of both originals before switching authority.</p></article>
+          <article class="acceptance" id="ae3"><h4>AE3. Explicit migration without alias change</h4><p><strong>Covers R11-R13.</strong> A user can migrate two valid legacy stores without adding, removing, or overwriting an alias; repeating the action after success does not duplicate or discard data.</p></article>
+          <article class="acceptance" id="ae4"><h4>AE4. Invalid migration input</h4><p><strong>Covers R8-R11.</strong> If either legacy store is malformed or unsupported, migration reports an actionable configuration failure and leaves both legacy files and alias behavior unchanged.</p></article>
+          <article class="acceptance" id="ae5"><h4>AE5. Stale voice profile</h4><p><strong>Covers R10-R12.</strong> If the voice TOML contains a structurally valid profile for a removed alias, migration reports that it was not attached, preserves it in the backup, and does not invent an incomplete alias.</p></article>
+          <article class="acceptance" id="ae6"><h4>AE6. Default inheritance</h4><p><strong>Covers R4, R7, R15.</strong> Removing one global or per-alias voice field restores that field's compiled or system fallback without changing other explicitly configured values; the documentation identifies the effective value.</p></article>
+          <article class="acceptance" id="ae7"><h4>AE7. Canonical rewrite</h4><p><strong>Covers R5-R8.</strong> After a user adds comments and custom spacing to valid TOML, a later alias save may remove those comments and normalize formatting but retains every configured alias, routing, and speech value.</p></article>
+          <article class="acceptance" id="ae8"><h4>AE8. Cross-platform retention</h4><p><strong>Covers R14, R17.</strong> A Windows or Linux alias update retains configured match phrases and speech values while the existing non-macOS voice invocation still exits before routing or generation.</p></article>
+          <article class="acceptance" id="ae9"><h4>AE9. Native and oracle parity</h4><p><strong>Covers R16-R17.</strong> Native and Python suites independently reach the same route, score boundary, ambiguity decision, and omission fallback for shared cases, while packaged runtime checks execute without Python.</p></article>
+          <article class="acceptance" id="ae10"><h4>AE10. Explicit downgrade recovery</h4><p><strong>Covers R13, R15.</strong> Documentation warns that an older binary may not understand the unified document and explains how a user can deliberately restore the preserved legacy files before downgrading.</p></article>
+        </div>
+      </section>
+
+      <section id="scope-boundaries">
+        <h3>Scope Boundaries</h3>
+        <div class="scope-grid">
+          <article class="scope-card in">
+            <span class="surface-label">In scope</span>
+            <ul>
+              <li>One alias-centric TOML authority</li>
+              <li>Legacy read compatibility and recoverable migration</li>
+              <li>Compiled omission defaults and complete documentation</li>
+              <li>Cross-platform storage with macOS-only execution</li>
+              <li>Native/Python behavioral parity coverage</li>
+            </ul>
+          </article>
+          <article class="scope-card out">
+            <span class="surface-label">Out of scope</span>
+            <ul>
+              <li>Credentials or provider authentication in TOML</li>
+              <li>Comment preservation, generated examples, or materialized defaults</li>
+              <li>Silent configuration creation during voice invocation</li>
+              <li>Non-macOS speech or voice routing</li>
+              <li>A graphical editor, interactive calibration, or route replay tool</li>
+              <li>Removal of the Python example</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="dependencies-assumptions">
+        <h3>Dependencies / Assumptions</h3>
+        <div class="cards-2">
+          <article class="card"><h3>Legacy inputs remain parseable</h3><p>The migration can recognize both supported alias document versions and the current closed voice TOML grammar before switching authority.</p></article>
+          <article class="card"><h3>Existing behaviors remain owners</h3><p>The current alias collision/overwrite contract and native routing/safety plan remain authoritative outside storage changes named by R1-R17.</p></article>
+          <article class="card"><h3>TOML writing is new work</h3><p>The repository currently uses built-in TOML parsing but declares no TOML serializer or comment-preserving editor; planning must select a maintained writer rather than reimplement serialization.</p></article>
+          <article class="card"><h3>Backups are recovery artifacts</h3><p>Backups may contain plaintext alias instructions just as the current alias store does; documentation and permissions must treat them accordingly.</p></article>
+        </div>
+      </section>
+
+      <section id="outstanding-questions">
+        <h3>Outstanding Questions</h3>
+        <div class="assumption-grid">
+          <article class="question-card before">
+            <span class="surface-label">Resolve Before Planning</span>
+            <p>None.</p>
+          </article>
+          <article class="question-card later">
+            <span class="surface-label">Deferred to Planning</span>
+            <ul>
+              <li>The unified filename, exact TOML table/key names, and format-version representation</li>
+              <li>The maintained TOML serializer and canonical formatting policy</li>
+              <li>Backup naming, permissions, atomic publication, and interrupted-migration recovery mechanics</li>
+              <li>The exact CLI spelling for explicit migration and configuration-path discovery</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="sources-research">
+        <h3>Sources / Research</h3>
+        <ul class="sources">
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/aliases.ts">Alias document, path, validation, locking, and atomic persistence</a></li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/voice-routing.ts">Voice TOML path, schema, and omission defaults</a></li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/voice.ts">Native voice configuration read flow</a></li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/examples/macos-voice-shortcut.md">Current user-facing voice configuration contract</a></li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/docs/ideation/2026-08-07-editable-voice-router-defaults-ideation.html">Editable voice-router defaults ideation</a></li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/docs/plans/2026-08-06-001-feat-native-macos-voice-routing-plan.md">Native macOS voice routing plan</a></li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/tests/voice-routing.test.ts">Native routing and parity coverage</a></li>
+          <li><a href="https://github.com/swartzrock/llm-now/blob/main/examples/macos-voice-router/src/llm_now_voice/cli.py">Retained Python reference implementation</a></li>
+        </ul>
+      </section>
+    </section>
+
+    <footer class="composition-signal">Composed <time datetime="2026-08-09T02:16:11Z">2026-08-09T02:16:11Z</time> by <code>ce-brainstorm</code> from the confirmed unified alias-and-voice configuration dialogue and <code>docs/ideation/2026-08-07-editable-voice-router-defaults-ideation.html</code>.</footer>
+  </main>
+</body>
+</html>

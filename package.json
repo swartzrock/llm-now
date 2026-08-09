@@ -31,6 +31,7 @@
     "@clack/prompts": "1.7.0",
     "@swartzrock/byok-runtime": "2.2.0",
     "picocolors": "1.1.1",
+    "smol-toml": "1.7.1",
     "unicode-case-folding": "1.1.1"
   },
   "patchedDependencies": {
