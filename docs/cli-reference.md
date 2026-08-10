@@ -112,12 +112,15 @@ Prompt text comes from one source:
 - stdin; or
 - the terminal prompt shown for an interactive launcher or alias-only call.
 
-Arguments, `--input`, piped input, and noninteractive execution bypass the
-launcher. A noninteractive call requires a positional alias, `--alias`, or both
+Except for a sole `--speak` in an interactive terminal, arguments, `--input`,
+piped input, and noninteractive execution bypass the launcher. That exception
+opens the launcher with speech enabled, including its shortcut-creation routes.
+A noninteractive call requires a positional alias, `--alias`, or both
 `--provider` and `--model`. It also requires one nonblank prompt from `--input`
-or stdin. Supplying nonempty stdin together with `--input`, supplying neither
-source, supplying a blank prompt, or piping invalid UTF-8 is a usage error.
-Accepted prompt text is not trimmed or otherwise transformed.
+or stdin. Supplying nonempty stdin together with `--input` or supplying neither
+source is a usage error. On calls without `--voice-route`, a blank prompt or
+invalid-UTF-8 stdin is also a usage error. Accepted prompt text is not trimmed
+or otherwise transformed.
 
 In an interactive terminal, `llm-now daily` resolves the saved shortcut, shows
 its alias, provider, and model in
@@ -209,7 +212,9 @@ instructions for that request.
 Routing checks canonical aliases, configured `spoken_names`, and fuzzy
 matching in that order. A route-only mismatch exits `1`, leaves stdout empty,
 reports a bounded value-free reason on stderr, and makes no provider or speech
-call. Routing without speech works on every supported platform.
+call. Blank or invalid-UTF-8 routed input is also a voice rejection: route-only
+calls exit `1`, while `--speak` calls exit `0` when the stable retry notice is
+spoken successfully. Routing without speech works on every supported platform.
 
 `--speak` composes with positional-alias, `--alias`, explicit provider/model,
 voice-routing, and interactive selection flows. It adds this plain-text speech
@@ -275,13 +280,17 @@ identify the discovery, model-list, generation, or credential-store operation.
 - `0`: successful generation, alias inventory, config-path discovery,
   migration, help, version, or a completed or declined setup action;
   cancellation after a durable key or shortcut write preserves that work and
-  can exit without generation. Handled speech-mode routing or generation
-  failures also exit `0` when their stable notice is spoken successfully.
+  can exit without generation. With `--speak`, blank or invalid-UTF-8 routed
+  input and ordinary routing mismatches also exit `0` when their stable retry
+  notice is spoken successfully. Handled speech-mode generation failures use
+  the same exit code when their stable notice is spoken successfully.
 - `1`: discovery, model-list, generation, configuration, credential-store,
-  route-only mismatch, or post-credential shortcut failure. Invalid,
-  unreadable, and case-conflicting unified configuration also use `1`.
+  route-only voice rejection (including mismatch, blank input, or invalid
+  UTF-8), or post-credential shortcut failure. Invalid, unreadable, and
+  case-conflicting unified configuration also use `1`.
 - `2`: invalid usage, including illegal option combinations and combining
   `--aliases`, `--config-path`, or `--migrate-config` with another option or
-  positional value.
+  positional value. For calls without `--voice-route`, blank prompts and
+  invalid-UTF-8 input are also usage errors.
 - `130`: launcher, management, prompt, alias, provider, or model selection
   cancelled before a durable action; voice cancellation also uses `130`.

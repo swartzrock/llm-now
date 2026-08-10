@@ -150,10 +150,12 @@ wake-word, fuzzy-routing, speech, and example values are not written. Deleting
 an override therefore resumes the documented compiled or system behavior
 instead of pinning today's value.
 
-Routing and speech may read the selected authority but never create
-`config.toml`, migrate legacy files, write a backup, or change configuration.
-`--config-path` and the early non-macOS `--speak` rejection do not read
-application configuration.
+`--voice-route` calls and deterministic `--speak` calls may read the selected
+authority but never create `config.toml`, migrate legacy files, write a backup,
+or change configuration. A sole `--speak` in an interactive terminal opens the
+launcher instead; it can save and canonically rewrite configuration when the
+user explicitly chooses shortcut creation. `--config-path` and the early
+non-macOS `--speak` rejection do not read application configuration.
 
 ## Instructions and secrets
 

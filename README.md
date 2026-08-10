@@ -95,12 +95,12 @@ llm-now daily --input "Summarize the three most important points"
 | Route a dictated prompt | `llm-now --voice-route --input "hey daily, summarize this"` |
 | Speak a response on macOS | `llm-now --alias daily --speak --input "Summarize this"` |
 
-Arguments, `--input`, piped input, and noninteractive execution bypass the
-launcher. Noninteractive generation needs exactly one prompt source (`--input`
-or stdin) plus a saved shortcut or an explicit provider and model. Successful
-generation writes only the model response to stdout; interactive UI and
-diagnostics use stderr. `--aliases`, `--config-path`, and `--migrate-config`
-are standalone commands.
+Except for a sole `--speak` in an interactive terminal, arguments, `--input`,
+piped input, and noninteractive execution bypass the launcher. Noninteractive
+generation needs exactly one prompt source (`--input` or stdin) plus a saved
+shortcut or an explicit provider and model. Successful generation writes only
+the model response to stdout; interactive UI and diagnostics use stderr.
+`--aliases`, `--config-path`, and `--migrate-config` are standalone commands.
 
 `llm-now --help` shows command syntax, option summaries, recognized API-key
 environment variables, and a generic secure-storage note. Platform-specific
