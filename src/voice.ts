@@ -229,7 +229,10 @@ function redactionVariants(value: string): readonly string[] {
   return [value, serialized, escaped, JSON.stringify(escaped).slice(1, -1)];
 }
 
-function redactRequestValues(value: string, requestValues: readonly string[]): string {
+export function redactVoiceRequestValues(
+  value: string,
+  requestValues: readonly string[],
+): string {
   return createSensitiveValueRegistry(requestValues.flatMap(redactionVariants)).redact(value);
 }
 
@@ -365,7 +368,7 @@ function reportVoiceSpeechDiagnostic(
   value?: unknown,
 ): void {
   const suffix = value === undefined ? "" : `: ${detail(value)}`;
-  state.diagnostic(redactRequestValues(
+  state.diagnostic(redactVoiceRequestValues(
     canonicalizeDiagnostic(`${category}${suffix}`),
     state.requestValues,
   ));

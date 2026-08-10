@@ -83,6 +83,7 @@ import {
   VOICE_PROMPT,
   createBunVoiceProcessRunner,
   prepareVoiceSpeech,
+  redactVoiceRequestValues,
   routeVoiceTranscript,
   speakVoiceAnswer,
   speakVoiceNotice,
@@ -182,10 +183,30 @@ function sanitizeDiagnostic(
     : `${sanitized.slice(0, MAX_DIAGNOSTIC_LENGTH - 1)}…`;
 }
 
-function diagnosticWriter(deps: ApplicationDependencies): (text: string) => void {
+function diagnosticWriter(
+  deps: ApplicationDependencies,
+  requestValues: readonly string[] = [],
+): (text: string) => void {
   return (text) => {
-    const sanitized = sanitizeDiagnostic(text, deps.env, deps.sensitive);
+    const sanitized = sanitizeDiagnostic(
+      redactVoiceRequestValues(text, requestValues),
+      deps.env,
+      deps.sensitive,
+    );
     deps.stderr.write(`${sanitized}${sanitized.endsWith("\n") ? "" : "\n"}`);
+  };
+}
+
+function withPromptSignal(
+  prompter: SearchablePrompter,
+  signal: AbortSignal,
+): SearchablePrompter {
+  return {
+    select: (message, options) => prompter.select(message, options, signal),
+    input: (message, options) => prompter.input(message, options, signal),
+    instruction: (message) => prompter.instruction(message, signal),
+    password: (message, options) => prompter.password(message, options, signal),
+    confirm: (message, options) => prompter.confirm(message, options, signal),
   };
 }
 
@@ -1542,7 +1563,8 @@ async function voicePreflightFailureExit(
 }
 
 export async function runApplication(deps: ApplicationDependencies): Promise<number> {
-  const diagnostic = diagnosticWriter(deps);
+  const requestValues: string[] = [];
+  const diagnostic = diagnosticWriter(deps, requestValues);
   try {
     const parsed = parseArguments(deps.args);
     if (parsed.kind === "help") {
@@ -1599,7 +1621,9 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       const signal = cancellation?.signal;
       if (signal?.aborted) return cancelled();
       const interactive = isInteractive(deps.stdin, deps.stderr);
-      const requestValues: string[] = [];
+      const requestDeps = signal === undefined
+        ? deps
+        : { ...deps, prompter: withPromptSignal(deps.prompter, signal) };
       const runner = parsed.speak
         ? deps.voiceRunner ?? createBunVoiceProcessRunner()
         : undefined;
@@ -1631,6 +1655,8 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       let selection: ResolvedSelection;
       let snapshot: ConfigSnapshot | null = null;
       if (parsed.voiceRoute) {
+        snapshot = await loadApplicationConfigSnapshot(deps, true);
+        if (signal?.aborted) return cancelled();
         let transcript: string;
         try {
           transcript = await resolveInputSource(parsed.input, deps.stdin, signal);
@@ -1645,8 +1671,6 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         if (transcript.trim().length === 0) {
           return rejectedRoute("voice input rejected: dictated transcript is blank", RETRY_NOTICE, 0);
         }
-        snapshot = await loadApplicationConfigSnapshot(deps, true);
-        if (signal?.aborted) return cancelled();
         const route = routeVoiceTranscript(transcript, snapshot);
         if (route.kind === "rejected") {
           if (route.reason === "empty_aliases") {
@@ -1669,8 +1693,10 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       ) {
         snapshot = await loadApplicationConfigSnapshot(deps, parsed.speak);
         if (signal?.aborted) return cancelled();
-        const outcome = await runLauncher(deps, snapshot.aliases, diagnostic);
-        if (typeof outcome === "number") return outcome;
+        const outcome = await runLauncher(requestDeps, snapshot.aliases, diagnostic);
+        if (typeof outcome === "number") {
+          return signal?.aborted ? cancelled() : outcome;
+        }
         prompt = outcome.prompt;
         selection = outcome.selection;
       } else if (
@@ -1683,19 +1709,21 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           : await preflightUnifiedConfig(deps);
         if (signal?.aborted) return cancelled();
         const resolved = await resolveSelection(
-          deps,
+          requestDeps,
           parsed.selection,
           snapshot,
           interactive,
           diagnostic,
         );
-        if (typeof resolved === "number") return resolved;
+        if (typeof resolved === "number") {
+          return signal?.aborted ? cancelled() : resolved;
+        }
         selection = resolved;
         const entered = await collectOneShotPrompt(
-          deps,
+          requestDeps,
           aliasPromptMessage(deps, parsed.selection.alias, resolved.selection),
         );
-        if (entered === null) return 130;
+        if (entered === null) return signal?.aborted ? cancelled() : 130;
         prompt = entered;
       } else {
         if (!interactive && parsed.selection.kind === "interactive") {
@@ -1724,13 +1752,15 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           : await loadApplicationConfigSnapshot(deps, parsed.speak);
         if (signal?.aborted) return cancelled();
         const resolved = await resolveSelection(
-          deps,
+          requestDeps,
           parsed.selection,
           snapshot,
           interactive,
           diagnostic,
         );
-        if (typeof resolved === "number") return resolved;
+        if (typeof resolved === "number") {
+          return signal?.aborted ? cancelled() : resolved;
+        }
         selection = resolved;
       }
 

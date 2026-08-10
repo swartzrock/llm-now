@@ -456,6 +456,20 @@ describe("terminal provider and model selection", () => {
     expect(await selected).toBeNull();
   });
 
+  test("real Clack adapter normalizes programmatic aborts", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const root = new AbortController();
+    const selected = createSearchablePrompter(input, output).select(
+      "Pick",
+      [{ value: "alpha", label: "Alpha" }],
+      root.signal,
+    );
+    setTimeout(() => root.abort(), 1);
+
+    expect(await selected).toBeNull();
+  });
+
   test("real Clack text input returns blank Enter as the exit value", async () => {
     const input = new PassThrough();
     const output = new PassThrough();

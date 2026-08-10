@@ -16,6 +16,7 @@ import { renderHelpText } from "../src/args.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import {
   CONFIG_FAILED_NOTICE,
+  REQUEST_FAILED_NOTICE,
   type VoiceCancellation,
   type VoiceProcessRequest,
   type VoiceProcessRunner,
@@ -864,6 +865,174 @@ describe("voice boundary", () => {
     expect(speechChecks).toBe(0);
     expect(app.stdout.text()).toBe("");
     expect(app.stderr.text()).toBe("voice request rejected: no_match\n");
+  });
+
+  test("loads malformed configuration before blank or invalid-UTF-8 voice input can reach speech", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const configPath = join(directory, "config.toml");
+    await writeFile(configPath, "version = 2\n[aliases]\n");
+    let inputReads = 0;
+    let voiceCalls = 0;
+    const voiceRunner: VoiceProcessRunner = {
+      isExecutable: async () => {
+        voiceCalls += 1;
+        return true;
+      },
+      run: async () => {
+        voiceCalls += 1;
+        return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+      },
+    };
+    const blank = dependencies({
+      args: ["--voice-route", "--speak", "--input", "   "],
+      platform: "darwin",
+      env: { XDG_CONFIG_HOME: root },
+      configPath,
+      voiceRunner,
+    });
+    const invalid = dependencies({
+      args: ["--voice-route", "--speak"],
+      platform: "darwin",
+      env: { XDG_CONFIG_HOME: root },
+      configPath,
+      stdin: {
+        isTTY: false,
+        async *[Symbol.asyncIterator]() {
+          inputReads += 1;
+          yield new Uint8Array([0xc3, 0x28]);
+        },
+      },
+      voiceRunner,
+    });
+
+    expect(await runApplication(blank.value)).toBe(1);
+    expect(await runApplication(invalid.value)).toBe(1);
+    expect(inputReads).toBe(0);
+    expect(voiceCalls).toBe(0);
+    expect(blank.runtime.calls.generate).toBe(0);
+    expect(invalid.runtime.calls.generate).toBe(0);
+  });
+
+  test("cancels an interactive speech prompt through the root signal", async () => {
+    const root = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    let disposals = 0;
+    let voiceCalls = 0;
+    const app = dependencies({
+      args: ["--speak"],
+      platform: "darwin",
+      stdin: input("", true),
+      stderrTty: true,
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      readVoiceConfig: async () => null,
+      prompter: {
+        ...prompts(),
+        select: async (_message, _options, signal) => {
+          seenSignal = signal;
+          root.abort();
+          return null;
+        },
+      },
+      installVoiceCancellation: () => ({
+        signal: root.signal,
+        dispose: () => {
+          disposals += 1;
+        },
+      }),
+      voiceRunner: {
+        isExecutable: async () => {
+          voiceCalls += 1;
+          return true;
+        },
+        run: async () => {
+          voiceCalls += 1;
+          return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+        },
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(seenSignal).toBe(root.signal);
+    expect(disposals).toBe(1);
+    expect(voiceCalls).toBe(0);
+    expect(app.runtime.calls.generate).toBe(0);
+    expect(app.stderr.text()).toBe("voice request cancelled\n");
+  });
+
+  test("redacts routed request values from generation failures", async () => {
+    const transcript = "haiku private dictated question";
+    const question = "private dictated question";
+    const app = dependencies({
+      args: ["--voice-route", "--input", transcript],
+      runtime: runtime({
+        generate: async () => {
+          throw new RuntimeStageError(
+            "generation",
+            "ollama",
+            `provider reflected ${transcript} ${JSON.stringify(question)}`,
+          );
+        },
+      }),
+      loadAliases: async () => ({
+        version: 1,
+        aliases: { haiku: { provider: "ollama", model: "qwen" } },
+      }),
+      readVoiceConfig: async () => null,
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toContain("provider reflected");
+    expect(app.stderr.text()).toContain("[REDACTED]");
+    expect(app.stderr.text()).not.toContain(transcript);
+    expect(app.stderr.text()).not.toContain(question);
+  });
+
+  test("preflights speech before generation and speaks only a stable failure notice", async () => {
+    const unavailable = dependencies({
+      args: ["--provider", "ollama", "--model", "qwen", "--speak", "--input", "question"],
+      platform: "darwin",
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      readVoiceConfig: async () => null,
+      voiceRunner: {
+        isExecutable: async () => false,
+        run: async () => {
+          throw new Error("speech must not start after failed preflight");
+        },
+      },
+    });
+
+    expect(await runApplication(unavailable.value)).toBe(1);
+    expect(unavailable.runtime.calls.generate).toBe(0);
+    expect(unavailable.stderr.text()).toContain("voice configuration failed");
+
+    const requests: VoiceProcessRequest[] = [];
+    const failedGeneration = dependencies({
+      args: ["--provider", "ollama", "--model", "qwen", "--speak", "--input", "question"],
+      platform: "darwin",
+      runtime: runtime({
+        generate: async () => {
+          throw new RuntimeStageError("generation", "ollama", "provider unavailable");
+        },
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      readVoiceConfig: async () => null,
+      voiceRunner: {
+        isExecutable: async () => true,
+        run: async (request) => {
+          requests.push(request);
+          return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+        },
+      },
+    });
+
+    expect(await runApplication(failedGeneration.value)).toBe(0);
+    expect(requests).toHaveLength(1);
+    expect(new TextDecoder().decode(requests[0]?.stdin)).toBe(REQUEST_FAILED_NOTICE);
+    expect(failedGeneration.stdout.text()).toBe("");
+    expect(failedGeneration.stderr.text()).toBe("voice generation failed\n");
   });
 
   test("cancels speech generation without starting a later sink", async () => {
