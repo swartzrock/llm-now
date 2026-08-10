@@ -143,9 +143,12 @@ describe("native release build", () => {
     expect(releaseValidation).toContain('name.toUpperCase() !== "PATH"');
     expect(releaseValidation).toContain("missing-login-shell");
     expect(releaseValidation).not.toContain("process.env.PATH");
-    expect(releaseValidation).toContain("llm-now --voice [--input <text>]");
-    expect(releaseValidation).toContain("non-macOS voice guard before scorer initialization");
-    expect(releaseValidation).toContain("voice: llm-now --voice currently supports macOS only.");
+    expect(releaseValidation).toContain("llm-now --voice-route --input <text>");
+    expect(releaseValidation).toContain("llm-now --voice-route --speak --input <text>");
+    expect(releaseValidation).not.toContain("llm-now --voice [--input <text>]");
+    expect(releaseValidation).toContain("non-macOS speech guard before scorer initialization");
+    expect(releaseValidation).toContain("voice: llm-now --speak currently supports macOS only.");
+    expect(releaseValidation).toContain("cross-platform fuzzy voice routing");
     expect(fakeCli).toContain("unexpected fake CLI instruction configuration");
     expect(fakeCli).toContain("unexpected fake CLI prompt");
     expect(fakeCli).not.toContain("args.join");

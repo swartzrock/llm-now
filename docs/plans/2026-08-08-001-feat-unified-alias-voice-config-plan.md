@@ -12,6 +12,12 @@ execution: code
 
 # Unified Alias and Voice Configuration - Plan
 
+> **Superseded invocation boundary (2026-08-09):** References in this historical
+> plan to `--voice` now map to `--voice-route`, `--speak`, or their combination.
+> Routing remains cross-platform; speech remains macOS-only. Both modifiers keep
+> this plan's read-only configuration contract, and the unified/legacy authority
+> and migration requirements are unchanged.
+
 ## Goal Capsule
 
 - **Objective:** Give llm-now users one editable configuration file for aliases and voice behavior, with a recoverable path from the current split stores.

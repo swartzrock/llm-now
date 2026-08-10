@@ -7,10 +7,10 @@ The Shortcut itself has only two actions:
 2. `Run Shell Script`
 
 The shell action passes the dictated text through stdin to the installed
-`llm-now --voice` command. The native command loads the current aliases, rejects
-uncertain matches, calls the selected alias once, and speaks the answer with
-macOS `say`. Normal use does not require Python, uv, this repository, or a
-second launcher.
+`llm-now --voice-route --speak` command. Voice routing selects a saved alias and
+extracts its question; speech adds concise plain-text guidance and sends the
+validated answer to macOS `say` instead of stdout. Normal use does not require
+Python, uv, this repository, or a second launcher.
 
 ## Before you start
 
@@ -57,7 +57,7 @@ Paste one command, replacing the example with the absolute path printed by
 `command -v llm-now`:
 
 ```zsh
-/opt/homebrew/bin/llm-now --voice
+/opt/homebrew/bin/llm-now --voice-route --speak
 ```
 
 Intel Homebrew commonly installs the binary at `/usr/local/bin/llm-now`; direct
@@ -80,7 +80,7 @@ dependencies, aliases, and providers from Dictation permissions.
 For manual Terminal testing, `--input` is also available:
 
 ```bash
-/absolute/path/to/llm-now --voice --input 'haiku, explain a perfect chord'
+/absolute/path/to/llm-now --voice-route --speak --input 'haiku, explain a perfect chord'
 ```
 
 The Shortcut must use stdin. Command-line input can be visible in shell history
@@ -243,9 +243,9 @@ changing the voice or alias.
 An alias save may canonically rewrite all of `config.toml`, removing comments
 and custom spacing while preserving valid unrelated values. Generated and
 migrated files remain sparse and comment-free; llm-now does not write the
-omitted defaults or example aliases. Running `llm-now --voice` is read-only with
-respect to configuration: it never creates the unified file, migrates legacy
-files, creates backups, or saves inferred speech settings. Use
+omitted defaults or example aliases. Voice routing and speech are read-only
+with respect to configuration: they never create the unified file, migrate
+legacy files, create backups, or save inferred speech settings. Use
 `llm-now --migrate-config` if you want to migrate legacy `aliases.json` and
 `voice-router.toml` before the next successful alias save. Any structurally
 valid legacy voice profiles that cannot attach to an active alias are reported
@@ -266,6 +266,30 @@ that apply to your alias inventory.
    the same model. Confirm the profile follows the alias, not the model.
 5. Ask one local Ollama alias and one hosted API- or CLI-backed alias. Ordinary
    safe text from both must follow the same speech path.
+
+The two flags also work independently. In Terminal, verify route-only output
+on stdout without speech:
+
+```bash
+/absolute/path/to/llm-now --voice-route --input 'haiku, explain a perfect chord'
+```
+
+Then bypass routing, select the alias explicitly, and speak the answer:
+
+```bash
+/absolute/path/to/llm-now --alias haiku --speak --input 'Explain a perfect chord'
+```
+
+The route-only command writes the model response to stdout and works on every
+supported platform. Both speech forms leave answer stdout empty. Before one
+combined run, copy a distinctive sentinel in another application; afterward,
+paste into a blank document and confirm the sentinel is unchanged. llm-now
+does not use the clipboard as an output channel.
+
+A rejected route-only request exits `1`, leaves stdout empty, reports only a
+bounded value-free reason on stderr, and starts neither generation nor speech.
+When `--speak` is also present, the same routing failure uses the stable spoken
+retry notice described below.
 
 ### Pitch A/B check
 
@@ -339,7 +363,7 @@ Run the same installed binary from Terminal with a transcript to see local
 diagnostics:
 
 ```bash
-printf 'haiku, explain a perfect chord' | /absolute/path/to/llm-now --voice
+printf 'haiku, explain a perfect chord' | /absolute/path/to/llm-now --voice-route --speak
 ```
 
 Rejected input says `I couldn't match an alias and question. Please try again.`
