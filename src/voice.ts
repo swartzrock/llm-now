@@ -8,22 +8,19 @@ import {
   createSensitiveValueRegistry,
   type SensitiveValueRegistry,
 } from "./credentials.ts";
-import { InvalidUtf8Error, resolveInputSource, type PromptInput } from "./io.ts";
 import { stripTerminalSequences } from "./prompts.ts";
-import type { RuntimeGateway } from "./runtime.ts";
 import {
   formatTrustedPitchCommand,
   parseVoiceInventory,
   routeTranscript,
   validateSpeechAnswer,
-  type VoiceConfig,
+  type AliasProfile,
+  type RejectedRouteReason,
 } from "./voice-routing.ts";
 
 const SAY = "/usr/bin/say";
-const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
 const DEFAULT_INVENTORY_TIMEOUT_MS = 5_000;
 const DEFAULT_SPEECH_TIMEOUT_MS = 120_000;
-const DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS = 500;
 const FORCE_KILL_DELAY_MS = 250;
 
 export const RETRY_NOTICE = "I couldn't match an alias and question. Please try again.";
@@ -215,24 +212,6 @@ export function createBunVoiceProcessRunner(
   };
 }
 
-export interface VoiceDependencies {
-  readonly inputFlag: string | undefined;
-  readonly stdin: PromptInput;
-  readonly runtime: RuntimeGateway;
-  readonly sensitive: SensitiveValueRegistry;
-  readonly env: ByokEnvironment;
-  readonly snapshot: ConfigSnapshot;
-  readonly runner: VoiceProcessRunner;
-  readonly signal: AbortSignal;
-  readonly diagnostic: (detail: string) => void;
-  readonly generationTimeoutMs?: number;
-  readonly generationCleanupTimeoutMs?: number;
-  readonly inventoryTimeoutMs?: number;
-  readonly speechTimeoutMs?: number;
-}
-
-export type VoiceExitCode = 0 | 1 | 130;
-
 function filteredEnvironment(env: ByokEnvironment): ByokEnvironment {
   const filtered = { ...env };
   for (const name of BYOK_API_KEY_ENV_VARS) delete filtered[name];
@@ -259,246 +238,335 @@ function canonicalizeDiagnostic(value: string): string {
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
 }
 
-async function waitForSettlement(
-  operation: Promise<unknown>,
-  timeoutMs: number,
-): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([
-    operation.then(() => undefined, () => undefined),
-    new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, timeoutMs);
-    }),
-  ]);
-  if (timer !== undefined) clearTimeout(timer);
-}
-
 function childDetail(outcome: Exclude<VoiceProcessOutcome, { kind: "completed" | "cancelled" }>): string {
   return outcome.detail;
 }
 
-export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> {
-  const requestValues: string[] = [];
-  const childEnv = filteredEnvironment(deps.env);
-  const generationTimeoutMs = deps.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS;
-  const generationCleanupTimeoutMs = deps.generationCleanupTimeoutMs
-    ?? DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS;
-  const inventoryTimeoutMs = deps.inventoryTimeoutMs ?? DEFAULT_INVENTORY_TIMEOUT_MS;
-  const speechTimeoutMs = deps.speechTimeoutMs ?? DEFAULT_SPEECH_TIMEOUT_MS;
-  let cancellationReported = false;
+export type VoiceRouteRejectionReason = RejectedRouteReason
+  | "empty_aliases"
+  | "invalid_snapshot";
 
-  const diagnostic = (category: string, value?: unknown): void => {
-    const suffix = value === undefined ? "" : `: ${detail(value)}`;
-    deps.diagnostic(redactRequestValues(
-      canonicalizeDiagnostic(`${category}${suffix}`),
-      requestValues,
-    ));
-  };
-  const cancelled = (): VoiceExitCode => {
-    if (!cancellationReported) {
-      cancellationReported = true;
-      deps.diagnostic("voice request cancelled");
-    }
-    return 130;
-  };
-  const runChild = async (
-    executable: typeof SAY,
-    args: readonly string[],
-    stdin: Uint8Array,
-    timeoutMs: number,
-  ): Promise<VoiceProcessOutcome> => {
-    if (deps.signal.aborted) return { kind: "cancelled" };
-    try {
-      return await deps.runner.run({
-        executable,
-        args: [...args],
-        stdin,
-        env: childEnv,
-        signal: deps.signal,
-        timeoutMs,
-      });
-    } catch (error) {
-      return deps.signal.aborted
-        ? { kind: "cancelled" }
-        : { kind: "failed", detail: detail(error) };
-    }
-  };
-  const speakNotice = async (
-    notice: string,
-    successfulExit: 0 | 1,
-  ): Promise<VoiceExitCode> => {
-    if (deps.signal.aborted) return cancelled();
-    const outcome = await runChild(SAY, [], new TextEncoder().encode(notice), speechTimeoutMs);
-    if (deps.signal.aborted || outcome.kind === "cancelled") return cancelled();
-    if (outcome.kind === "completed") return successfulExit;
-    diagnostic("voice notice speech failed", childDetail(outcome));
-    return 1;
-  };
-  const configFailure = async (
-    value: unknown,
-    sayAvailable: boolean,
-  ): Promise<VoiceExitCode> => {
-    if (deps.signal.aborted) return cancelled();
-    diagnostic("voice configuration failed", value);
-    if (!sayAvailable) return 1;
-    return await speakNotice(CONFIG_FAILED_NOTICE, 1);
-  };
+export type VoiceRouteOutcome =
+  | Readonly<{
+    kind: "routed";
+    alias: string;
+    aliasRecord: AliasRecord;
+    question: string;
+    profile?: AliasProfile;
+  }>
+  | Readonly<{
+    kind: "rejected";
+    reason: VoiceRouteRejectionReason;
+  }>;
 
-  if (deps.signal.aborted) return cancelled();
-
-  let transcript = "";
-  let invalidTranscript: unknown;
-  try {
-    transcript = await resolveInputSource(deps.inputFlag, deps.stdin, deps.signal);
-    requestValues.push(transcript);
-    if (transcript.trim().length === 0) invalidTranscript = "dictated transcript is blank";
-  } catch (error) {
-    if (deps.signal.aborted) return cancelled();
-    if (!(error instanceof InvalidUtf8Error)) throw error;
-    invalidTranscript = error;
+export function routeVoiceTranscript(
+  transcript: string,
+  snapshot: ConfigSnapshot,
+): VoiceRouteOutcome {
+  const aliasNames = Object.keys(snapshot.aliases);
+  if (aliasNames.length === 0) {
+    return Object.freeze({ kind: "rejected", reason: "empty_aliases" });
   }
-  if (deps.signal.aborted) return cancelled();
+
+  let route: ReturnType<typeof routeTranscript>;
+  try {
+    route = routeTranscript(transcript, aliasNames, snapshot.voice);
+  } catch {
+    return Object.freeze({ kind: "rejected", reason: "invalid_snapshot" });
+  }
+  if (!route.accepted) {
+    return Object.freeze({ kind: "rejected", reason: route.reason });
+  }
+
+  const aliasRecord = snapshot.aliases[route.alias];
+  if (aliasRecord === undefined) {
+    return Object.freeze({ kind: "rejected", reason: "invalid_snapshot" });
+  }
+  const profile = snapshot.voice.profiles[route.alias];
+  return Object.freeze({
+    kind: "routed",
+    alias: route.alias,
+    aliasRecord,
+    question: route.question,
+    ...(profile === undefined ? {} : { profile }),
+  });
+}
+
+export interface VoiceSpeechDependencies {
+  readonly sensitive: SensitiveValueRegistry;
+  readonly env: ByokEnvironment;
+  readonly runner: VoiceProcessRunner;
+  readonly signal: AbortSignal;
+  readonly diagnostic: (detail: string) => void;
+  readonly requestValues?: readonly string[];
+  readonly inventoryTimeoutMs?: number;
+  readonly speechTimeoutMs?: number;
+}
+
+export interface PreparedVoiceSpeech {
+  readonly args: readonly string[];
+  readonly pitchPrefix: string;
+}
+
+export type VoiceSpeechPreflightFailureReason =
+  | "executable_unavailable"
+  | "voice_inventory"
+  | "voice_unavailable"
+  | "invalid_profile";
+
+export type VoiceSpeechPreflightOutcome =
+  | Readonly<{ kind: "ready"; speech: PreparedVoiceSpeech }>
+  | Readonly<{
+    kind: "configuration_failed";
+    reason: VoiceSpeechPreflightFailureReason;
+    noticeSpeech?: PreparedVoiceSpeech;
+  }>
+  | Readonly<{ kind: "cancelled" }>;
+
+export type VoiceSpeechExecutionFailureReason = "failed" | "timed_out";
+
+export type VoiceNoticeOutcome =
+  | Readonly<{ kind: "completed" }>
+  | Readonly<{ kind: "failed"; reason: VoiceSpeechExecutionFailureReason }>
+  | Readonly<{ kind: "cancelled" }>;
+
+export type VoiceAnswerOutcome = VoiceNoticeOutcome
+  | Readonly<{ kind: "rejected"; reason: "blank" | "unsafe" | "credential" }>;
+
+export type VoiceNotice = typeof RETRY_NOTICE
+  | typeof REQUEST_FAILED_NOTICE
+  | typeof CONFIG_FAILED_NOTICE
+  | typeof CREATE_ALIAS_NOTICE;
+
+interface VoiceSpeechState {
+  readonly sensitive: SensitiveValueRegistry;
+  readonly env: ByokEnvironment;
+  readonly runner: VoiceProcessRunner;
+  readonly signal: AbortSignal;
+  readonly diagnostic: (detail: string) => void;
+  readonly requestValues: string[];
+  readonly speechTimeoutMs: number;
+}
+
+const preparedVoiceSpeechStates = new WeakMap<PreparedVoiceSpeech, VoiceSpeechState>();
+
+function createVoiceSpeechState(deps: VoiceSpeechDependencies): VoiceSpeechState {
+  return {
+    sensitive: deps.sensitive,
+    env: filteredEnvironment(deps.env),
+    runner: deps.runner,
+    signal: deps.signal,
+    diagnostic: deps.diagnostic,
+    requestValues: [...(deps.requestValues ?? [])],
+    speechTimeoutMs: deps.speechTimeoutMs ?? DEFAULT_SPEECH_TIMEOUT_MS,
+  };
+}
+
+function reportVoiceSpeechDiagnostic(
+  state: VoiceSpeechState,
+  category: string,
+  value?: unknown,
+): void {
+  const suffix = value === undefined ? "" : `: ${detail(value)}`;
+  state.diagnostic(redactRequestValues(
+    canonicalizeDiagnostic(`${category}${suffix}`),
+    state.requestValues,
+  ));
+}
+
+function preparedVoiceSpeech(
+  state: VoiceSpeechState,
+  args: readonly string[],
+  pitchPrefix: string,
+): PreparedVoiceSpeech {
+  const speech = Object.freeze({
+    args: Object.freeze([...args]),
+    pitchPrefix,
+  });
+  preparedVoiceSpeechStates.set(speech, state);
+  return speech;
+}
+
+function voiceSpeechState(speech: PreparedVoiceSpeech): VoiceSpeechState {
+  const state = preparedVoiceSpeechStates.get(speech);
+  if (state === undefined) throw new TypeError("invalid prepared voice speech handle");
+  return state;
+}
+
+async function runVoiceSpeechChild(
+  state: VoiceSpeechState,
+  args: readonly string[],
+  stdin: Uint8Array,
+  timeoutMs: number,
+): Promise<VoiceProcessOutcome> {
+  if (state.signal.aborted) return { kind: "cancelled" };
+  try {
+    return await state.runner.run({
+      executable: SAY,
+      args: [...args],
+      stdin,
+      env: state.env,
+      signal: state.signal,
+      timeoutMs,
+    });
+  } catch (error) {
+    return state.signal.aborted
+      ? { kind: "cancelled" }
+      : { kind: "failed", detail: detail(error) };
+  }
+}
+
+function configurationFailure(
+  state: VoiceSpeechState,
+  reason: VoiceSpeechPreflightFailureReason,
+  value: unknown,
+  noticeSpeech?: PreparedVoiceSpeech,
+): VoiceSpeechPreflightOutcome {
+  reportVoiceSpeechDiagnostic(state, "voice configuration failed", value);
+  return Object.freeze({
+    kind: "configuration_failed",
+    reason,
+    ...(noticeSpeech === undefined ? {} : { noticeSpeech }),
+  });
+}
+
+export async function prepareVoiceSpeech(
+  deps: VoiceSpeechDependencies,
+  profile?: AliasProfile,
+): Promise<VoiceSpeechPreflightOutcome> {
+  const state = createVoiceSpeechState(deps);
+  if (state.signal.aborted) return Object.freeze({ kind: "cancelled" });
 
   let sayAvailable = false;
   try {
-    sayAvailable = await deps.runner.isExecutable(SAY);
+    sayAvailable = await state.runner.isExecutable(SAY);
   } catch (error) {
-    return await configFailure(error, false);
+    if (state.signal.aborted) return Object.freeze({ kind: "cancelled" });
+    return configurationFailure(state, "executable_unavailable", error);
   }
-  if (deps.signal.aborted) return cancelled();
-  if (!sayAvailable) return await configFailure("required executable is unavailable: /usr/bin/say", false);
-
-  if (invalidTranscript !== undefined) {
-    diagnostic("voice input rejected", invalidTranscript);
-    return await speakNotice(RETRY_NOTICE, 0);
-  }
-
-  const aliases: Readonly<Record<string, AliasRecord>> = deps.snapshot.aliases;
-  const config: VoiceConfig = deps.snapshot.voice;
-
-  const aliasNames = Object.keys(aliases);
-  if (aliasNames.length === 0) {
-    diagnostic("voice alias store is empty");
-    return await speakNotice(CREATE_ALIAS_NOTICE, 1);
+  if (state.signal.aborted) return Object.freeze({ kind: "cancelled" });
+  if (!sayAvailable) {
+    return configurationFailure(
+      state,
+      "executable_unavailable",
+      "required executable is unavailable: /usr/bin/say",
+    );
   }
 
-  if (deps.signal.aborted) return cancelled();
-
-  const route = routeTranscript(transcript, aliasNames, config);
-  if (!route.accepted) {
-    diagnostic("voice request rejected", route.reason);
-    return await speakNotice(RETRY_NOTICE, 0);
+  const noticeSpeech = preparedVoiceSpeech(state, [], "");
+  let pitchPrefix = "";
+  const speechArgs: string[] = [];
+  try {
+    if (profile?.rate !== undefined) {
+      if (!Number.isInteger(profile.rate) || profile.rate < 80 || profile.rate > 500) {
+        throw new Error("configured speech rate is invalid");
+      }
+    }
+    if (profile?.pitch !== undefined) pitchPrefix = formatTrustedPitchCommand(profile.pitch);
+    if (profile?.voice !== undefined && profile.voice.trim().length === 0) {
+      throw new Error("configured voice is invalid");
+    }
+  } catch (error) {
+    return configurationFailure(state, "invalid_profile", error, noticeSpeech);
   }
-  const selection = aliases[route.alias];
-  if (selection === undefined) {
-    return await configFailure("selected alias is missing from the loaded snapshot", true);
-  }
-  const profile = config.profiles[route.alias];
-  requestValues.push(route.question);
 
-  let installedVoice: string | undefined;
   if (profile?.voice !== undefined) {
-    const inventory = await runChild(
-      SAY,
+    state.requestValues.push(profile.voice);
+    const inventory = await runVoiceSpeechChild(
+      state,
       ["-v", "?"],
       new Uint8Array(),
-      inventoryTimeoutMs,
+      deps.inventoryTimeoutMs ?? DEFAULT_INVENTORY_TIMEOUT_MS,
     );
-    if (deps.signal.aborted || inventory.kind === "cancelled") return cancelled();
-    if (inventory.kind !== "completed") {
-      return await configFailure(`voice inventory ${inventory.kind}: ${childDetail(inventory)}`, true);
+    if (state.signal.aborted || inventory.kind === "cancelled") {
+      return Object.freeze({ kind: "cancelled" });
     }
+    if (inventory.kind !== "completed") {
+      return configurationFailure(
+        state,
+        "voice_inventory",
+        `voice inventory ${inventory.kind}: ${childDetail(inventory)}`,
+        noticeSpeech,
+      );
+    }
+    let installedVoice: string | undefined;
     try {
       installedVoice = parseVoiceInventory(strictUtf8(inventory.stdout)).get(caseFold(profile.voice));
     } catch (error) {
-      return await configFailure(error, true);
+      return configurationFailure(state, "voice_inventory", error, noticeSpeech);
     }
     if (installedVoice === undefined) {
-      return await configFailure("configured voice is not installed", true);
+      return configurationFailure(
+        state,
+        "voice_unavailable",
+        "configured voice is not installed",
+        noticeSpeech,
+      );
     }
+    speechArgs.push("-v", installedVoice);
   }
+  if (profile?.rate !== undefined) speechArgs.push("-r", String(profile.rate));
 
-  const prompt = `${VOICE_PROMPT}\n\n${route.question}`;
-  requestValues.push(prompt);
-  const generationController = new AbortController();
-  type GenerationOutcome =
-    | Readonly<{ kind: "completed"; answer: string }>
-    | Readonly<{ kind: "failed"; error: unknown }>
-    | Readonly<{ kind: "timed_out" }>
-    | Readonly<{ kind: "cancelled" }>;
-  let interruptGeneration: (outcome: GenerationOutcome) => void = () => undefined;
-  const interruptedGeneration = new Promise<GenerationOutcome>((resolve) => {
-    interruptGeneration = resolve;
+  return Object.freeze({
+    kind: "ready",
+    speech: preparedVoiceSpeech(state, speechArgs, pitchPrefix),
   });
-  const abortGeneration = () => {
-    generationController.abort(deps.signal.reason);
-    interruptGeneration({ kind: "cancelled" });
-  };
-  deps.signal.addEventListener("abort", abortGeneration, { once: true });
-  const generationTimer = setTimeout(() => {
-    generationController.abort(new Error("generation timed out"));
-    interruptGeneration({ kind: "timed_out" });
-  }, generationTimeoutMs);
-  const generation = Promise.resolve().then(() => deps.runtime.generate(
-    selection.provider,
-    selection.model,
-    prompt,
-    generationController.signal,
-    selection.instructions,
-  )).then<GenerationOutcome, GenerationOutcome>(
-    (answer) => ({ kind: "completed", answer }),
-    (error) => ({ kind: "failed", error }),
-  );
-  if (deps.signal.aborted) abortGeneration();
-  const generationOutcome = await Promise.race([generation, interruptedGeneration]);
-  clearTimeout(generationTimer);
-  deps.signal.removeEventListener("abort", abortGeneration);
+}
 
-  if (generationOutcome.kind === "cancelled" || generationOutcome.kind === "timed_out") {
-    if (selection.provider === "codex-cli" || selection.provider === "claude-cli") {
-      await generation;
-    } else {
-      await waitForSettlement(generation, generationCleanupTimeoutMs);
-    }
-    if (deps.signal.aborted || generationOutcome.kind === "cancelled") return cancelled();
-    diagnostic("voice generation timed out");
-    return await speakNotice(REQUEST_FAILED_NOTICE, 0);
+function processOutcome(
+  state: VoiceSpeechState,
+  category: string,
+  outcome: VoiceProcessOutcome,
+): VoiceNoticeOutcome {
+  if (state.signal.aborted || outcome.kind === "cancelled") {
+    return Object.freeze({ kind: "cancelled" });
   }
-  if (generationOutcome.kind === "failed") {
-    if (deps.signal.aborted) return cancelled();
-    diagnostic("voice generation failed", generationOutcome.error);
-    return await speakNotice(REQUEST_FAILED_NOTICE, 0);
-  }
-  if (deps.signal.aborted) return cancelled();
-  const answer = generationOutcome.answer;
-  requestValues.push(answer);
+  if (outcome.kind === "completed") return Object.freeze({ kind: "completed" });
+  reportVoiceSpeechDiagnostic(state, category, childDetail(outcome));
+  return Object.freeze({ kind: "failed", reason: outcome.kind });
+}
+
+export async function speakVoiceNotice(
+  speech: PreparedVoiceSpeech,
+  notice: VoiceNotice,
+): Promise<VoiceNoticeOutcome> {
+  const state = voiceSpeechState(speech);
+  const outcome = await runVoiceSpeechChild(
+    state,
+    [],
+    new TextEncoder().encode(notice),
+    state.speechTimeoutMs,
+  );
+  return processOutcome(state, "voice notice speech failed", outcome);
+}
+
+export async function speakVoiceAnswer(
+  speech: PreparedVoiceSpeech,
+  answer: string,
+): Promise<VoiceAnswerOutcome> {
+  const state = voiceSpeechState(speech);
+  state.requestValues.push(answer);
   const validation = validateSpeechAnswer(answer);
   if (!validation.valid) {
-    diagnostic(`voice generation returned ${validation.reason} text`);
-    return await speakNotice(REQUEST_FAILED_NOTICE, 0);
+    reportVoiceSpeechDiagnostic(state, `voice generation returned ${validation.reason} text`);
+    return Object.freeze({ kind: "rejected", reason: validation.reason });
   }
   const terminalAnswer = stripTerminalSequences(answer);
   if (
-    deps.sensitive.redact(answer) !== answer
-    || deps.sensitive.redact(terminalAnswer) !== terminalAnswer
+    state.sensitive.redact(answer) !== answer
+    || state.sensitive.redact(terminalAnswer) !== terminalAnswer
   ) {
-    diagnostic("voice generation returned credential-bearing text");
-    return await speakNotice(REQUEST_FAILED_NOTICE, 0);
+    reportVoiceSpeechDiagnostic(state, "voice generation returned credential-bearing text");
+    return Object.freeze({ kind: "rejected", reason: "credential" });
   }
 
-  const speechPrefix = profile?.pitch === undefined
-    ? ""
-    : formatTrustedPitchCommand(profile.pitch);
-  const speech = `${speechPrefix}${answer}`;
-  requestValues.push(speech);
-  const speechArgs: string[] = [];
-  if (installedVoice !== undefined) speechArgs.push("-v", installedVoice);
-  if (profile?.rate !== undefined) speechArgs.push("-r", String(profile.rate));
-  const spoken = await runChild(SAY, speechArgs, new TextEncoder().encode(speech), speechTimeoutMs);
-  if (deps.signal.aborted || spoken.kind === "cancelled") return cancelled();
-  if (spoken.kind !== "completed") {
-    diagnostic(`voice answer speech ${spoken.kind}`, childDetail(spoken));
-    return 1;
-  }
-  return 0;
+  const bytes = `${speech.pitchPrefix}${answer}`;
+  state.requestValues.push(bytes);
+  const outcome = await runVoiceSpeechChild(
+    state,
+    speech.args,
+    new TextEncoder().encode(bytes),
+    state.speechTimeoutMs,
+  );
+  return processOutcome(state, `voice answer speech ${outcome.kind}`, outcome);
 }

@@ -129,6 +129,18 @@ describe("terminal alias selection", () => {
       label: "Select a new provider and model…",
     });
   });
+
+  test("returns the canonical alias with a mixed-picker selection", async () => {
+    const aliases = {
+      Daily: { provider: "anthropic", model: "claude-sonnet" },
+    } as const;
+
+    expect(await selectAliasOrFresh(aliases, choices("Daily"))).toEqual({
+      kind: "selected",
+      alias: "Daily",
+      selection: aliases.Daily,
+    });
+  });
 });
 
 describe("terminal provider and model selection", () => {

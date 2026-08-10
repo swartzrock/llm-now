@@ -13,7 +13,6 @@ import {
   type SaveAliasResult,
 } from "../src/aliases.ts";
 import { renderHelpText } from "../src/args.ts";
-import { resolveInputSource } from "../src/io.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import {
   CONFIG_FAILED_NOTICE,
@@ -181,7 +180,6 @@ function dependencies(options: {
   configPath?: string;
   voiceConfigPath?: string;
   credentialMutationLock?: CredentialMutationLock;
-  runVoice?: NonNullable<Parameters<typeof runApplication>[0]["runVoice"]>;
   installVoiceCancellation?: () => VoiceCancellation;
   voiceRunner?: VoiceProcessRunner;
   readVoiceConfig?: (path: string) => Promise<Uint8Array | null>;
@@ -228,7 +226,6 @@ function dependencies(options: {
       credentialResolver,
       sensitive,
       nativeVaultEnabled: options.nativeVaultEnabled ?? true,
-      runVoice: options.runVoice,
       installVoiceCancellation: options.installVoiceCancellation ?? (() => ({
         signal: new AbortController().signal,
         dispose: () => undefined,
@@ -485,7 +482,7 @@ describe("unified read authority", () => {
       }),
     };
     const app = dependencies({
-      args: ["--voice", "--input", "chosen question"],
+      args: ["--voice-route", "--speak", "--input", "chosen question"],
       platform: "darwin",
       env: { XDG_CONFIG_HOME: root },
       aliasPath,
@@ -523,7 +520,7 @@ describe("unified read authority", () => {
       },
     };
     const app = dependencies({
-      args: ["--voice", "--input", "legacy question"],
+      args: ["--voice-route", "--speak", "--input", "legacy question"],
       platform: "darwin",
       env: { XDG_CONFIG_HOME: root },
       configPath,
@@ -551,7 +548,7 @@ describe("unified read authority", () => {
     );
     const childWork: string[] = [];
     const app = dependencies({
-      args: ["--voice", "--input", "legacy question"],
+      args: ["--voice-route", "--speak", "--input", "legacy question"],
       platform: "darwin",
       env: { XDG_CONFIG_HOME: root },
       aliasPath: join(directory, "aliases.json"),
@@ -655,7 +652,6 @@ describe("configuration maintenance", () => {
       loadAliases: async () => { throw new Error("aliases must not load"); },
       saveAlias: async () => { throw new Error("aliases must not save"); },
       migrateConfig: async () => { throw new Error("migration must not run"); },
-      runVoice: async () => { throw new Error("voice must not run"); },
       installVoiceCancellation: () => { throw new Error("voice cancellation must not install"); },
     });
 
@@ -682,7 +678,6 @@ describe("configuration maintenance", () => {
         calls.push(paths.configPath);
         return { kind: "migrated", staleProfiles: ["zed", "alpha"] };
       },
-      runVoice: async () => { throw new Error("voice must not run"); },
       installVoiceCancellation: () => { throw new Error("voice cancellation must not install"); },
     });
 
@@ -735,11 +730,192 @@ describe("configuration maintenance", () => {
 });
 
 describe("voice boundary", () => {
+  test("routes and speaks through the normal request pipeline", async () => {
+    const requests: VoiceProcessRequest[] = [];
+    const voiceRunner: VoiceProcessRunner = {
+      isExecutable: async () => true,
+      run: async (request) => {
+        requests.push(request);
+        return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+      },
+    };
+    const generated = runtime({
+      generate: async (_provider, _model, prompt, _signal, instructions) => {
+        expect(prompt).toBe(
+          "Answer concisely in plain text suitable for speech. Do not use Markdown or code fences unless the question requires code.\n\nintegrated question",
+        );
+        expect(instructions).toBe("request instruction");
+        return "integrated answer";
+      },
+    });
+    const app = dependencies({
+      args: [
+        "--voice-route",
+        "--speak",
+        "--instruction",
+        "request instruction",
+        "--input",
+        "haiku integrated question",
+      ],
+      platform: "darwin",
+      runtime: generated,
+      loadAliases: async () => ({
+        version: 2,
+        aliases: { haiku: { provider: "ollama", model: "qwen", instructions: "saved" } },
+      }),
+      readVoiceConfig: async () => null,
+      voiceRunner,
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(generated.calls.generate).toBe(1);
+    expect(requests).toHaveLength(1);
+    expect(new TextDecoder().decode(requests[0]?.stdin)).toBe("integrated answer");
+    expect(app.stdout.text()).toBe("");
+  });
+
+  test("speaks direct alias profiles and explicit targets with the correct defaults", async () => {
+    const profiledRequests: VoiceProcessRequest[] = [];
+    const profiled = dependencies({
+      args: ["daily", "--speak", "--input", "profile question"],
+      platform: "darwin",
+      loadAliases: async () => ({
+        version: 2,
+        aliases: { daily: { provider: "ollama", model: "qwen" } },
+      }),
+      readVoiceConfig: async () => new TextEncoder().encode(
+        "[daily]\nvoice = 'Samantha'\nrate = 205\npitch = 50\n",
+      ),
+      voiceRunner: {
+        isExecutable: async () => true,
+        run: async (request) => {
+          profiledRequests.push(request);
+          return request.args[0] === "-v" && request.args[1] === "?"
+            ? {
+              kind: "completed",
+              stdout: new TextEncoder().encode("Samantha en_US    # Hello\n"),
+              stderr: new Uint8Array(),
+            }
+            : { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+        },
+      },
+    });
+
+    expect(await runApplication(profiled.value)).toBe(0);
+    expect(profiledRequests.at(-1)?.args).toEqual(["-v", "Samantha", "-r", "205"]);
+    expect(new TextDecoder().decode(profiledRequests.at(-1)?.stdin)).toBe(
+      "[[pbas 50]]response",
+    );
+    expect(profiled.stdout.text()).toBe("");
+
+    const explicitRequests: VoiceProcessRequest[] = [];
+    const explicit = dependencies({
+      args: [
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen",
+        "--speak",
+        "--input",
+        "explicit question",
+      ],
+      platform: "darwin",
+      loadAliases: async () => {
+        throw new Error("explicit speech must not load aliases");
+      },
+      voiceRunner: {
+        isExecutable: async () => true,
+        run: async (request) => {
+          explicitRequests.push(request);
+          return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+        },
+      },
+    });
+
+    expect(await runApplication(explicit.value)).toBe(0);
+    expect(explicitRequests).toHaveLength(1);
+    expect(explicitRequests[0]?.args).toEqual([]);
+    expect(new TextDecoder().decode(explicitRequests[0]?.stdin)).toBe("response");
+    expect(explicit.stdout.text()).toBe("");
+  });
+
+  test("rejects route-only misses without generation or speech", async () => {
+    let speechChecks = 0;
+    const app = dependencies({
+      args: ["--voice-route", "--input", "unknown question"],
+      loadAliases: async () => ({
+        version: 1,
+        aliases: { haiku: { provider: "ollama", model: "qwen" } },
+      }),
+      voiceRunner: {
+        isExecutable: async () => {
+          speechChecks += 1;
+          return true;
+        },
+        run: async () => {
+          speechChecks += 1;
+          return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+        },
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.runtime.calls.generate).toBe(0);
+    expect(speechChecks).toBe(0);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toBe("voice request rejected: no_match\n");
+  });
+
+  test("cancels speech generation without starting a later sink", async () => {
+    const root = new AbortController();
+    let disposals = 0;
+    let childRuns = 0;
+    const generated = runtime({
+      generate: async (_provider, _model, _prompt, signal) => {
+        root.abort();
+        if (signal?.aborted) throw signal.reason ?? new Error("cancelled");
+        return "must not complete";
+      },
+    });
+    const app = dependencies({
+      args: [
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen",
+        "--speak",
+        "--input",
+        "cancel me",
+      ],
+      platform: "darwin",
+      runtime: generated,
+      installVoiceCancellation: () => ({
+        signal: root.signal,
+        dispose: () => {
+          disposals += 1;
+        },
+      }),
+      voiceRunner: {
+        isExecutable: async () => true,
+        run: async () => {
+          childRuns += 1;
+          return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+        },
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(130);
+    expect(childRuns).toBe(0);
+    expect(disposals).toBe(1);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toBe("voice request cancelled\n");
+  });
+
   test("rejects non-macOS before stdin, aliases, runtime, or injected voice work", async () => {
     let stdinReads = 0;
     let voiceCalls = 0;
     const app = dependencies({
-      args: ["--voice"],
+      args: ["--speak"],
       platform: "linux",
       stdin: {
         isTTY: false,
@@ -756,15 +932,21 @@ describe("voice boundary", () => {
           throw new Error("voice platform guard must not generate");
         },
       }),
-      runVoice: async () => {
-        voiceCalls += 1;
-        throw new Error("voice platform guard must not initialize voice work");
+      voiceRunner: {
+        isExecutable: async () => {
+          voiceCalls += 1;
+          throw new Error("voice platform guard must not initialize voice work");
+        },
+        run: async () => {
+          voiceCalls += 1;
+          throw new Error("voice platform guard must not initialize voice work");
+        },
       },
     });
 
     expect(await runApplication(app.value)).toBe(1);
     expect(app.stdout.text()).toBe("");
-    expect(app.stderr.text()).toBe("voice: llm-now --voice currently supports macOS only.\n");
+    expect(app.stderr.text()).toBe("voice: llm-now --speak currently supports macOS only.\n");
     expect(stdinReads).toBe(0);
     expect(voiceCalls).toBe(0);
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
@@ -782,19 +964,26 @@ describe("voice boundary", () => {
         },
       };
     };
-    const runVoice: NonNullable<Parameters<typeof runApplication>[0]["runVoice"]> = async () => 0;
+    const voiceRunner: VoiceProcessRunner = {
+      isExecutable: async () => true,
+      run: async () => ({
+        kind: "completed",
+        stdout: new Uint8Array(),
+        stderr: new Uint8Array(),
+      }),
+    };
 
-    const ordinary = dependencies({ args: ["--help"], installVoiceCancellation, runVoice });
+    const ordinary = dependencies({ args: ["--help"], installVoiceCancellation });
     const guarded = dependencies({
-      args: ["--voice", "--input", "hello"],
+      args: ["--speak", "--input", "hello"],
       platform: "linux",
       installVoiceCancellation,
     });
     const mac = dependencies({
-      args: ["--voice", "--input", "hello"],
+      args: ["--provider", "ollama", "--model", "qwen", "--speak", "--input", "hello"],
       platform: "darwin",
       installVoiceCancellation,
-      runVoice,
+      voiceRunner,
     });
 
     expect(await runApplication(ordinary.value)).toBe(0);
@@ -804,19 +993,22 @@ describe("voice boundary", () => {
     expect(disposals).toBe(1);
   });
 
-  test("dispatches through the real coordinator with fake processes and runtime", async () => {
-    const requests: VoiceProcessRequest[] = [];
+  test("routes without speech through stdout on non-macOS", async () => {
+    let speechChecks = 0;
     const voiceRunner: VoiceProcessRunner = {
-      isExecutable: async () => true,
-      run: async (request) => {
-        requests.push(request);
+      isExecutable: async () => {
+        speechChecks += 1;
+        return true;
+      },
+      run: async () => {
+        speechChecks += 1;
         return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
       },
     };
     const generated = runtime({ response: "integrated answer" });
     const app = dependencies({
-      args: ["--voice", "--input", "haiku integrated question"],
-      platform: "darwin",
+      args: ["--voice-route", "--input", "haiku integrated question"],
+      platform: "linux",
       runtime: generated,
       loadAliases: async () => ({
         version: 2,
@@ -828,11 +1020,8 @@ describe("voice boundary", () => {
 
     expect(await runApplication(app.value)).toBe(0);
     expect(generated.calls.generate).toBe(1);
-    expect(requests.map((request) => request.executable)).toEqual([
-      "/usr/bin/say",
-    ]);
-    expect(new TextDecoder().decode(requests[0]?.stdin)).toBe("integrated answer");
-    expect(app.stdout.text()).toBe("");
+    expect(speechChecks).toBe(0);
+    expect(app.stdout.text()).toBe("integrated answer");
   });
 
   test("sanitizes coordinator diagnostics after request-value redaction", async () => {
@@ -853,7 +1042,7 @@ describe("voice boundary", () => {
       },
     };
     const app = dependencies({
-      args: ["--voice", "--input", "haiku private question"],
+      args: ["--voice-route", "--speak", "--input", "haiku private question"],
       platform: "darwin",
       env: { OPENAI_API_KEY: apiKey },
       runtime: runtime({ response: answer }),
@@ -874,37 +1063,41 @@ describe("voice boundary", () => {
     expect(app.stdout.text()).toBe("");
   });
 
-  test("passes exactly one macOS voice input source to injected voice work", async () => {
-    const transcripts: string[] = [];
-    const runVoice: NonNullable<Parameters<typeof runApplication>[0]["runVoice"]> = async (
-      voiceDeps,
-    ) => {
-      transcripts.push(await resolveInputSource(voiceDeps.inputFlag, voiceDeps.stdin));
-      return 0;
-    };
+  test("passes exactly one routed input source to generation", async () => {
+    const prompts: string[] = [];
+    const generated = runtime({
+      generate: async (_provider, _model, prompt) => {
+        prompts.push(prompt);
+        return "answer";
+      },
+    });
+    const loadAliases = async () => ({
+      version: 1 as const,
+      aliases: { haiku: { provider: "ollama" as const, model: "qwen" } },
+    });
     const flag = dependencies({
-      args: ["--voice", "--input", "flag transcript"],
-      platform: "darwin",
+      args: ["--voice-route", "--input", "haiku flag transcript"],
       stdin: input("", true),
-      runVoice,
+      runtime: generated,
+      loadAliases,
     });
     const piped = dependencies({
-      args: ["--voice"],
-      platform: "darwin",
-      stdin: input("piped transcript"),
-      runVoice,
+      args: ["--voice-route"],
+      stdin: input("haiku piped transcript"),
+      runtime: generated,
+      loadAliases,
     });
     const both = dependencies({
-      args: ["--voice", "--input", "flag transcript"],
-      platform: "darwin",
-      stdin: input("piped transcript"),
-      runVoice,
+      args: ["--voice-route", "--input", "haiku flag transcript"],
+      stdin: input("haiku piped transcript"),
+      runtime: generated,
+      loadAliases,
     });
 
     expect(await runApplication(flag.value)).toBe(0);
     expect(await runApplication(piped.value)).toBe(0);
     expect(await runApplication(both.value)).toBe(2);
-    expect(transcripts).toEqual(["flag transcript", "piped transcript"]);
+    expect(prompts).toEqual(["flag transcript", "piped transcript"]);
     expect(both.stderr.text()).toContain("exactly one input source");
   });
 });

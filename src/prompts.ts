@@ -124,7 +124,7 @@ export type InteractiveSelectionResult =
   | { kind: "failed"; exitCode: 1; stage: "discovery" | "model-list" };
 
 export type InteractiveAliasResult =
-  | { kind: "selected"; selection: AliasRecord }
+  | { kind: "selected"; alias: string; selection: AliasRecord }
   | { kind: "fresh" }
   | { kind: "cancelled"; exitCode: 130 };
 
@@ -262,7 +262,8 @@ export async function selectAliasOrFresh(
   const value = await prompter.select("Choose an alias", options);
   if (value === null) return { kind: "cancelled", exitCode: 130 };
   if (value === false) return { kind: "fresh" };
-  return { kind: "selected", selection: resolveAliasChoice(value, aliases).selection };
+  const resolved = resolveAliasChoice(value, aliases);
+  return { kind: "selected", alias: resolved.alias, selection: resolved.selection };
 }
 
 function selectedString(

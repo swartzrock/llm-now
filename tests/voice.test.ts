@@ -3,34 +3,24 @@ import { BYOK_API_KEY_ENV_VARS, type ByokEnvironment } from "@swartzrock/byok-ru
 import type { AliasDocument } from "../src/aliases.ts";
 import type { ConfigSnapshot } from "../src/config.ts";
 import { createSensitiveValueRegistry } from "../src/credentials.ts";
-import type { PromptInput } from "../src/io.ts";
-import type { RuntimeGateway } from "../src/runtime.ts";
 import {
-  CONFIG_FAILED_NOTICE,
-  CREATE_ALIAS_NOTICE,
   REQUEST_FAILED_NOTICE,
   RETRY_NOTICE,
-  VOICE_PROMPT,
   createBunVoiceProcessRunner,
   installVoiceCancellation,
-  runVoice,
+  prepareVoiceSpeech,
+  routeVoiceTranscript,
+  speakVoiceAnswer,
+  speakVoiceNotice,
   type VoiceProcessOutcome,
   type VoiceProcessRequest,
   type VoiceProcessRunner,
+  type VoiceSpeechDependencies,
 } from "../src/voice.ts";
 import { parseVoiceConfig } from "../src/voice-routing.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-
-function input(value: string | Uint8Array, isTTY = false): PromptInput {
-  return {
-    isTTY,
-    async *[Symbol.asyncIterator]() {
-      yield typeof value === "string" ? encoder.encode(value) : value;
-    },
-  };
-}
 
 function completed(stdout = "", stderr = ""): VoiceProcessOutcome {
   return {
@@ -61,447 +51,203 @@ class FakeRunner implements VoiceProcessRunner {
   }
 }
 
-interface HarnessOptions {
-  transcript?: string | Uint8Array;
-  stdin?: PromptInput;
-  inputFlag?: string;
-  aliases?: AliasDocument;
-  config?: string | Uint8Array | null;
-  answer?: string;
-  env?: ByokEnvironment;
-  runner?: FakeRunner;
-  signal?: AbortSignal;
-  generate?: RuntimeGateway["generate"];
-  generationTimeoutMs?: number;
-  generationCleanupTimeoutMs?: number;
-  sensitiveValues?: readonly string[];
-  snapshot?: ConfigSnapshot;
-}
+describe("composable voice operations", () => {
+  function routeSnapshot(
+    aliases: AliasDocument["aliases"],
+    config: string | null = null,
+  ): ConfigSnapshot {
+    return Object.freeze({
+      authority: "legacy" as const,
+      document: null,
+      aliases: Object.freeze({ ...aliases }),
+      voice: parseVoiceConfig(config, Object.keys(aliases)),
+    });
+  }
 
-function harness(options: HarnessOptions = {}) {
-  const runner = options.runner ?? new FakeRunner();
-  const operations: string[] = [];
-  const diagnostics: string[] = [];
-  const runtimeCalls: Parameters<RuntimeGateway["generate"]>[] = [];
-  const aliases = options.aliases ?? {
-    version: 2,
-    aliases: {
-      haiku: {
-        provider: "ollama",
-        model: "qwen",
-        instructions: "Keep the saved instructions unchanged.\nEven here.",
-      },
-      terra: { provider: "openai", model: "gpt-test" },
-    },
-  };
-  const runtime: RuntimeGateway = {
-    discover: async () => [],
-    listModels: async () => [],
-    validateCredential: async () => [],
-    generate: async (...args) => {
-      operations.push("generate");
-      runtimeCalls.push(args);
-      if (options.generate) return options.generate(...args);
-      return options.answer ?? "-v --flag '$HOME'\nsecond line";
-    },
-  };
-  const originalRun = runner.run.bind(runner);
-  runner.run = async (request) => {
-    operations.push(`${request.executable}${request.args.length ? ` ${request.args.join(" ")}` : ""}`);
-    return originalRun(request);
-  };
-  const configText = options.config === null || options.config === undefined
-    ? null
-    : typeof options.config === "string"
-    ? options.config
-    : new TextDecoder("utf-8", { fatal: true }).decode(options.config);
-  const snapshot = options.snapshot ?? Object.freeze({
-    authority: "legacy" as const,
-    document: null,
-    aliases: Object.freeze({ ...aliases.aliases }),
-    voice: parseVoiceConfig(configText, Object.keys(aliases.aliases)),
-  });
-
-  return {
-    runner,
-    operations,
-    diagnostics,
-    runtimeCalls,
-    aliasLoads: () => 0,
-    configReads: () => 0,
-    run: () => runVoice({
-      inputFlag: options.inputFlag,
-      stdin: options.stdin
-        ?? input(options.transcript ?? "Hey haiku, write about brisket", options.inputFlag !== undefined),
-      runtime,
-      sensitive: createSensitiveValueRegistry(options.sensitiveValues),
-      env: options.env ?? {},
-      snapshot,
+  function speechDependencies(
+    runner: FakeRunner,
+    options: {
+      signal?: AbortSignal;
+      env?: ByokEnvironment;
+      sensitiveValues?: readonly string[];
+      requestValues?: readonly string[];
+      diagnostics?: string[];
+    } = {},
+  ): VoiceSpeechDependencies {
+    const diagnostics = options.diagnostics ?? [];
+    return {
       runner,
       signal: options.signal ?? new AbortController().signal,
-      diagnostic: (detail) => diagnostics.push(detail),
-      generationTimeoutMs: options.generationTimeoutMs,
-      generationCleanupTimeoutMs: options.generationCleanupTimeoutMs,
-    }),
-  };
-}
+      env: options.env ?? {},
+      sensitive: createSensitiveValueRegistry(options.sensitiveValues),
+      requestValues: options.requestValues,
+      diagnostic: (message) => diagnostics.push(message),
+    };
+  }
 
-describe("native voice coordinator", () => {
-  test("uses a provided immutable snapshot once with configurable fuzzy thresholds", async () => {
-    const snapshot: ConfigSnapshot = Object.freeze({
-      authority: "legacy",
-      document: null,
-      aliases: Object.freeze({
-        ai: Object.freeze({ provider: "ollama", model: "snapshot-model" }),
-      }),
-      voice: Object.freeze({
-        wakeWords: Object.freeze(["hey"]),
-        minFuzzyPhraseLength: 2,
-        minSimilarity: 0,
-        minMargin: 0,
-        profiles: Object.freeze({}),
-      }),
+  test("routes exact, configured, fuzzy, and rejected transcripts without side effects", () => {
+    const snapshot = routeSnapshot({
+      terra: { provider: "openai", model: "gpt-test" },
+    }, "[terra]\nspoken_names = ['tara']\nvoice = 'Samantha'\n");
+
+    expect(routeVoiceTranscript("terra exact question", snapshot)).toMatchObject({
+      kind: "routed",
+      alias: "terra",
+      aliasRecord: { provider: "openai", model: "gpt-test" },
+      question: "exact question",
+      profile: { spokenNames: ["tara"], voice: "Samantha" },
     });
-    const app = harness({ transcript: "aj question", snapshot });
+    expect(routeVoiceTranscript("tara configured question", snapshot)).toMatchObject({
+      kind: "routed",
+      alias: "terra",
+      question: "configured question",
+    });
+    expect(routeVoiceTranscript("tera fuzzy question", snapshot)).toMatchObject({
+      kind: "routed",
+      alias: "terra",
+      question: "fuzzy question",
+    });
+    for (const [transcript, reason] of [
+      ["unknown question", "no_match"],
+      ["terra", "missing_question"],
+      ["", "missing_request"],
+    ] as const) {
+      const outcome = routeVoiceTranscript(transcript, snapshot);
+      expect(outcome).toEqual({ kind: "rejected", reason });
+      expect(JSON.stringify(outcome)).not.toContain(transcript || "unknown question");
+    }
 
-    expect(await app.run()).toBe(0);
-    expect(app.aliasLoads()).toBe(0);
-    expect(app.configReads()).toBe(0);
-    expect(app.runtimeCalls[0]?.slice(0, 3)).toEqual([
-      "ollama",
-      "snapshot-model",
-      `${VOICE_PROMPT}\n\nquestion`,
-    ]);
+    expect(routeVoiceTranscript("anything", routeSnapshot({}))).toEqual({
+      kind: "rejected",
+      reason: "empty_aliases",
+    });
+    const ambiguous = routeSnapshot({
+      abcdefghijklmnopuuuu: { provider: "openai", model: "one" },
+      abcdefghijklmnvvvvvv: { provider: "openai", model: "two" },
+    });
+    expect(routeVoiceTranscript("abcdefghijklmnopqrst question", ambiguous)).toEqual({
+      kind: "rejected",
+      reason: "ambiguous",
+    });
   });
 
-  test("loads one snapshot, generates once, then speaks configured bytes", async () => {
+  test("preflights system and configured speech into trusted process arguments", async () => {
+    const systemRunner = new FakeRunner();
+    const system = await prepareVoiceSpeech(speechDependencies(systemRunner));
+    expect(system.kind).toBe("ready");
+    if (system.kind !== "ready") throw new Error("system speech was not ready");
+    expect(system.speech.args).toEqual([]);
+    expect(system.speech.pitchPrefix).toBe("");
+    expect(systemRunner.requests).toEqual([]);
+
     const secrets = Object.fromEntries(
       BYOK_API_KEY_ENV_VARS.map((name) => [name, `${name}-secret`]),
     );
-    const runner = new FakeRunner();
-    runner.outcomes = [
-      completed("Samantha en_US    # Hello\n"),
-      completed(),
-    ];
-    const app = harness({
-      transcript: "Tara, keep punctuation?!",
-      config: "[terra]\nspoken_names = ['tara']\nvoice = 'samantha'\nrate = 205\npitch = 50\n",
-      answer: "-v --flag '$HOME'\nsecond line",
-      env: { ...secrets, PATH: "/trusted/path", ORDINARY: "kept" },
-      runner,
-    });
-
-    expect(await app.run()).toBe(0);
-    expect(app.aliasLoads()).toBe(0);
-    expect(app.configReads()).toBe(0);
-    expect(app.runtimeCalls).toHaveLength(1);
-    expect(app.runtimeCalls[0]?.slice(0, 3)).toEqual([
-      "openai",
-      "gpt-test",
-      "Answer concisely in plain text suitable for speech. Do not use Markdown or code fences unless the question requires code.\n\nkeep punctuation?!",
-    ]);
-    expect(app.runtimeCalls[0]?.[3]).toBeInstanceOf(AbortSignal);
-    expect(app.runtimeCalls[0]?.[4]).toBeUndefined();
-    expect(app.operations).toEqual([
-      "/usr/bin/say -v ?",
-      "generate",
-      "/usr/bin/say -v Samantha -r 205",
-    ]);
-    expect(runner.accesses).toEqual(["/usr/bin/say"]);
-    expect(runner.requests.map((request) => [
-      request.executable,
-      request.args,
-      decoder.decode(request.stdin),
-      request.timeoutMs,
-    ])).toEqual([
-      ["/usr/bin/say", ["-v", "?"], "", 5_000],
-      ["/usr/bin/say", ["-v", "Samantha", "-r", "205"], "[[pbas 50]]-v --flag '$HOME'\nsecond line", 120_000],
-    ]);
-    for (const request of runner.requests) {
-      expect(request.env.PATH).toBe("/trusted/path");
-      expect(request.env.ORDINARY).toBe("kept");
-      for (const name of BYOK_API_KEY_ENV_VARS) expect(request.env[name]).toBeUndefined();
-    }
-    expect(app.diagnostics).toEqual([]);
-  });
-
-  test("forwards the selected snapshot record's saved instructions unchanged", async () => {
-    const app = harness();
-
-    expect(await app.run()).toBe(0);
-    expect(app.runtimeCalls[0]?.[4]).toBe("Keep the saved instructions unchanged.\nEven here.");
-    expect(app.aliasLoads()).toBe(0);
-  });
-
-  test("maps rejected and invalid UTF-8 transcripts to the unconfigured retry notice", async () => {
-    for (const transcript of ["unknown question", Uint8Array.of(0xff)]) {
-      const app = harness({ transcript });
-      expect(await app.run()).toBe(0);
-      expect(app.runtimeCalls).toHaveLength(0);
-      expect(app.runner.requests).toHaveLength(1);
-      expect(app.runner.requests[0]?.args).toEqual([]);
-      expect(decoder.decode(app.runner.requests[0]?.stdin)).toBe(RETRY_NOTICE);
+    const profileRunner = new FakeRunner();
+    profileRunner.outcomes = [completed("Samantha en_US    # Hello\n")];
+    const configured = await prepareVoiceSpeech(
+      speechDependencies(profileRunner, {
+        env: { ...secrets, PATH: "/trusted/path", ORDINARY: "kept" },
+      }),
+      { spokenNames: [], voice: "samantha", rate: 205, pitch: 50 },
+    );
+    expect(configured.kind).toBe("ready");
+    if (configured.kind !== "ready") throw new Error("configured speech was not ready");
+    expect(configured.speech.args).toEqual(["-v", "Samantha", "-r", "205"]);
+    expect(configured.speech.pitchPrefix).toBe("[[pbas 50]]");
+    expect(profileRunner.requests[0]?.args).toEqual(["-v", "?"]);
+    expect(profileRunner.requests[0]?.env.PATH).toBe("/trusted/path");
+    expect(profileRunner.requests[0]?.env.ORDINARY).toBe("kept");
+    for (const name of BYOK_API_KEY_ENV_VARS) {
+      expect(profileRunner.requests[0]?.env[name]).toBeUndefined();
     }
   });
 
-  test("returns exit 1 when a handled retry or request notice cannot be spoken", async () => {
-    const retryRunner = new FakeRunner();
-    retryRunner.outcomes = [{ kind: "failed", detail: "notice failed" }];
-    expect(await harness({ transcript: "unknown question", runner: retryRunner }).run()).toBe(1);
-
-    const requestRunner = new FakeRunner();
-    requestRunner.outcomes = [{ kind: "failed", detail: "notice failed" }];
-    expect(await harness({ answer: "", runner: requestRunner }).run()).toBe(1);
-  });
-
-  test("uses a dedicated setup notice and exit 1 for a valid empty alias roster", async () => {
-    const app = harness({ aliases: { version: 1, aliases: {} } });
-
-    expect(await app.run()).toBe(1);
-    expect(decoder.decode(app.runner.requests.at(-1)?.stdin)).toBe(CREATE_ALIAS_NOTICE);
-    expect(app.runtimeCalls).toHaveLength(0);
-  });
-
-  test("maps config, generation, and answer-speech failures to stable outcomes", async () => {
-    for (const answer of ["", "unsafe [[slnc 100]]", "unsafe\x1b[31m", "unsafe\x00text"]) {
-      const app = harness({ answer });
-      expect(await app.run()).toBe(0);
-      expect(decoder.decode(app.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
-    }
-
-    const generation = harness({
-      generate: async () => {
-        throw new Error("provider failed");
-      },
-    });
-    expect(await generation.run()).toBe(0);
-    expect(decoder.decode(generation.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
-
-    const speechRunner = new FakeRunner();
-    speechRunner.outcomes = [{ kind: "failed", detail: "speech failed" }];
-    const speech = harness({ runner: speechRunner });
-    expect(await speech.run()).toBe(1);
-    expect(speech.runner.requests).toHaveLength(1);
-    expect(decoder.decode(speech.runner.requests[0]?.stdin)).toBe("-v --flag '$HOME'\nsecond line");
-  });
-
-  test("uses configuration notice for unavailable tools and selected voices", async () => {
+  test("returns value-free preflight failures and a safe notice handle when possible", async () => {
     const missingSay = new FakeRunner();
-    missingSay.available.delete("/usr/bin/say");
-    const unavailableSay = harness({ runner: missingSay });
-    expect(await unavailableSay.run()).toBe(1);
-    expect(missingSay.requests).toEqual([]);
-
-    const voices = new FakeRunner();
-    voices.outcomes = [completed("Alex en_US    # Hello\n"), completed()];
-    const unavailableVoice = harness({
-      runner: voices,
-      config: "[haiku]\nvoice = 'Samantha'\n",
+    missingSay.available.clear();
+    expect(await prepareVoiceSpeech(speechDependencies(missingSay))).toEqual({
+      kind: "configuration_failed",
+      reason: "executable_unavailable",
     });
-    expect(await unavailableVoice.run()).toBe(1);
-    expect(unavailableVoice.runtimeCalls).toHaveLength(0);
-    expect(decoder.decode(voices.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
 
-    const inventoryTimeout = new FakeRunner();
-    inventoryTimeout.outcomes = [
-      { kind: "timed_out", detail: "inventory deadline" },
-      completed(),
-    ];
-    const timedOutVoice = harness({
-      runner: inventoryTimeout,
-      config: "[haiku]\nvoice = 'Samantha'\n",
-    });
-    expect(await timedOutVoice.run()).toBe(1);
-    expect(timedOutVoice.runtimeCalls).toHaveLength(0);
-    expect(decoder.decode(inventoryTimeout.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
-
-    const relativeConfig = harness({ env: { XDG_CONFIG_HOME: "relative" } });
-    expect(await relativeConfig.run()).toBe(0);
-    expect(relativeConfig.diagnostics).toEqual([]);
+    const diagnostics: string[] = [];
+    const unavailableVoice = new FakeRunner();
+    unavailableVoice.outcomes = [completed("Alex en_US    # Hello\n")];
+    const failed = await prepareVoiceSpeech(
+      speechDependencies(unavailableVoice, {
+        diagnostics,
+        requestValues: ["raw-request-sentinel"],
+      }),
+      { spokenNames: [], voice: "raw-request-sentinel" },
+    );
+    expect(failed.kind).toBe("configuration_failed");
+    if (failed.kind !== "configuration_failed") throw new Error("expected preflight failure");
+    expect(failed.reason).toBe("voice_unavailable");
+    expect(failed.noticeSpeech).toBeDefined();
+    expect(JSON.stringify(failed)).not.toContain("raw-request-sentinel");
+    expect(diagnostics.join("\n")).not.toContain("raw-request-sentinel");
   });
 
-  test("keeps request payload sentinels and child credentials out of diagnostics and notices", async () => {
-    const transcript = "haiku raw-transcript-sentinel";
-    const prompt = "Answer concisely in plain text suitable for speech. Do not use Markdown or code fences unless the question requires code.\n\nraw-transcript-sentinel";
-    const answer = "raw-answer-sentinel";
-    const speech = `[[pbas 50]]${answer}`;
-    const detail = [
-      transcript,
-      JSON.stringify(transcript),
-      prompt,
-      JSON.stringify(prompt),
-      answer,
-      JSON.stringify(answer),
-      speech,
-      JSON.stringify(speech),
-      "api-secret",
-      "\u001b[31mcontrol\u0000",
-    ].join(" | ");
+  test("validates credentials and speech controls before speaking an answer", async () => {
+    const diagnostics: string[] = [];
     const runner = new FakeRunner();
-    runner.outcomes = [{ kind: "failed", detail }];
-    const app = harness({
-      transcript,
-      answer,
-      config: "[haiku]\npitch = 50\n",
-      env: { OPENAI_API_KEY: "api-secret" },
-      runner,
-    });
+    const prepared = await prepareVoiceSpeech(
+      speechDependencies(runner, {
+        diagnostics,
+        sensitiveValues: ["registered-secret"],
+        requestValues: ["raw-question"],
+      }),
+      { spokenNames: [], rate: 210, pitch: 55 },
+    );
+    if (prepared.kind !== "ready") throw new Error("speech was not ready");
 
-    expect(await app.run()).toBe(1);
-    const diagnostics = app.diagnostics.join("\n");
-    for (const sentinel of [transcript, prompt, answer, speech]) {
-      expect(diagnostics).not.toContain(sentinel);
-      expect(diagnostics).not.toContain(JSON.stringify(sentinel));
+    expect(await speakVoiceAnswer(prepared.speech, "safe answer")).toEqual({
+      kind: "completed",
+    });
+    expect(runner.requests.at(-1)?.args).toEqual(["-r", "210"]);
+    expect(decoder.decode(runner.requests.at(-1)?.stdin)).toBe("[[pbas 55]]safe answer");
+
+    for (const [answer, reason] of [
+      ["", "blank"],
+      ["unsafe [[slnc 100]]", "unsafe"],
+      ["unsafe\x1b[31m", "unsafe"],
+      ["unsafe\x00text", "unsafe"],
+      ["registered-secret", "credential"],
+    ] as const) {
+      const before = runner.requests.length;
+      expect(await speakVoiceAnswer(prepared.speech, answer)).toEqual({
+        kind: "rejected",
+        reason,
+      });
+      expect(runner.requests).toHaveLength(before);
     }
-    expect(decoder.decode(runner.requests.at(-1)?.stdin)).toBe(speech);
+    expect(diagnostics.join("\n")).not.toContain("raw-question");
+    expect(runner.requests.every((request) => request.executable === "/usr/bin/say")).toBeTrue();
+    expect(runner.requests.some((request) => request.executable.includes("pbcopy"))).toBeFalse();
   });
 
-  test("canonicalizes diagnostics before redacting the derived question", async () => {
-    const question = "write about brisket";
-    const app = harness({
-      generate: async () => {
-        throw new Error([
-          "write\u001b[31m about brisket",
-          "write\u0000 about brisket",
-          question,
-        ].join(" | "));
-      },
+  test("speaks only stable notices and preserves process failures and cancellation", async () => {
+    const failedRunner = new FakeRunner();
+    failedRunner.outcomes = [{ kind: "timed_out", detail: "notice deadline" }];
+    const failedPrepared = await prepareVoiceSpeech(speechDependencies(failedRunner));
+    if (failedPrepared.kind !== "ready") throw new Error("speech was not ready");
+    expect(await speakVoiceNotice(failedPrepared.speech, REQUEST_FAILED_NOTICE)).toEqual({
+      kind: "failed",
+      reason: "timed_out",
     });
 
-    expect(await app.run()).toBe(0);
-    expect(app.diagnostics).toHaveLength(1);
-    expect(app.diagnostics[0]).toContain("[REDACTED]");
-    expect(app.diagnostics[0]).not.toContain(question);
-    expect(decoder.decode(app.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
-  });
-
-  test("withholds registered credentials before answer speech", async () => {
-    const app = harness({
-      answer: "Never expose registered-secret in an answer.",
-      sensitiveValues: ["registered-secret"],
-    });
-
-    expect(await app.run()).toBe(0);
-    expect(app.diagnostics).toEqual(["voice generation returned credential-bearing text"]);
-    expect(app.runner.requests.map((request) => request.executable)).toEqual(["/usr/bin/say"]);
-    expect(decoder.decode(app.runner.requests[0]?.stdin)).toBe(REQUEST_FAILED_NOTICE);
-  });
-
-  test("cancels a stalled stdin iterator and requests cleanup", async () => {
     const root = new AbortController();
-    let returned = false;
-    const stdin: PromptInput = {
-      isTTY: false,
-      [Symbol.asyncIterator]() {
-        return {
-          next() {
-            root.abort();
-            return new Promise<IteratorResult<string | Uint8Array>>(() => undefined);
-          },
-          async return() {
-            returned = true;
-            return { done: true, value: undefined };
-          },
-        };
-      },
-    };
-    const app = harness({ signal: root.signal, stdin });
-
-    expect(await app.run()).toBe(130);
-    expect(returned).toBeTrue();
-    expect(app.runner.accesses).toEqual([]);
-    expect(app.diagnostics).toEqual(["voice request cancelled"]);
-  });
-
-  test("external cancellation wins before work and during generation or child stages", async () => {
-    const before = new AbortController();
-    before.abort();
-    const precancelled = harness({ signal: before.signal });
-    expect(await precancelled.run()).toBe(130);
-    expect(precancelled.runner.accesses).toEqual([]);
-    expect(precancelled.runner.requests).toEqual([]);
-    expect(precancelled.diagnostics).toEqual(["voice request cancelled"]);
-
-    const generation = new AbortController();
-    const duringGeneration = harness({
-      signal: generation.signal,
-      generate: async (_provider, _model, _prompt, signal) => {
-        generation.abort();
-        throw signal?.reason ?? new Error("aborted");
-      },
+    const cancelledRunner = new FakeRunner();
+    const cancelledPrepared = await prepareVoiceSpeech(
+      speechDependencies(cancelledRunner, { signal: root.signal }),
+    );
+    if (cancelledPrepared.kind !== "ready") throw new Error("speech was not ready");
+    root.abort();
+    expect(await speakVoiceNotice(cancelledPrepared.speech, RETRY_NOTICE)).toEqual({
+      kind: "cancelled",
     });
-    expect(await duringGeneration.run()).toBe(130);
-    expect(duringGeneration.runner.requests).toEqual([]);
-    expect(duringGeneration.diagnostics).toEqual(["voice request cancelled"]);
-
-    const speech = new AbortController();
-    const speechRunner = new FakeRunner();
-    speechRunner.onRun = () => speech.abort();
-    speechRunner.outcomes = [{ kind: "cancelled" }];
-    const duringSpeech = harness({ runner: speechRunner, signal: speech.signal });
-    expect(await duringSpeech.run()).toBe(130);
-    expect(duringSpeech.diagnostics).toEqual(["voice request cancelled"]);
-    expect(speechRunner.requests.at(-1)?.executable).toBe("/usr/bin/say");
-  });
-
-  test("external cancellation during setup and voice inventory suppresses every notice", async () => {
-    const setupCases: Array<(root: AbortController, runner: FakeRunner) => HarnessOptions> = [
-      (root, runner) => {
-        runner.onAccess = () => root.abort();
-        return { runner, signal: root.signal };
-      },
-      (root, runner) => {
-        runner.onRun = () => root.abort();
-        runner.outcomes = [{ kind: "cancelled" }];
-        return {
-          runner,
-          signal: root.signal,
-          config: "[haiku]\nvoice = 'Samantha'\n",
-        };
-      },
-    ];
-
-    for (const configure of setupCases) {
-      const root = new AbortController();
-      const runner = new FakeRunner();
-      const app = harness(configure(root, runner));
-      expect(await app.run()).toBe(130);
-      expect(app.diagnostics).toEqual(["voice request cancelled"]);
-      expect(app.runtimeCalls).toHaveLength(0);
-      expect(runner.requests.filter((request) => decoder.decode(request.stdin).includes("attention")))
-        .toHaveLength(0);
-    }
-  });
-
-  test("maps generation and child deadlines without confusing them with cancellation", async () => {
-    const generation = harness({
-      generationTimeoutMs: 1,
-      generate: async (_provider, _model, _prompt, signal) =>
-        await new Promise<string>((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-        }),
-    });
-    expect(await generation.run()).toBe(0);
-    expect(decoder.decode(generation.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
-
-    const timedOutSpeech = new FakeRunner();
-    timedOutSpeech.outcomes = [{ kind: "timed_out", detail: "speech deadline" }];
-    const speech = harness({ runner: timedOutSpeech });
-    expect(await speech.run()).toBe(1);
-    expect(speech.diagnostics).toEqual(["voice answer speech timed_out: speech deadline"]);
-  });
-
-  test("enforces the generation deadline when a runtime ignores its signal", async () => {
-    const app = harness({
-      generationTimeoutMs: 1,
-      generationCleanupTimeoutMs: 1,
-      generate: async () => await new Promise<string>(() => undefined),
-    });
-
-    expect(await app.run()).toBe(0);
-    expect(app.diagnostics).toEqual(["voice generation timed out"]);
-    expect(app.runner.requests.map((request) => request.executable)).toEqual(["/usr/bin/say"]);
-    expect(decoder.decode(app.runner.requests[0]?.stdin)).toBe(REQUEST_FAILED_NOTICE);
+    expect(cancelledRunner.requests).toEqual([]);
   });
 });
 
