@@ -95,7 +95,6 @@ describe("composable voice operations", () => {
       alias: "terra",
       aliasRecord: { provider: "openai", model: "gpt-test" },
       question: "exact question",
-      profile: { spokenNames: ["tara"], voice: "Samantha" },
     });
     expect(routeVoiceTranscript("tara configured question", snapshot)).toMatchObject({
       kind: "routed",

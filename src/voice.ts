@@ -252,7 +252,6 @@ export type VoiceRouteOutcome =
     alias: string;
     aliasRecord: AliasRecord;
     question: string;
-    profile?: AliasProfile;
   }>
   | Readonly<{
     kind: "rejected";
@@ -282,13 +281,11 @@ export function routeVoiceTranscript(
   if (aliasRecord === undefined) {
     return Object.freeze({ kind: "rejected", reason: "invalid_snapshot" });
   }
-  const profile = snapshot.voice.profiles[route.alias];
   return Object.freeze({
     kind: "routed",
     alias: route.alias,
     aliasRecord,
     question: route.question,
-    ...(profile === undefined ? {} : { profile }),
   });
 }
 

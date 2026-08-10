@@ -1630,7 +1630,6 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       let prompt: string;
       let selection: ResolvedSelection;
       let snapshot: ConfigSnapshot | null = null;
-      let routedProfile: ConfigSnapshot["voice"]["profiles"][string] | undefined;
       if (parsed.voiceRoute) {
         let transcript: string;
         try {
@@ -1664,7 +1663,6 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           shortcutFollowUp: "none",
           alias: route.alias,
         };
-        routedProfile = route.profile;
       } else if (
         interactive
         && (deps.args.length === 0 || (parsed.speak && deps.args.length === 1))
@@ -1741,15 +1739,15 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       if (effectiveInstructions !== undefined) requestValues.push(effectiveInstructions);
       let speech: PreparedVoiceSpeech | undefined;
       if (parsed.speak) {
-        const profile = routedProfile
-          ?? (selection.alias === undefined ? undefined : snapshot?.voice.profiles[selection.alias]);
+        const profile = selection.alias === undefined
+          ? undefined
+          : snapshot?.voice.profiles[selection.alias];
         const preflight = await preflightSpeech(profile);
         if (preflight.kind !== "ready") {
           return voicePreflightFailureExit(preflight, cancelled);
         }
         speech = preflight.speech;
         prompt = `${VOICE_PROMPT}\n\n${prompt}`;
-        requestValues.push(prompt);
       }
 
       const generated = await generateWithTimeout(
