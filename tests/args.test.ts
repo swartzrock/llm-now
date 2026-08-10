@@ -26,10 +26,12 @@ Usage:
   llm-now --aliases
   llm-now --config-path
   llm-now --migrate-config
-  llm-now --voice [--input <text>]
+  llm-now --voice-route --input <text>
+  llm-now --voice-route --speak --input <text>
   llm-now --input <text>
   llm-now <alias>
   llm-now <alias> --input <text>
+  llm-now <alias> --speak --input <text>
   llm-now <alias> --instruction <text> --input <text>
   llm-now --provider <id> --model <id|default> --input <text>
 
@@ -47,7 +49,9 @@ Rules:
   Opening a launcher menu performs no provider discovery or credential access.
   A terminal alias with no input source also asks for one prompt.
   Otherwise, input comes from exactly one of --input or stdin.
-  On macOS, --voice routes one dictated transcript without changing positional aliases.
+  --voice-route selects a saved shortcut and question from one dictated transcript.
+  It may combine with --instruction and --speak, but not with another selection.
+  --speak adds concise plain-text guidance and speaks the response on macOS instead of stdout.
   --instruction is separate from prompt input and applies only to the current request.
   A command-line instruction replaces saved shortcut instructions for that request.
   Arguments, --input, piped input, and noninteractive calls bypass the launcher.
@@ -58,7 +62,8 @@ Options:
   --aliases            List saved aliases
   --config-path        Print the unified configuration path
   --migrate-config     Migrate legacy configuration without changing aliases
-  --voice              Route one dictated transcript on macOS
+  --voice-route        Route one dictated transcript to a saved shortcut
+  --speak              Speak the response on macOS instead of writing to stdout
   --input <text>       Prompt text
   --instruction <text> Request-scoped behavioral instruction
   --alias <name>       Saved shortcut selection
@@ -153,29 +158,95 @@ describe("arguments and input", () => {
     });
   });
 
-  test("parses --voice as a standalone mode while preserving the positional alias", () => {
-    expect(parseArguments(["--voice"])).toEqual({ kind: "voice" });
-    expect(parseArguments(["--voice", "--input", "  dictated text  "])).toEqual({
-      kind: "voice",
-      input: "  dictated text  ",
-    });
-    expect(parseArguments(["voice"])).toEqual({
+  test("parses voice routing and speech as independent run modifiers", () => {
+    expect(parseArguments(["--voice-route"])).toEqual({
       kind: "run",
-      selection: { kind: "alias", alias: "voice" },
+      voiceRoute: true,
+      selection: { kind: "interactive" },
+    });
+    expect(parseArguments(["--speak"])).toEqual({
+      kind: "run",
+      speak: true,
+      selection: { kind: "interactive" },
+    });
+    expect(
+      parseArguments([
+        "--voice-route",
+        "--speak",
+        "--instruction",
+        "  temporary\nrule  ",
+        "--input",
+        "  dictated text  ",
+      ]),
+    ).toEqual({
+      kind: "run",
+      input: "  dictated text  ",
+      instruction: "  temporary\nrule  ",
+      voiceRoute: true,
+      speak: true,
+      selection: { kind: "interactive" },
     });
   });
 
-  test("rejects voice mode combined with positionals, selection, instructions, or other modes", () => {
+  test("composes speech with every ordinary selection surface", () => {
+    expect(parseArguments(["daily", "--speak", "--input", "hello"])).toEqual({
+      kind: "run",
+      input: "hello",
+      speak: true,
+      selection: { kind: "alias", alias: "daily" },
+    });
+    expect(parseArguments(["--alias", "daily", "--speak"])).toEqual({
+      kind: "run",
+      speak: true,
+      selection: { kind: "alias", alias: "daily" },
+    });
+    expect(
+      parseArguments([
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen",
+        "--speak",
+      ]),
+    ).toEqual({
+      kind: "run",
+      speak: true,
+      selection: { kind: "explicit", provider: "ollama", model: "qwen" },
+    });
+  });
+
+  test("rejects routing combined with another selection", () => {
     const conflicts = [
-      ["--voice", "daily"],
-      ["--voice", "--alias", "daily"],
-      ["--voice", "--provider", "ollama", "--model", "qwen"],
-      ["--voice", "--instruction", "temporary"],
-      ["--voice", "--aliases"],
-      ["--voice", "--help"],
-      ["--voice", "--version"],
+      ["--voice-route", "daily"],
+      ["--voice-route", "--alias", "daily"],
+      ["--voice-route", "--provider", "ollama", "--model", "qwen"],
+      ["--voice-route", "--provider", "ollama"],
+      ["--voice-route", "--model", "qwen"],
     ];
-    for (const args of conflicts) expect(() => parseArguments(args)).toThrow(UsageError);
+    for (const args of conflicts) {
+      expect(() => parseArguments(args)).toThrow(
+        "--voice-route cannot be combined with an alias, --provider, or --model",
+      );
+    }
+  });
+
+  test("retires --voice while preserving voice-related positional aliases", () => {
+    try {
+      parseArguments(["--voice"]);
+      throw new Error("expected retired option to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UsageError);
+      expect((error as UsageError).exitCode).toBe(2);
+      expect((error as Error).message).toContain("Unknown option '--voice'");
+    }
+
+    for (const alias of ["voice", "voice-route", "speak"]) {
+      expect(parseArguments([alias, "--input", "hello"])).toEqual({
+        kind: "run",
+        input: "hello",
+        selection: { kind: "alias", alias },
+      });
+    }
   });
 
   test("preserves an exact request instruction across every selection surface", () => {
@@ -445,6 +516,10 @@ describe("arguments and input", () => {
     expect(() => parseArguments(["--version", "--instruction", "temporary"])).toThrow(
       UsageError,
     );
+    for (const option of ["--voice-route", "--speak"]) {
+      expect(() => parseArguments(["--help", option])).toThrow(UsageError);
+      expect(() => parseArguments(["--version", option])).toThrow(UsageError);
+    }
   });
 
   test("aliases is a standalone option while the bare word remains an alias", () => {
@@ -457,6 +532,8 @@ describe("arguments and input", () => {
     expect(() => parseArguments(["--aliases", "--instruction", "temporary"])).toThrow(
       UsageError,
     );
+    expect(() => parseArguments(["--aliases", "--voice-route"])).toThrow(UsageError);
+    expect(() => parseArguments(["--aliases", "--speak"])).toThrow(UsageError);
   });
 
   test("configuration maintenance flags are standalone and mutually exclusive", () => {
@@ -466,10 +543,14 @@ describe("arguments and input", () => {
       ["--config-path", "daily"],
       ["--config-path", "--aliases"],
       ["--migrate-config", "--input", "prompt"],
-      ["--migrate-config", "--voice"],
       ["--migrate-config", "--config-path"],
       ["--migrate-config", "--provider", "ollama", "--model", "qwen"],
     ]) expect(() => parseArguments(args)).toThrow(UsageError);
+    for (const mode of ["--config-path", "--migrate-config"]) {
+      for (const option of ["--voice-route", "--speak"]) {
+        expect(() => parseArguments([mode, option])).toThrow(UsageError);
+      }
+    }
   });
 
   test("renders the exact approved compact plain help", () => {
@@ -479,6 +560,8 @@ describe("arguments and input", () => {
       "linux",
     );
     expect(linuxHelp).toBe(APPROVED_HELP_TEXT);
+    expect(linuxHelp).not.toContain("llm-now --voice [");
+    expect(linuxHelp).not.toContain("\n  --voice              ");
     expect(HELP_TEXT).toBe(
       renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, process.platform),
     );
@@ -537,7 +620,8 @@ describe("arguments and input", () => {
 
     expect(rendered).toContain(colors.bold(colors.greenBright("Usage:")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("llm-now")));
-    expect(rendered).toContain(colors.bold(colors.cyanBright("--voice")));
+    expect(rendered).toContain(colors.bold(colors.cyanBright("--voice-route")));
+    expect(rendered).toContain(colors.bold(colors.cyanBright("--speak")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--input")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--instruction")));
     expect(rendered).toContain(colors.cyan("<text>"));

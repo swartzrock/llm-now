@@ -34,10 +34,12 @@ ${heading("Usage:")}
   ${literal("llm-now")} ${literal("--aliases")}
   ${literal("llm-now")} ${literal("--config-path")}
   ${literal("llm-now")} ${literal("--migrate-config")}
-  ${literal("llm-now")} ${literal("--voice")} [${literal("--input")} ${metadata("<text>")}]
+  ${literal("llm-now")} ${literal("--voice-route")} ${literal("--input")} ${metadata("<text>")}
+  ${literal("llm-now")} ${literal("--voice-route")} ${literal("--speak")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${metadata("<alias>")}
   ${literal("llm-now")} ${metadata("<alias>")} ${literal("--input")} ${metadata("<text>")}
+  ${literal("llm-now")} ${metadata("<alias>")} ${literal("--speak")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${metadata("<alias>")} ${literal("--instruction")} ${metadata("<text>")} ${literal("--input")} ${metadata("<text>")}
   ${literal("llm-now")} ${literal("--provider")} ${metadata("<id>")} ${literal("--model")} ${metadata("<id|default>")} ${literal("--input")} ${metadata("<text>")}
 
@@ -55,7 +57,9 @@ ${heading("Rules:")}
   Opening a launcher menu performs no provider discovery or credential access.
   A terminal alias with no input source also asks for one prompt.
   Otherwise, input comes from exactly one of ${literal("--input")} or stdin.
-  On macOS, ${literal("--voice")} routes one dictated transcript without changing positional aliases.
+  ${literal("--voice-route")} selects a saved shortcut and question from one dictated transcript.
+  It may combine with ${literal("--instruction")} and ${literal("--speak")}, but not with another selection.
+  ${literal("--speak")} adds concise plain-text guidance and speaks the response on macOS instead of stdout.
   ${literal("--instruction")} is separate from prompt input and applies only to the current request.
   A command-line instruction replaces saved shortcut instructions for that request.
   Arguments, ${literal("--input")}, piped input, and noninteractive calls bypass the launcher.
@@ -66,7 +70,8 @@ ${heading("Options:")}
   ${literal("--aliases")}            List saved aliases
   ${literal("--config-path")}        Print the unified configuration path
   ${literal("--migrate-config")}     Migrate legacy configuration without changing aliases
-  ${literal("--voice")}              Route one dictated transcript on macOS
+  ${literal("--voice-route")}        Route one dictated transcript to a saved shortcut
+  ${literal("--speak")}              Speak the response on macOS instead of writing to stdout
   ${literal("--input")} ${metadata("<text>")}       Prompt text
   ${literal("--instruction")} ${metadata("<text>")} Request-scoped behavioral instruction
   ${literal("--alias")} ${metadata("<name>")}       Saved shortcut selection
@@ -109,8 +114,14 @@ export type ParsedArguments =
   | { kind: "aliases" }
   | { kind: "config-path" }
   | { kind: "migrate-config" }
-  | { kind: "voice"; input?: string }
-  | { kind: "run"; input?: string; instruction?: string; selection: Selection };
+  | {
+    kind: "run";
+    input?: string;
+    instruction?: string;
+    voiceRoute?: boolean;
+    speak?: boolean;
+    selection: Selection;
+  };
 
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
 
@@ -140,7 +151,8 @@ export function parseArguments(args: string[]): ParsedArguments {
     aliases?: boolean;
     "config-path"?: boolean;
     "migrate-config"?: boolean;
-    voice?: boolean;
+    "voice-route"?: boolean;
+    speak?: boolean;
     help?: boolean;
     version?: boolean;
   };
@@ -159,7 +171,8 @@ export function parseArguments(args: string[]): ParsedArguments {
         aliases: { type: "boolean" },
         "config-path": { type: "boolean" },
         "migrate-config": { type: "boolean" },
-        voice: { type: "boolean" },
+        "voice-route": { type: "boolean" },
+        speak: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean" },
       },
@@ -189,19 +202,23 @@ export function parseArguments(args: string[]): ParsedArguments {
     }
     return values.help ? { kind: "help" } : { kind: "version" };
   }
-  if (values.voice) {
-    const hasConflictingOption = supplied.some(([name]) => name !== "voice" && name !== "input");
-    if (hasConflictingOption || positionals.length > 0) {
-      throw new UsageError("--voice may be combined only with --input.");
-    }
-    return {
-      kind: "voice",
-      ...(values.input === undefined ? {} : { input: values.input }),
-    };
-  }
-
   if (positionals.length > 1) {
     throw new UsageError("only one positional alias may be supplied.");
+  }
+  const voiceRoute = values["voice-route"] === true;
+  const speak = values.speak === true;
+  if (
+    voiceRoute
+    && (
+      positionals.length > 0
+      || values.alias !== undefined
+      || values.provider !== undefined
+      || values.model !== undefined
+    )
+  ) {
+    throw new UsageError(
+      "--voice-route cannot be combined with an alias, --provider, or --model.",
+    );
   }
   if (
     positionals.length === 1
@@ -247,6 +264,8 @@ export function parseArguments(args: string[]): ParsedArguments {
     kind: "run",
     ...(input === undefined ? {} : { input }),
     ...(instruction === undefined ? {} : { instruction }),
+    ...(voiceRoute ? { voiceRoute: true } : {}),
+    ...(speak ? { speak: true } : {}),
     selection,
   };
 }
