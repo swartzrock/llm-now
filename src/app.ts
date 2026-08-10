@@ -1573,7 +1573,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         && !deps.env.NO_COLOR
         && deps.env.TERM !== "dumb",
       );
-      deps.stdout.write(`${renderHelpText(colors, BYOK_API_KEY_ENV_VARS, deps.platform)}\n`);
+      deps.stdout.write(`${renderHelpText(colors, BYOK_API_KEY_ENV_VARS)}\n`);
       return 0;
     }
     if (parsed.kind === "version") {

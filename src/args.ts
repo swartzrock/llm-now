@@ -12,86 +12,65 @@ type TerminalColors = ReturnType<typeof pc.createColors>;
 export function renderHelpText(
   colors: TerminalColors,
   credentialNames: readonly string[],
-  platform: NodeJS.Platform,
 ): string {
   const heading = (text: string) => colors.bold(colors.greenBright(text));
   const literal = (text: string) => colors.bold(colors.cyanBright(text));
   const metadata = (text: string) => colors.cyan(text);
-  const credentialRows = [...credentialNames]
-    .sort()
-    .map((name) => `  ${metadata(name)}`)
-    .join("\n");
-  const secureStorageDetail = platform === "darwin"
-    ? `  On macOS, llm-now stores API keys in ${metadata("macOS Keychain")}.`
-    : platform === "linux"
-      ? `  Linux requires ${metadata("GNOME Keyring")} or ${metadata("KWallet")} in your user session.`
-      : "  This platform must provide a supported native credential store.";
+  const sortedCredentialNames = [...credentialNames].sort();
+  const credentialColumnWidth = Math.max(
+    0,
+    ...sortedCredentialNames.map((name) => name.length),
+  ) + 4;
+  const credentialRows: string[] = [];
+  for (let index = 0; index < sortedCredentialNames.length; index += 2) {
+    const left = sortedCredentialNames[index] ?? "";
+    const right = sortedCredentialNames[index + 1];
+    credentialRows.push(
+      right === undefined
+        ? `  ${metadata(left)}`
+        : `  ${metadata(left)}${" ".repeat(credentialColumnWidth - left.length)}${metadata(right)}`,
+    );
+  }
 
-  return `A tiny CLI to send text-generation prompts to the models you already run.
+  return `A tiny CLI for prompting models you already use.
 
 ${heading("Usage:")}
-  ${literal("llm-now")}
+  ${literal("llm-now")} [${metadata("<alias>")} | ${literal("--alias")} ${metadata("<name>")}] [${literal("--input")} ${metadata("<text>")}]
+          [${literal("--instruction")} ${metadata("<text>")}] [${literal("--speak")}]
+  ${literal("llm-now")} ${literal("--provider")} ${metadata("<id>")} ${literal("--model")} ${metadata("<id|default>")} [${literal("--input")} ${metadata("<text>")}]
+          [${literal("--instruction")} ${metadata("<text>")}] [${literal("--speak")}]
+  ${literal("llm-now")} ${literal("--voice-route")} [${literal("--input")} ${metadata("<text>")}] [${literal("--instruction")} ${metadata("<text>")}] [${literal("--speak")}]
   ${literal("llm-now")} ${literal("--aliases")}
   ${literal("llm-now")} ${literal("--config-path")}
   ${literal("llm-now")} ${literal("--migrate-config")}
-  ${literal("llm-now")} ${literal("--voice-route")} ${literal("--input")} ${metadata("<text>")}
-  ${literal("llm-now")} ${literal("--voice-route")} ${literal("--speak")} ${literal("--input")} ${metadata("<text>")}
-  ${literal("llm-now")} ${literal("--input")} ${metadata("<text>")}
-  ${literal("llm-now")} ${metadata("<alias>")}
-  ${literal("llm-now")} ${metadata("<alias>")} ${literal("--input")} ${metadata("<text>")}
-  ${literal("llm-now")} ${metadata("<alias>")} ${literal("--speak")} ${literal("--input")} ${metadata("<text>")}
-  ${literal("llm-now")} ${metadata("<alias>")} ${literal("--instruction")} ${metadata("<text>")} ${literal("--input")} ${metadata("<text>")}
-  ${literal("llm-now")} ${literal("--provider")} ${metadata("<id>")} ${literal("--model")} ${metadata("<id|default>")} ${literal("--input")} ${metadata("<text>")}
 
-${heading("Rules:")}
-  Run ${literal("llm-now")} with no arguments in a terminal to open the adaptive launcher.
-  With shortcuts: “Run with a saved shortcut…”, “Create a new shortcut…”,
-  “Run once with another provider and model…”, then “Manage connections…”.
-  Without shortcuts: “Create a new shortcut…”, “Run once with a provider and model…”,
-  then “Manage connections…”.
-  Creation uses “Use an available provider…” or “Add a provider with an API key…”.
-  Creation saves the provider/model target and optional instructions before its first prompt.
-  Saved instructions are sent separately on every shortcut run.
-  Run once generates without saving or offering a shortcut.
-  Manage connections owns discovery and API-key addition, replacement, and deletion.
-  Opening a launcher menu performs no provider discovery or credential access.
-  A terminal alias with no input source also asks for one prompt.
-  Otherwise, input comes from exactly one of ${literal("--input")} or stdin.
-  ${literal("--voice-route")} selects a saved shortcut and question from one dictated transcript.
-  It may combine with ${literal("--instruction")} and ${literal("--speak")}, but not with another selection.
-  ${literal("--speak")} adds concise plain-text guidance and speaks the response on macOS instead of stdout.
-  ${literal("--instruction")} is separate from prompt input and applies only to the current request.
-  A command-line instruction replaces saved shortcut instructions for that request.
-  Arguments, ${literal("--input")}, piped input, and noninteractive calls bypass the launcher.
-  Deterministic calls use an alias or both ${literal("--provider")} and ${literal("--model")}.
-  Model "default" is available only for codex-cli and claude-cli.
+${heading("Notes:")}
+  Run without arguments to open the interactive launcher.
+  Read input from ${literal("--input")}, stdin, or a terminal prompt; choose one.
 
 ${heading("Options:")}
-  ${literal("--aliases")}            List saved aliases
-  ${literal("--config-path")}        Print the unified configuration path
-  ${literal("--migrate-config")}     Migrate legacy configuration without changing aliases
-  ${literal("--voice-route")}        Route one dictated transcript to a saved shortcut
-  ${literal("--speak")}              Speak the response on macOS instead of writing to stdout
-  ${literal("--input")} ${metadata("<text>")}       Prompt text
-  ${literal("--instruction")} ${metadata("<text>")} Request-scoped behavioral instruction
-  ${literal("--alias")} ${metadata("<name>")}       Saved shortcut selection
-  ${literal("--provider")} ${metadata("<id>")}      Explicit provider
-  ${literal("--model")} ${metadata("<id>")}         Explicit model, or default for a supported CLI provider
+  ${literal("--aliases")}            List saved shortcuts
+  ${literal("--config-path")}        Print the config.toml path
+  ${literal("--migrate-config")}     Migrate legacy configuration to config.toml
+  ${literal("--voice-route")}        Parse “[wake word] <shortcut> <question>” from input
+  ${literal("--speak")}              Speak the response on macOS instead of using stdout
+  ${literal("--input")} ${metadata("<text>")}       Prompt or dictated input
+  ${literal("--instruction")} ${metadata("<text>")} Override saved instructions for this request
+  ${literal("--alias")} ${metadata("<name>")}       Select a saved shortcut
+  ${literal("--provider")} ${metadata("<id>")}      Select a provider
+  ${literal("--model")} ${metadata("<id|default>")} Select a model; default supports codex-cli and claude-cli
   ${literal("-h, --help")}           Show help
   ${literal("--version")}            Show version
 
 ${heading("API key environment variables:")}
-${credentialRows}
+${credentialRows.join("\n")}
 
-${heading("Secure API-key storage:")}
-  llm-now can save provider API keys securely for reuse.
-${secureStorageDetail}`;
+API keys can also be stored securely through the interactive launcher.`;
 }
 
 export const HELP_TEXT = renderHelpText(
   pc.createColors(false),
   BYOK_API_KEY_ENV_VARS,
-  process.platform,
 );
 
 export class UsageError extends Error {

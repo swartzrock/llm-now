@@ -252,7 +252,7 @@ describe("help output", () => {
     expect(await runApplication(app.value)).toBe(0);
     expect(app.stdout.text()).toContain("\u001b[");
     expect(stripTerminalSequences(app.stdout.text())).toBe(
-      `${renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, "linux")}\n`,
+      `${renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS)}\n`,
     );
     expect(app.stderr.text()).toBe("");
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
@@ -262,7 +262,7 @@ describe("help output", () => {
     const nonTty = dependencies({ args: ["--help"], stdoutTty: false });
 
     expect(await runApplication(nonTty.value)).toBe(0);
-    const linuxHelp = renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, "linux");
+    const linuxHelp = renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS);
     expect(nonTty.stdout.text()).toBe(`${linuxHelp}\n`);
     expect(nonTty.stdout.text()).not.toContain("\u001b");
     expect(nonTty.stderr.text()).toBe("");
@@ -309,25 +309,12 @@ describe("help output", () => {
 
       expect(await runApplication(app.value), scenario.name).toBe(0);
       expect(app.stdout.text(), scenario.name).toBe(
-        `${renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, "linux")}\n`,
+        `${renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS)}\n`,
       );
       expect(app.stdout.text(), scenario.name).not.toContain("\u001b");
       expect(app.stderr.text(), scenario.name).toBe("");
       expect(app.runtime.calls, scenario.name).toEqual({ discover: 0, list: 0, generate: 0 });
     }
-  });
-
-  test("renders secure credential guidance for the application platform", async () => {
-    const mac = dependencies({ args: ["--help"], platform: "darwin" });
-    const linux = dependencies({ args: ["--help"], platform: "linux" });
-
-    expect(await runApplication(mac.value)).toBe(0);
-    expect(mac.stdout.text()).toContain("macOS Keychain");
-    expect(mac.stdout.text()).not.toContain("GNOME Keyring");
-
-    expect(await runApplication(linux.value)).toBe(0);
-    expect(linux.stdout.text()).toContain("GNOME Keyring or KWallet");
-    expect(linux.stdout.text()).not.toContain("macOS Keychain");
   });
 
   test("keeps combined help as usage failure without rendering or runtime work", async () => {

@@ -514,7 +514,7 @@ async function smoke(archivePath: string): Promise<void> {
       ...aliasEnvironment,
     };
     const cases = [
-      { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --config-path\n  llm-now --migrate-config\n  llm-now --voice-route --input <text>\n  llm-now --voice-route --speak --input <text>\n  llm-now --input <text>", stderrIncludes: "" },
+      { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--speak]\n  llm-now --provider <id> --model <id|default> [--input <text>]", stderrIncludes: "" },
       { name: "version", args: ["--version"], code: 0, stdout: `${packageMetadata.version}\n`, stderrIncludes: "" },
       ...(process.platform === "darwin" ? [] : [{
         name: "non-macOS speech guard before scorer initialization",

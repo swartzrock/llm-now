@@ -19,74 +19,44 @@ import {
 } from "../src/io.ts";
 import { stripTerminalSequences } from "../src/prompts.ts";
 
-const APPROVED_HELP_TEXT = `A tiny CLI to send text-generation prompts to the models you already run.
+const APPROVED_HELP_TEXT = `A tiny CLI for prompting models you already use.
 
 Usage:
-  llm-now
+  llm-now [<alias> | --alias <name>] [--input <text>]
+          [--instruction <text>] [--speak]
+  llm-now --provider <id> --model <id|default> [--input <text>]
+          [--instruction <text>] [--speak]
+  llm-now --voice-route [--input <text>] [--instruction <text>] [--speak]
   llm-now --aliases
   llm-now --config-path
   llm-now --migrate-config
-  llm-now --voice-route --input <text>
-  llm-now --voice-route --speak --input <text>
-  llm-now --input <text>
-  llm-now <alias>
-  llm-now <alias> --input <text>
-  llm-now <alias> --speak --input <text>
-  llm-now <alias> --instruction <text> --input <text>
-  llm-now --provider <id> --model <id|default> --input <text>
 
-Rules:
-  Run llm-now with no arguments in a terminal to open the adaptive launcher.
-  With shortcuts: “Run with a saved shortcut…”, “Create a new shortcut…”,
-  “Run once with another provider and model…”, then “Manage connections…”.
-  Without shortcuts: “Create a new shortcut…”, “Run once with a provider and model…”,
-  then “Manage connections…”.
-  Creation uses “Use an available provider…” or “Add a provider with an API key…”.
-  Creation saves the provider/model target and optional instructions before its first prompt.
-  Saved instructions are sent separately on every shortcut run.
-  Run once generates without saving or offering a shortcut.
-  Manage connections owns discovery and API-key addition, replacement, and deletion.
-  Opening a launcher menu performs no provider discovery or credential access.
-  A terminal alias with no input source also asks for one prompt.
-  Otherwise, input comes from exactly one of --input or stdin.
-  --voice-route selects a saved shortcut and question from one dictated transcript.
-  It may combine with --instruction and --speak, but not with another selection.
-  --speak adds concise plain-text guidance and speaks the response on macOS instead of stdout.
-  --instruction is separate from prompt input and applies only to the current request.
-  A command-line instruction replaces saved shortcut instructions for that request.
-  Arguments, --input, piped input, and noninteractive calls bypass the launcher.
-  Deterministic calls use an alias or both --provider and --model.
-  Model "default" is available only for codex-cli and claude-cli.
+Notes:
+  Run without arguments to open the interactive launcher.
+  Read input from --input, stdin, or a terminal prompt; choose one.
 
 Options:
-  --aliases            List saved aliases
-  --config-path        Print the unified configuration path
-  --migrate-config     Migrate legacy configuration without changing aliases
-  --voice-route        Route one dictated transcript to a saved shortcut
-  --speak              Speak the response on macOS instead of writing to stdout
-  --input <text>       Prompt text
-  --instruction <text> Request-scoped behavioral instruction
-  --alias <name>       Saved shortcut selection
-  --provider <id>      Explicit provider
-  --model <id>         Explicit model, or default for a supported CLI provider
+  --aliases            List saved shortcuts
+  --config-path        Print the config.toml path
+  --migrate-config     Migrate legacy configuration to config.toml
+  --voice-route        Parse “[wake word] <shortcut> <question>” from input
+  --speak              Speak the response on macOS instead of using stdout
+  --input <text>       Prompt or dictated input
+  --instruction <text> Override saved instructions for this request
+  --alias <name>       Select a saved shortcut
+  --provider <id>      Select a provider
+  --model <id|default> Select a model; default supports codex-cli and claude-cli
   -h, --help           Show help
   --version            Show version
 
 API key environment variables:
-  ANTHROPIC_API_KEY
-  DEEPINFRA_TOKEN
-  DEEPSEEK_API_KEY
-  GEMINI_API_KEY
-  GOOGLE_API_KEY
-  GROQ_API_KEY
-  MISTRAL_API_KEY
-  OPENAI_API_KEY
-  OPENROUTER_API_KEY
-  XAI_API_KEY
+  ANTHROPIC_API_KEY     DEEPINFRA_TOKEN
+  DEEPSEEK_API_KEY      GEMINI_API_KEY
+  GOOGLE_API_KEY        GROQ_API_KEY
+  MISTRAL_API_KEY       OPENAI_API_KEY
+  OPENROUTER_API_KEY    XAI_API_KEY
 
-Secure API-key storage:
-  llm-now can save provider API keys securely for reuse.
-  Linux requires GNOME Keyring or KWallet in your user session.`;
+API keys can also be stored securely through the interactive launcher.`;
 
 function input(text: string, isTTY = false) {
   return {
@@ -557,13 +527,12 @@ describe("arguments and input", () => {
     const linuxHelp = renderHelpText(
       pc.createColors(false),
       BYOK_API_KEY_ENV_VARS,
-      "linux",
     );
     expect(linuxHelp).toBe(APPROVED_HELP_TEXT);
     expect(linuxHelp).not.toContain("llm-now --voice [");
     expect(linuxHelp).not.toContain("\n  --voice              ");
     expect(HELP_TEXT).toBe(
-      renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, process.platform),
+      renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS),
     );
     for (const rejectedCopy of [
       "printf",
@@ -578,18 +547,6 @@ describe("arguments and input", () => {
     }
   });
 
-  test("describes the native secure credential store for the running platform", () => {
-    const colors = pc.createColors(false);
-    const macHelp = renderHelpText(colors, BYOK_API_KEY_ENV_VARS, "darwin");
-    const linuxHelp = renderHelpText(colors, BYOK_API_KEY_ENV_VARS, "linux");
-
-    expect(macHelp).toContain("llm-now can save provider API keys securely for reuse.");
-    expect(macHelp).toContain("macOS Keychain");
-    expect(macHelp).not.toContain("GNOME Keyring");
-    expect(linuxHelp).toContain("GNOME Keyring or KWallet");
-    expect(linuxHelp).not.toContain("macOS Keychain");
-  });
-
   test("copies and ASCII-sorts credential names without mutating the input", () => {
     const credentialNames = Object.freeze([
       "ZETA_API_KEY",
@@ -597,11 +554,11 @@ describe("arguments and input", () => {
       "MIDDLE_TOKEN",
     ]);
     const originalOrder = [...credentialNames];
-    const rendered = renderHelpText(pc.createColors(false), credentialNames, "linux");
+    const rendered = renderHelpText(pc.createColors(false), credentialNames);
 
     expect(credentialNames).toEqual(originalOrder);
     expect(rendered).toContain(
-      `API key environment variables:\n  ALPHA_API_KEY\n  MIDDLE_TOKEN\n  ZETA_API_KEY`,
+      `API key environment variables:\n  ALPHA_API_KEY    MIDDLE_TOKEN\n  ZETA_API_KEY`,
     );
     for (const name of credentialNames) {
       expect(rendered.split(name)).toHaveLength(2);
@@ -616,7 +573,7 @@ describe("arguments and input", () => {
 
   test("applies semantic ANSI roles without changing the plain layout", () => {
     const colors = pc.createColors(true);
-    const rendered = renderHelpText(colors, BYOK_API_KEY_ENV_VARS, "linux");
+    const rendered = renderHelpText(colors, BYOK_API_KEY_ENV_VARS);
 
     expect(rendered).toContain(colors.bold(colors.greenBright("Usage:")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("llm-now")));
@@ -626,10 +583,9 @@ describe("arguments and input", () => {
     expect(rendered).toContain(colors.bold(colors.cyanBright("--instruction")));
     expect(rendered).toContain(colors.cyan("<text>"));
     expect(rendered).toContain(colors.cyan("ANTHROPIC_API_KEY"));
-    expect(rendered).toContain(
-      colors.bold(colors.greenBright("Secure API-key storage:")),
-    );
-    expect(rendered).toContain("Prompt text");
+    expect(rendered).toContain(colors.bold(colors.greenBright("Notes:")));
+    expect(rendered).toContain("Prompt or dictated input");
+    expect(rendered).toContain("stored securely through the interactive launcher");
     expect(stripTerminalSequences(rendered)).toBe(APPROVED_HELP_TEXT);
   });
 
