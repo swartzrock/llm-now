@@ -607,9 +607,9 @@ version `2`, an unknown root field, an alias `api_key` field, an invalid model
 `"default"` for a non-CLI provider, and out-of-range routing or speech values.
 
 Every configuration-backed command must exit `1`, leave stdout empty, preserve
-all files byte-for-byte, and perform no provider call, generation, clipboard
-change, speech, alias mutation, backup, or temporary publication. Existing
-`config.toml` is the sole authority even when invalid: none of these cases may
+all files byte-for-byte, and perform no provider call, generation,
+configuration change, speech, alias mutation, backup, or temporary publication.
+Existing `config.toml` is the sole authority even when invalid: none of these cases may
 fall back to the valid legacy files or migration backups. Put non-secret
 credential-shaped and instruction sentinels in the malformed document and
 confirm diagnostics identify only the sanitized path, field, source location,
@@ -1073,32 +1073,27 @@ repository checkout.
 The finished Shortcut must contain only `Dictate Text` followed by
 `Run Shell Script`. It must pass `Dictated Text` to stdin, and the shell action
 must invoke the absolute installed path to `llm-now --voice`. No `--input`,
-marker parser, clipboard action, separate `Speak Text` action, or Python/uv
-launcher may remain.
+marker parser, separate `Speak Text` action, or Python/uv launcher may remain.
 
 Complete the guide's exact, configured-phrase, unique-fuzzy, poor, and ambiguous
 routes; optional/omitted/configured wake words; per-alias voice/rate/pitch;
-clipboard sentinel and clean-answer checks; audible pitch A/B; one local and one
-hosted alias; provider and configuration failures; permissions; and recovery.
+audible pitch A/B; one local and one hosted alias; provider and configuration
+failures; permissions; and recovery.
 A successful process exit alone is not evidence that an installed voice honored
-the pitch setting. Confirm failed or ambiguous routing preserves the sentinel,
-successful copying contains no pitch command, and a speech failure after copy
-does not remove the answer.
+the pitch setting. Confirm failed or ambiguous routing does not invoke a model,
+and a speech failure does not trigger a replacement notice.
 
 For cancellation, start a slow request and use the Shortcut's stop control. The
 command must handle its root interrupt, reap the active operation, exit `130`,
-report `voice request cancelled`, and start no later notice, copy, or speech.
-An answer copied before cancellation is not rolled back. Run only one invocation
-at a time; overlapping invocations are unsupported because global clipboard and
-speech effects can interleave.
+report `voice request cancelled`, and start no later notice or speech.
+Run only one invocation at a time; overlapping invocations are unsupported
+because audible speech can interleave.
 
 Record the macOS version, Dictation mode, shortcut key, absolute binary path,
 aliases/providers and their prerequisites, installed voices, elapsed setup time,
-pitch values and audible comparison, clean-clipboard result, clipboard sentinel
-result, cancellation exit/diagnostic, and permission prompts. Also record that
-Dictation may use Apple services, hosted aliases send accepted question content
-to their provider, speech is audible, and clipboard contents persist until
-replaced.
+pitch values and audible comparison, cancellation exit/diagnostic, and
+permission prompts. Also record that Dictation may use Apple services, hosted
+aliases send accepted question content to their provider, and speech is audible.
 
 ## Automation-backed coverage
 

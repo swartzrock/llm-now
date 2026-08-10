@@ -11,6 +11,11 @@ deepened: 2026-08-06
 
 # Native macOS Voice Routing - Plan
 
+> **Superseded behavior (2026-08-09):** The clipboard requirements in this
+> historical plan no longer apply. Native voice mode and the retained Python
+> oracle do not invoke `pbcopy` or otherwise read or modify the clipboard;
+> routing, validation, and speech requirements remain applicable.
+
 Move the proven macOS voice-routing behavior into the installed `llm-now` binary, while preserving the Python example as an independent parity oracle. Users get one native command; contributors keep the reference implementation for differential testing.
 
 **Plan navigation**

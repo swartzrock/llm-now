@@ -505,7 +505,7 @@ describe("unified read authority", () => {
     ])).toEqual(before);
   });
 
-  test("rejects malformed unified voice config before generation, clipboard, or speech", async () => {
+  test("rejects malformed unified voice config before generation or speech", async () => {
     const root = await temporaryDirectory();
     const directory = join(root, "llm-now");
     await mkdir(directory);
@@ -829,7 +829,6 @@ describe("voice boundary", () => {
     expect(await runApplication(app.value)).toBe(0);
     expect(generated.calls.generate).toBe(1);
     expect(requests.map((request) => request.executable)).toEqual([
-      "/usr/bin/pbcopy",
       "/usr/bin/say",
     ]);
     expect(new TextDecoder().decode(requests[0]?.stdin)).toBe("integrated answer");
@@ -867,7 +866,7 @@ describe("voice boundary", () => {
     });
 
     expect(await runApplication(app.value)).toBe(1);
-    expect(app.stderr.text()).toContain("voice clipboard failed");
+    expect(app.stderr.text()).toContain("voice answer speech failed");
     expect(app.stderr.text()).not.toContain(answer);
     expect(app.stderr.text()).not.toContain(apiKey);
     expect(app.stderr.text()).not.toContain("\u001b");

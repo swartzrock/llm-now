@@ -7,7 +7,6 @@ import type { PromptInput } from "../src/io.ts";
 import type { RuntimeGateway } from "../src/runtime.ts";
 import {
   CONFIG_FAILED_NOTICE,
-  COPY_FAILED_NOTICE,
   CREATE_ALIAS_NOTICE,
   REQUEST_FAILED_NOTICE,
   RETRY_NOTICE,
@@ -44,7 +43,7 @@ function completed(stdout = "", stderr = ""): VoiceProcessOutcome {
 class FakeRunner implements VoiceProcessRunner {
   readonly accesses: string[] = [];
   readonly requests: VoiceProcessRequest[] = [];
-  available = new Set(["/usr/bin/say", "/usr/bin/pbcopy"]);
+  available = new Set(["/usr/bin/say"]);
   outcomes: VoiceProcessOutcome[] = [];
   onAccess?: (path: string) => void;
   onRun?: (request: VoiceProcessRequest, index: number) => void;
@@ -175,14 +174,13 @@ describe("native voice coordinator", () => {
     ]);
   });
 
-  test("loads one snapshot, generates once, copies exact answer, then speaks configured bytes", async () => {
+  test("loads one snapshot, generates once, then speaks configured bytes", async () => {
     const secrets = Object.fromEntries(
       BYOK_API_KEY_ENV_VARS.map((name) => [name, `${name}-secret`]),
     );
     const runner = new FakeRunner();
     runner.outcomes = [
       completed("Samantha en_US    # Hello\n"),
-      completed(),
       completed(),
     ];
     const app = harness({
@@ -207,10 +205,9 @@ describe("native voice coordinator", () => {
     expect(app.operations).toEqual([
       "/usr/bin/say -v ?",
       "generate",
-      "/usr/bin/pbcopy",
       "/usr/bin/say -v Samantha -r 205",
     ]);
-    expect(runner.accesses).toEqual(["/usr/bin/say", "/usr/bin/pbcopy"]);
+    expect(runner.accesses).toEqual(["/usr/bin/say"]);
     expect(runner.requests.map((request) => [
       request.executable,
       request.args,
@@ -218,7 +215,6 @@ describe("native voice coordinator", () => {
       request.timeoutMs,
     ])).toEqual([
       ["/usr/bin/say", ["-v", "?"], "", 5_000],
-      ["/usr/bin/pbcopy", [], "-v --flag '$HOME'\nsecond line", 5_000],
       ["/usr/bin/say", ["-v", "Samantha", "-r", "205"], "[[pbas 50]]-v --flag '$HOME'\nsecond line", 120_000],
     ]);
     for (const request of runner.requests) {
@@ -266,13 +262,11 @@ describe("native voice coordinator", () => {
     expect(app.runtimeCalls).toHaveLength(0);
   });
 
-  test("maps config, generation, clipboard, and answer-speech failures to stable outcomes", async () => {
+  test("maps config, generation, and answer-speech failures to stable outcomes", async () => {
     for (const answer of ["", "unsafe [[slnc 100]]", "unsafe\x1b[31m", "unsafe\x00text"]) {
       const app = harness({ answer });
       expect(await app.run()).toBe(0);
       expect(decoder.decode(app.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
-      expect(app.runner.requests.some((request) => request.executable === "/usr/bin/pbcopy"))
-        .toBeFalse();
     }
 
     const generation = harness({
@@ -283,21 +277,11 @@ describe("native voice coordinator", () => {
     expect(await generation.run()).toBe(0);
     expect(decoder.decode(generation.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
 
-    const copyRunner = new FakeRunner();
-    copyRunner.outcomes = [{ kind: "failed", detail: "copy failed" }, completed()];
-    const copy = harness({ runner: copyRunner });
-    expect(await copy.run()).toBe(1);
-    expect(copy.runner.requests.map((request) => request.executable)).toEqual([
-      "/usr/bin/pbcopy",
-      "/usr/bin/say",
-    ]);
-    expect(decoder.decode(copy.runner.requests.at(-1)?.stdin)).toBe(COPY_FAILED_NOTICE);
-
     const speechRunner = new FakeRunner();
-    speechRunner.outcomes = [completed(), { kind: "failed", detail: "speech failed" }];
+    speechRunner.outcomes = [{ kind: "failed", detail: "speech failed" }];
     const speech = harness({ runner: speechRunner });
     expect(await speech.run()).toBe(1);
-    expect(speech.runner.requests).toHaveLength(2);
+    expect(speech.runner.requests).toHaveLength(1);
     expect(decoder.decode(speech.runner.requests[0]?.stdin)).toBe("-v --flag '$HOME'\nsecond line");
   });
 
@@ -307,12 +291,6 @@ describe("native voice coordinator", () => {
     const unavailableSay = harness({ runner: missingSay });
     expect(await unavailableSay.run()).toBe(1);
     expect(missingSay.requests).toEqual([]);
-
-    const missingCopy = new FakeRunner();
-    missingCopy.available.delete("/usr/bin/pbcopy");
-    const unavailableCopy = harness({ runner: missingCopy });
-    expect(await unavailableCopy.run()).toBe(1);
-    expect(decoder.decode(missingCopy.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
 
     const voices = new FakeRunner();
     voices.outcomes = [completed("Alex en_US    # Hello\n"), completed()];
@@ -360,7 +338,7 @@ describe("native voice coordinator", () => {
       "\u001b[31mcontrol\u0000",
     ].join(" | ");
     const runner = new FakeRunner();
-    runner.outcomes = [completed(), { kind: "failed", detail }];
+    runner.outcomes = [{ kind: "failed", detail }];
     const app = harness({
       transcript,
       answer,
@@ -397,7 +375,7 @@ describe("native voice coordinator", () => {
     expect(decoder.decode(app.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
   });
 
-  test("withholds registered credentials before clipboard and answer speech", async () => {
+  test("withholds registered credentials before answer speech", async () => {
     const app = harness({
       answer: "Never expose registered-secret in an answer.",
       sensitiveValues: ["registered-secret"],
@@ -456,20 +434,14 @@ describe("native voice coordinator", () => {
     expect(duringGeneration.runner.requests).toEqual([]);
     expect(duringGeneration.diagnostics).toEqual(["voice request cancelled"]);
 
-    for (const cancelledExecutable of ["/usr/bin/pbcopy", "/usr/bin/say"] as const) {
-      const root = new AbortController();
-      const runner = new FakeRunner();
-      runner.onRun = (request) => {
-        if (request.executable === cancelledExecutable) root.abort();
-      };
-      runner.outcomes = cancelledExecutable === "/usr/bin/pbcopy"
-        ? [{ kind: "cancelled" }]
-        : [completed(), { kind: "cancelled" }];
-      const app = harness({ runner, signal: root.signal });
-      expect(await app.run()).toBe(130);
-      expect(app.diagnostics).toEqual(["voice request cancelled"]);
-      expect(runner.requests.at(-1)?.executable).toBe(cancelledExecutable);
-    }
+    const speech = new AbortController();
+    const speechRunner = new FakeRunner();
+    speechRunner.onRun = () => speech.abort();
+    speechRunner.outcomes = [{ kind: "cancelled" }];
+    const duringSpeech = harness({ runner: speechRunner, signal: speech.signal });
+    expect(await duringSpeech.run()).toBe(130);
+    expect(duringSpeech.diagnostics).toEqual(["voice request cancelled"]);
+    expect(speechRunner.requests.at(-1)?.executable).toBe("/usr/bin/say");
   });
 
   test("external cancellation during setup and voice inventory suppresses every notice", async () => {
@@ -512,11 +484,11 @@ describe("native voice coordinator", () => {
     expect(await generation.run()).toBe(0);
     expect(decoder.decode(generation.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
 
-    const timedOutCopy = new FakeRunner();
-    timedOutCopy.outcomes = [{ kind: "timed_out", detail: "clipboard deadline" }, completed()];
-    const copy = harness({ runner: timedOutCopy });
-    expect(await copy.run()).toBe(1);
-    expect(decoder.decode(timedOutCopy.requests.at(-1)?.stdin)).toBe(COPY_FAILED_NOTICE);
+    const timedOutSpeech = new FakeRunner();
+    timedOutSpeech.outcomes = [{ kind: "timed_out", detail: "speech deadline" }];
+    const speech = harness({ runner: timedOutSpeech });
+    expect(await speech.run()).toBe(1);
+    expect(speech.diagnostics).toEqual(["voice answer speech timed_out: speech deadline"]);
   });
 
   test("enforces the generation deadline when a runtime ignores its signal", async () => {
@@ -615,7 +587,7 @@ describe("voice process and signal adapters", () => {
     });
 
     expect(await runner.run({
-      executable: "/usr/bin/pbcopy",
+      executable: "/usr/bin/say",
       args: [],
       stdin: encoder.encode("answer"),
       env: {},

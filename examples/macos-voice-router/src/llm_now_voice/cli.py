@@ -42,12 +42,10 @@ MIN_FUZZY_SIMILARITY = 65.0
 MIN_FUZZY_MARGIN = 15.0
 INVENTORY_TIMEOUT = 5
 GENERATION_TIMEOUT = 50
-CLIPBOARD_TIMEOUT = 5
 SPEECH_TIMEOUT = 120
 RETRY_NOTICE = b"I couldn't match an alias and question. Please try again."
 REQUEST_FAILED_NOTICE = b"The request failed. Please try again."
 CONFIG_FAILED_NOTICE = b"The voice router needs attention. Check the Shortcut result."
-COPY_FAILED_NOTICE = b"I couldn't copy the answer. Check the Shortcut result."
 CONCISE_PROMPT = (
     "Answer concisely in plain text suitable for speech. "
     "Do not use Markdown or code fences unless the question requires code."
@@ -703,14 +701,13 @@ def run_voice_router(
     config_data: bytes | None = None,
     stderr: TextIO,
     llm_now: str = "llm-now",
-    pbcopy: str = "/usr/bin/pbcopy",
     say: str = "/usr/bin/say",
     command_available: Callable[[str], bool] | None = None,
 ) -> int:
     try:
         if command_available is not None:
             missing = next(
-                (command for command in (llm_now, pbcopy, say) if not command_available(command)),
+                (command for command in (llm_now, say) if not command_available(command)),
                 None,
             )
             if missing is not None:
@@ -832,20 +829,6 @@ def run_voice_router(
             return 0 if _speak_notice(runner, say, REQUEST_FAILED_NOTICE, stderr) else 1
 
         answer = generation.stdout
-        try:
-            copy_result = runner.run((pbcopy,), answer, CLIPBOARD_TIMEOUT)
-        except (FileNotFoundError, ProcessTimedOut, OSError) as error:
-            _write_diagnostic(stderr, f"clipboard copy failed: {error}")
-            _speak_notice(runner, say, COPY_FAILED_NOTICE, stderr)
-            return 1
-        _write_child_diagnostic(stderr, "clipboard copy", copy_result.stderr)
-        if copy_result.returncode != 0:
-            _write_diagnostic(
-                stderr, f"clipboard copy exited with status {copy_result.returncode}"
-            )
-            _speak_notice(runner, say, COPY_FAILED_NOTICE, stderr)
-            return 1
-
         speech_args = [say]
         if installed_voice is not None:
             speech_args.extend(("-v", installed_voice))

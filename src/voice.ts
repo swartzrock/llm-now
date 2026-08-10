@@ -20,10 +20,8 @@ import {
 } from "./voice-routing.ts";
 
 const SAY = "/usr/bin/say";
-const PBCOPY = "/usr/bin/pbcopy";
 const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
 const DEFAULT_INVENTORY_TIMEOUT_MS = 5_000;
-const DEFAULT_CLIPBOARD_TIMEOUT_MS = 5_000;
 const DEFAULT_SPEECH_TIMEOUT_MS = 120_000;
 const DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS = 500;
 const FORCE_KILL_DELAY_MS = 250;
@@ -32,8 +30,6 @@ export const RETRY_NOTICE = "I couldn't match an alias and question. Please try 
 export const REQUEST_FAILED_NOTICE = "The request failed. Please try again.";
 export const CONFIG_FAILED_NOTICE =
   "The voice router needs attention. Check the Shortcut result.";
-export const COPY_FAILED_NOTICE =
-  "I couldn't copy the answer. Check the Shortcut result.";
 export const CREATE_ALIAS_NOTICE = "No aliases are configured. Create an alias and try again.";
 export const VOICE_PROMPT =
   "Answer concisely in plain text suitable for speech. Do not use Markdown or code fences unless the question requires code.";
@@ -69,7 +65,7 @@ export function installVoiceCancellation(
 }
 
 export interface VoiceProcessRequest {
-  readonly executable: typeof SAY | typeof PBCOPY;
+  readonly executable: typeof SAY;
   readonly args: readonly string[];
   readonly stdin: Uint8Array;
   readonly env: ByokEnvironment;
@@ -232,7 +228,6 @@ export interface VoiceDependencies {
   readonly generationTimeoutMs?: number;
   readonly generationCleanupTimeoutMs?: number;
   readonly inventoryTimeoutMs?: number;
-  readonly clipboardTimeoutMs?: number;
   readonly speechTimeoutMs?: number;
 }
 
@@ -289,7 +284,6 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
   const generationCleanupTimeoutMs = deps.generationCleanupTimeoutMs
     ?? DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS;
   const inventoryTimeoutMs = deps.inventoryTimeoutMs ?? DEFAULT_INVENTORY_TIMEOUT_MS;
-  const clipboardTimeoutMs = deps.clipboardTimeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS;
   const speechTimeoutMs = deps.speechTimeoutMs ?? DEFAULT_SPEECH_TIMEOUT_MS;
   let cancellationReported = false;
 
@@ -308,7 +302,7 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
     return 130;
   };
   const runChild = async (
-    executable: typeof SAY | typeof PBCOPY,
+    executable: typeof SAY,
     args: readonly string[],
     stdin: Uint8Array,
     timeoutMs: number,
@@ -373,17 +367,6 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
   }
   if (deps.signal.aborted) return cancelled();
   if (!sayAvailable) return await configFailure("required executable is unavailable: /usr/bin/say", false);
-
-  let copyAvailable = false;
-  try {
-    copyAvailable = await deps.runner.isExecutable(PBCOPY);
-  } catch (error) {
-    return await configFailure(error, true);
-  }
-  if (deps.signal.aborted) return cancelled();
-  if (!copyAvailable) {
-    return await configFailure("required executable is unavailable: /usr/bin/pbcopy", true);
-  }
 
   if (invalidTranscript !== undefined) {
     diagnostic("voice input rejected", invalidTranscript);
@@ -501,14 +484,6 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
   ) {
     diagnostic("voice generation returned credential-bearing text");
     return await speakNotice(REQUEST_FAILED_NOTICE, 0);
-  }
-
-  const answerBytes = new TextEncoder().encode(answer);
-  const copy = await runChild(PBCOPY, [], answerBytes, clipboardTimeoutMs);
-  if (deps.signal.aborted || copy.kind === "cancelled") return cancelled();
-  if (copy.kind !== "completed") {
-    diagnostic(`voice clipboard ${copy.kind}`, childDetail(copy));
-    return await speakNotice(COPY_FAILED_NOTICE, 1);
   }
 
   const speechPrefix = profile?.pitch === undefined

@@ -1,17 +1,16 @@
 # Talk to an llm-now alias from a macOS shortcut
 
 Press a keyboard shortcut, dictate an alias and question, then hear the answer.
-The same answer is copied to the clipboard. The Shortcut itself has only two
-actions:
+The Shortcut itself has only two actions:
 
 1. `Dictate Text`
 2. `Run Shell Script`
 
 The shell action passes the dictated text through stdin to the installed
 `llm-now --voice` command. The native command loads the current aliases, rejects
-uncertain matches, calls the selected alias once, copies the answer, and speaks
-it with macOS `say`. Normal use does not require Python, uv, this repository, or
-a second launcher.
+uncertain matches, calls the selected alias once, and speaks the answer with
+macOS `say`. Normal use does not require Python, uv, this repository, or a
+second launcher.
 
 ## Before you start
 
@@ -72,13 +71,11 @@ native credential storage.
 
 Run the Shortcut from the editor. Success means:
 
-- the answer is spoken;
-- the identical answer is on the clipboard; and
-- the shell action needs no `Speak Text` or clipboard action after it.
+- the answer is spoken; and
+- the shell action needs no `Speak Text` action after it.
 
-Paste somewhere to confirm the clipboard. Fix this Text test before involving
-the microphone; it isolates paths, dependencies, aliases, and providers from
-Dictation permissions.
+Fix this Text test before involving the microphone; it isolates paths,
+dependencies, aliases, and providers from Dictation permissions.
 
 For manual Terminal testing, `--input` is also available:
 
@@ -113,8 +110,8 @@ accepts both `Hey haiku, ...` and `haiku, ...`.
 Open the Shortcut's details, choose **Add Keyboard Shortcut**, and press an
 unused key combination. Switch to another application and invoke it. Wait for
 the current run to finish before starting another one. Only one active voice
-invocation is supported: overlapping runs can interleave writes to the global
-clipboard and audible speech.
+invocation is supported: overlapping runs can produce interleaved audible
+speech.
 
 If macOS asks whether Shortcuts may run shell scripts, allow it. Managed Macs
 may require an administrator to permit that capability.
@@ -229,10 +226,9 @@ names and spoken-name collisions between aliases are invalid.
 
 `pitch` uses Apple's legacy unsigned, absolute baseline-pitch (`pbas`) scale; it
 is not a percentage or a relative adjustment. The router turns `pitch = 50`
-into a trusted `[[pbas 50]]` command for `/usr/bin/say` only. The original model
-answer is still copied to the clipboard without that command. Raw embedded
-speech commands are not configurable, and model output containing `[[...]]` is
-rejected before copying or speaking.
+into a trusted `[[pbas 50]]` command for `/usr/bin/say`. Raw embedded speech
+commands are not configurable, and model output containing `[[...]]` is
+rejected before speaking.
 
 List the exact voices installed on this Mac:
 
@@ -269,9 +265,7 @@ that apply to your alias inventory.
 4. Configure different voices, rates, or pitches for two aliases that point to
    the same model. Confirm the profile follows the alias, not the model.
 5. Ask one local Ollama alias and one hosted API- or CLI-backed alias. Ordinary
-   unmarked text from both must follow the same clipboard-and-speech path.
-6. After each success, paste the clipboard and confirm it contains the original
-   answer text with no `[[pbas ...]]` command.
+   safe text from both must follow the same speech path.
 
 ### Pitch A/B check
 
@@ -282,8 +276,7 @@ not prove that the selected voice changed audibly.
    substitute one of your aliases), omit `pitch`, and ask for a short repeatable
    sentence. Treat that listening pass as the control.
 2. Add one legal pitch such as `pitch = 40`, repeat the same request, and compare
-   it with the control. Paste the clipboard and confirm that it contains only
-   the model answer, with no speech command.
+   it with the control.
 3. Repeat with a substantially different legal value such as `pitch = 80`.
    Record the voice, values, and whether the difference was audible.
 4. If the two legal values sound unchanged, repeat with another installed
@@ -292,33 +285,24 @@ not prove that the selected voice changed audibly.
 
 ### Rejection and failure safety
 
-Put a recognizable sentinel on the clipboard:
-
-```bash
-printf 'VOICE-ROUTER-SENTINEL' | /usr/bin/pbcopy
-```
-
 Dictate `Bananas, answer this question` or another deliberately poor alias.
-You should hear a retry notice, no model should run, and `pbpaste` should still
-print the sentinel.
+You should hear a retry notice and no model should run.
 
 For an ambiguity check, use a disposable unified configuration containing two harmless
 near neighbors such as `qwen` and `when`, then say `Kwen, answer this`. The
 router must reject instead of choosing row order. Do not alter a production
 configuration only to run this check.
 
-Stop a local provider or otherwise make a test alias fail, reset the clipboard
-sentinel, and ask it a question. You should hear only the stable request-failed
-notice. Provider stderr must not enter speech or the clipboard.
+Stop a local provider or otherwise make a test alias fail and ask it a question.
+You should hear only the stable request-failed notice. Provider stderr must not
+enter speech.
 
 Start a deliberately slow request and press the Shortcut's stop button. Wait
 past the provider's normal response time. The stop control is the supported
 cancellation affordance: `llm-now` handles the interrupt as one root request,
 terminates and reaps the active operation, exits `130`, and writes
 `voice request cancelled` to the Shortcut result. There must be no later notice,
-speech, or downstream action. If cancellation occurs after copying completed,
-the clipboard may already contain the answer; the command does not attempt an
-unsafe restore.
+speech, or downstream action.
 
 ## Troubleshooting
 
@@ -360,15 +344,14 @@ printf 'haiku, explain a perfect chord' | /absolute/path/to/llm-now --voice
 
 Rejected input says `I couldn't match an alias and question. Please try again.`
 A generation failure says `The request failed. Please try again.` Configuration
-problems say `The voice router needs attention. Check the Shortcut result.` A
-clipboard failure says `I couldn't copy the answer. Check the Shortcut result.`
+problems say `The voice router needs attention. Check the Shortcut result.`
 These notices use the unconfigured system speech defaults and never include
 provider or request detail.
 
 Handled routing and generation failures exit `0` only when their notice is
-spoken successfully. Configuration, missing-command, clipboard, and answer
-speech failures exit `1`; if answer speech fails after copying, the answer stays
-on the clipboard and no replacement notice is spoken. Cancellation exits `130`.
+spoken successfully. Configuration, missing-command, and answer-speech failures
+exit `1`; an answer-speech failure does not trigger a replacement notice.
+Cancellation exits `130`.
 Shortcuts may otherwise show little beyond the sanitized diagnostic in the
 shell action result.
 
@@ -383,9 +366,9 @@ through 127; do not put `[[...]]` commands in the profile.
 ### A local model returns plain text without markers
 
 That is supported. The router never asks a model for control markers, JSON, or a
-separate summary. It makes one generation request and copies the safe UTF-8
-response unchanged. If `pitch` is configured, the router adds its validated
-command only to the separate speech input.
+separate summary. It makes one generation request and speaks the safe UTF-8
+response. If `pitch` is configured, the router adds its validated command only
+to the speech input.
 
 ## Privacy and state
 
@@ -399,13 +382,11 @@ command only to the separate speech input.
 - The unified TOML contains plaintext alias targets, optional instructions,
   routing settings, and speech preferences, but never credentials. Migration
   backups are plaintext too; protect the configuration directory.
-- A successful answer replaces the clipboard before speech begins and remains
-  there until another application replaces it; `llm-now` does not clear it.
 - Only one invocation is supported at a time. Overlapping requests can
-  interleave global clipboard writes and audible speech.
-- Technical diagnostics stay on stderr and are never copied or spoken. Model
+  interleave audible speech.
+- Technical diagnostics stay on stderr and are never spoken. Model
   output containing terminal controls or macOS `[[...]]` speech commands is
-  rejected before either side effect.
+  rejected before speech.
 
 ## Contributor-only Python parity oracle
 

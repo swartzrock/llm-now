@@ -549,11 +549,11 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(runner.results, [])
         return exit_code, runner, stderr.getvalue()
 
-    def test_success_calls_inventory_generation_copy_and_speech_once_in_order(self) -> None:
+    def test_success_calls_inventory_generation_and_speech_once_in_order(self) -> None:
         answer = b"Tender smoke rises\nBrisket rests beneath the stars\nSummer on the plate\n"
         code, runner, diagnostics = self.run_router(
             b"Hey haiku, write about brisket",
-            [completed(INVENTORY), completed(answer), completed(), completed()],
+            [completed(INVENTORY), completed(answer), completed()],
         )
 
         self.assertEqual(code, 0)
@@ -563,7 +563,6 @@ class OrchestrationTests(unittest.TestCase):
             [
                 ("llm-now", "--aliases"),
                 ("llm-now", "--alias", "haiku"),
-                ("/usr/bin/pbcopy",),
                 ("/usr/bin/say",),
             ],
         )
@@ -571,8 +570,7 @@ class OrchestrationTests(unittest.TestCase):
         self.assertIsNotNone(prompt)
         self.assertTrue(prompt.endswith(b"\n\nwrite about brisket"))
         self.assertEqual(runner.calls[2][1], answer)
-        self.assertEqual(runner.calls[3][1], answer)
-        self.assertEqual([call[2] for call in runner.calls], [5, 50, 5, 120])
+        self.assertEqual([call[2] for call in runner.calls], [5, 50, 120])
 
     def test_selected_voice_and_rate_are_validated_before_generation(self) -> None:
         config = unified_config(
@@ -584,7 +582,7 @@ class OrchestrationTests(unittest.TestCase):
         answer = b"Answer"
         code, runner, _ = self.run_router(
             b"Tara, answer this",
-            [completed(INVENTORY), completed(voices), completed(answer), completed(), completed()],
+            [completed(INVENTORY), completed(voices), completed(answer), completed()],
             config_data=config,
         )
 
@@ -595,12 +593,10 @@ class OrchestrationTests(unittest.TestCase):
                 ("llm-now", "--aliases"),
                 ("/usr/bin/say", "-v", "?"),
                 ("llm-now", "--alias", "terra"),
-                ("/usr/bin/pbcopy",),
                 ("/usr/bin/say", "-v", "Samantha", "-r", "205"),
             ],
         )
-        self.assertEqual(runner.calls[3][1], answer)
-        self.assertEqual(runner.calls[4][1], b"[[pbas 50]]" + answer)
+        self.assertEqual(runner.calls[3][1], b"[[pbas 50]]" + answer)
 
     def test_each_alias_uses_its_own_fractional_or_integer_pitch(self) -> None:
         config = unified_config(
@@ -618,13 +614,12 @@ class OrchestrationTests(unittest.TestCase):
                 answer = b"Answer"
                 code, runner, _ = self.run_router(
                     transcript,
-                    [completed(INVENTORY), completed(answer), completed(), completed()],
+                    [completed(INVENTORY), completed(answer), completed()],
                     config_data=config,
                 )
 
                 self.assertEqual(code, 0)
-                self.assertEqual(runner.calls[2][1], answer)
-                self.assertEqual(runner.calls[3][1], prefix + answer)
+                self.assertEqual(runner.calls[2][1], prefix + answer)
 
     def test_unavailable_voice_fails_before_generation(self) -> None:
         code, runner, diagnostics = self.run_router(
@@ -640,7 +635,7 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(runner.calls[-1][0], ("/usr/bin/say",))
         self.assertNotIn(("llm-now", "--alias", "terra"), [call[0] for call in runner.calls])
 
-    def test_rejected_input_speaks_retry_without_generation_or_clipboard(self) -> None:
+    def test_rejected_input_speaks_retry_without_generation(self) -> None:
         code, runner, _ = self.run_router(
             b"unknown, answer this",
             [completed(INVENTORY), completed()],
@@ -662,7 +657,7 @@ class OrchestrationTests(unittest.TestCase):
         self.assertIn("invalid alias inventory", diagnostics)
         self.assertNotIn(b"inventory warning", runner.calls[-1][1] or b"")
 
-    def test_provider_failures_never_reach_clipboard_or_spoken_payload(self) -> None:
+    def test_provider_failures_never_reach_answer_speech(self) -> None:
         failures: list[ProcessResult | Exception] = [
             completed(stderr=b"secret provider detail", returncode=2),
             ProcessTimedOut(("llm-now", "--alias", "haiku"), 50),
@@ -683,24 +678,10 @@ class OrchestrationTests(unittest.TestCase):
                     ),
                 )
                 self.assertEqual(code, 0)
-                self.assertNotIn(("/usr/bin/pbcopy",), [call[0] for call in runner.calls])
                 self.assertIn(b"request failed", (runner.calls[-1][1] or b"").lower())
                 self.assertNotIn(b"[[pbas", runner.calls[-1][1] or b"")
                 self.assertNotIn(b"secret provider detail", runner.calls[-1][1] or b"")
                 self.assertTrue(diagnostics)
-
-    def test_clipboard_failure_prevents_answer_speech(self) -> None:
-        answer = b"answer"
-        code, runner, _ = self.run_router(
-            b"haiku, answer this",
-            [completed(INVENTORY), completed(answer), completed(returncode=1), completed()],
-            config_data=unified_config(profile_fields={"haiku": ("pitch = 50",)}),
-        )
-
-        self.assertEqual(code, 1)
-        self.assertEqual(runner.calls[-1][0], ("/usr/bin/say",))
-        self.assertNotEqual(runner.calls[-1][1], answer)
-        self.assertNotIn(b"[[pbas", runner.calls[-1][1] or b"")
 
     def test_invalid_pitch_fails_before_generation_with_unmodulated_notice(self) -> None:
         code, runner, diagnostics = self.run_router(
@@ -717,31 +698,27 @@ class OrchestrationTests(unittest.TestCase):
         )
         self.assertNotIn(b"[[pbas", runner.calls[-1][1] or b"")
 
-    def test_speech_failure_after_copy_leaves_answer_without_new_notice(self) -> None:
+    def test_answer_speech_failure_returns_failure_without_new_notice(self) -> None:
         answer = b"answer"
         code, runner, _ = self.run_router(
             b"haiku, answer this",
-            [completed(INVENTORY), completed(answer), completed(), completed(returncode=1)],
+            [completed(INVENTORY), completed(answer), completed(returncode=1)],
             config_data=unified_config(profile_fields={"haiku": ("pitch = 50",)}),
         )
 
         self.assertEqual(code, 1)
-        self.assertEqual(len(runner.calls), 4)
-        self.assertEqual(runner.calls[2][1], answer)
-        self.assertEqual(runner.calls[3][1], b"[[pbas 50]]" + answer)
+        self.assertEqual(len(runner.calls), 3)
+        self.assertEqual(runner.calls[2][1], b"[[pbas 50]]" + answer)
 
-    def test_cancellation_stops_downstream_work_at_each_side_effect(self) -> None:
-        for prior, cancellation_index in (
-            ([completed(INVENTORY), completed(b"answer")], 2),
-            ([completed(INVENTORY), completed(b"answer"), completed()], 3),
-        ):
-            with self.subTest(cancellation_index=cancellation_index):
-                runner = FakeRunner([*prior, ProcessCancelled()])
-                code = run_voice_router(
-                    b"haiku, answer this", runner=runner, config_data=None, stderr=StringIO()
-                )
-                self.assertEqual(code, 130)
-                self.assertEqual(len(runner.calls), cancellation_index + 1)
+    def test_cancellation_stops_answer_speech(self) -> None:
+        runner = FakeRunner(
+            [completed(INVENTORY), completed(b"answer"), ProcessCancelled()]
+        )
+        code = run_voice_router(
+            b"haiku, answer this", runner=runner, config_data=None, stderr=StringIO()
+        )
+        self.assertEqual(code, 130)
+        self.assertEqual(len(runner.calls), 3)
 
     def test_missing_command_is_a_setup_failure(self) -> None:
         runner = FakeRunner([FileNotFoundError("llm-now") , completed()])
@@ -753,20 +730,18 @@ class OrchestrationTests(unittest.TestCase):
         self.assertIn("llm-now", stderr.getvalue())
         self.assertEqual(runner.calls[-1][0], ("/usr/bin/say",))
 
-    def test_preflight_missing_side_effect_command_starts_no_llm_now_process(self) -> None:
-        for missing in ("/usr/bin/pbcopy", "/usr/bin/say"):
-            with self.subTest(missing=missing):
-                runner = FakeRunner([] if missing.endswith("say") else [completed()])
-                stderr = StringIO()
-                code = run_voice_router(
-                    b"haiku, answer this",
-                    runner=runner,
-                    stderr=stderr,
-                    command_available=lambda command: command != missing,
-                )
-                self.assertEqual(code, 1)
-                self.assertNotIn(("llm-now", "--aliases"), [call[0] for call in runner.calls])
-                self.assertIn(missing, stderr.getvalue())
+    def test_preflight_missing_say_starts_no_llm_now_process(self) -> None:
+        runner = FakeRunner([])
+        stderr = StringIO()
+        code = run_voice_router(
+            b"haiku, answer this",
+            runner=runner,
+            stderr=stderr,
+            command_available=lambda command: command != "/usr/bin/say",
+        )
+        self.assertEqual(code, 1)
+        self.assertNotIn(("llm-now", "--aliases"), [call[0] for call in runner.calls])
+        self.assertIn("/usr/bin/say", stderr.getvalue())
 
 
 class MainTests(unittest.TestCase):

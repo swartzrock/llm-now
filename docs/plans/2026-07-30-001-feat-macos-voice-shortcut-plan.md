@@ -12,6 +12,11 @@ deepened: 2026-08-01
 
 # macOS Voice Router for llm-now - Plan
 
+> **Superseded behavior (2026-08-09):** The clipboard requirements in this
+> historical plan no longer apply. The supported router does not invoke
+> `pbcopy` or otherwise read or modify the clipboard; routing and speech
+> requirements remain applicable.
+
 ## Goal Capsule
 
 - **Objective:** Let a macOS user press a global keyboard shortcut, dictate an alias and question, and hear the selected `llm-now` model's answer without opening a browser or typing.

@@ -12,6 +12,11 @@ execution: code
 
 # Per-Alias Speech Pitch Configuration - Plan
 
+> **Superseded behavior (2026-08-09):** The clipboard requirements in this
+> historical plan no longer apply. Pitch remains a trusted prefix applied only
+> to `/usr/bin/say`; the router does not invoke `pbcopy` or otherwise read or
+> modify the clipboard.
+
 ## Goal Capsule
 
 - **Objective:** Let a macOS user assign a validated baseline pitch to each `llm-now` alias in the existing voice-router configuration while keeping copied model output unchanged.
