@@ -1,16 +1,17 @@
 # Talk to an llm-now alias from a macOS shortcut
 
-Press a keyboard shortcut, dictate an alias and question, then hear the answer.
+Press a keyboard shortcut, dictate a saved-shortcut name and question, then
+hear the answer.
 The Shortcut itself has only two actions:
 
 1. `Dictate Text`
 2. `Run Shell Script`
 
 The shell action passes the dictated text through stdin to the installed
-`llm-now --voice-route --speak` command. Voice routing selects a saved alias and
-extracts its question; speech adds concise plain-text guidance and sends the
-validated answer to macOS `say` instead of stdout. Normal use does not require
-Python, uv, this repository, or a second launcher.
+`llm-now --voice-route --speak` command. Voice routing selects a saved shortcut
+and extracts its question; speech adds concise plain-text guidance and sends
+the validated answer to macOS `say` instead of stdout. Normal use does not
+require Python, uv, this repository, or a second launcher.
 
 ## Before you start
 
@@ -18,12 +19,12 @@ You need:
 
 - macOS Dictation enabled in **System Settings → Keyboard → Dictation**;
 - `llm-now` installed; and
-- at least one working saved alias.
+- at least one working saved shortcut.
 
-The selected alias still needs everything it normally needs. A hosted alias may
-need network access and its usual provider credential. An Ollama or LM Studio
-alias needs that local service running. A CLI-backed alias needs its CLI
-installed and authenticated.
+The selected shortcut still needs everything it normally needs. A hosted
+shortcut may need network access and its usual provider credential. An Ollama
+or LM Studio shortcut needs that local service running. A CLI-backed shortcut
+needs its CLI installed and authenticated.
 
 Confirm the command-line pieces in Terminal:
 
@@ -32,16 +33,16 @@ command -v llm-now
 llm-now --aliases
 ```
 
-Keep the absolute path printed by `command -v llm-now`. Test one alias normally
-before building the Shortcut so its provider, credential, network, or local
-service prerequisites are already known to work.
+Keep the absolute path printed by `command -v llm-now`. Test one saved shortcut
+normally before building the Shortcut so its provider, credential, network, or
+local service prerequisites are already known to work.
 
 ## Set up the Shortcut
 
 ### 1. Start with a Text smoke test
 
 Open Shortcuts, create a shortcut named `Ask llm-now`, and add a **Text** action.
-Enter a real alias followed by a question, for example:
+Enter a real saved-shortcut name followed by a question, for example:
 
 ```text
 haiku, write one sentence about smoked brisket
@@ -66,7 +67,7 @@ assuming either example.
 
 Do not put API keys in this script. Shortcuts does not reliably inherit
 variables from an interactive shell. Use a local or authenticated CLI-backed
-alias, a provider environment available to GUI apps, or llm-now's supported
+shortcut, a provider environment available to GUI apps, or llm-now's supported
 native credential storage.
 
 Run the Shortcut from the editor. Success means:
@@ -75,7 +76,7 @@ Run the Shortcut from the editor. Success means:
 - the shell action needs no `Speak Text` action after it.
 
 Fix this Text test before involving the microphone; it isolates paths,
-dependencies, aliases, and providers from Dictation permissions.
+dependencies, saved shortcuts, and providers from Dictation permissions.
 
 For manual Terminal testing, `--input` is also available:
 
@@ -116,10 +117,10 @@ speech.
 If macOS asks whether Shortcuts may run shell scripts, allow it. Managed Macs
 may require an administrator to permit that capability.
 
-## How alias matching works
+## How saved-shortcut matching works
 
-Aliases are loaded on every request, so adding an llm-now alias does not require
-editing the Shortcut or copying an alias roster into another file.
+Saved shortcuts are loaded on every request, so adding one does not require
+editing the Shortcut or copying a roster into another file.
 
 The router examines only the leading spoken phrase and tries these stages:
 
@@ -134,8 +135,8 @@ AI confidence score. A fuzzy result must clear both a minimum score and a
 runner-up margin; weak, tied, and ambiguous inputs are rejected rather than sent
 to the nearest model.
 
-With matching aliases and the optional profile below, these phrases route as
-follows:
+With matching saved shortcuts and the optional profile below, these phrases
+route as follows:
 
 | Dictated phrase | Alias | Match stage |
 | --- | --- | --- |
@@ -145,12 +146,13 @@ follows:
 | `Op. 47, explain this chord` | `opus47` | configured spoken name |
 | `Kwen, explain perfect chords` | `qwen` | unique fuzzy |
 
-`Kwen` works only when no competing alias makes the fuzzy result ambiguous.
+`Kwen` works only when no competing saved shortcut makes the fuzzy result
+ambiguous.
 
 ## Optional names, routing, and speech
 
-Aliases and voice settings share llm-now's unified configuration. Print its
-exact location with this read-only command:
+Saved shortcuts and voice settings share llm-now's unified configuration.
+Print its exact location with this read-only command:
 
 ```bash
 llm-now --config-path
@@ -238,7 +240,7 @@ List the exact voices installed on this Mac:
 
 Voice lookup is case-insensitive and speech uses the installed canonical name.
 An unavailable selected voice fails before model generation instead of silently
-changing the voice or alias.
+changing the voice or saved shortcut.
 
 An alias save may canonically rewrite all of `config.toml`, removing comments
 and custom spacing while preserving valid unrelated values. Generated and
@@ -259,13 +261,15 @@ that apply to your alias inventory.
 ### Routing and output
 
 1. Run the Text smoke test, then Dictate Text, then the global keyboard shortcut.
-2. Try the five phrases in the table for aliases that exist on your machine.
+2. Try the five phrases in the table for saved shortcuts that exist on your
+   machine.
 3. Try the same request with `Hey`, without a wake word, and with a configured
    wake word in different capitalization.
-4. Configure different voices, rates, or pitches for two aliases that point to
-   the same model. Confirm the profile follows the alias, not the model.
-5. Ask one local Ollama alias and one hosted API- or CLI-backed alias. Ordinary
-   safe text from both must follow the same speech path.
+4. Configure different voices, rates, or pitches for two saved shortcuts that
+   point to the same model. Confirm the profile follows the shortcut, not the
+   model.
+5. Ask one local Ollama shortcut and one hosted API- or CLI-backed shortcut.
+   Ordinary safe text from both must follow the same speech path.
 
 The two flags also work independently. In Terminal, verify route-only output
 on stdout without speech:
@@ -274,7 +278,8 @@ on stdout without speech:
 /absolute/path/to/llm-now --voice-route --input 'haiku, explain a perfect chord'
 ```
 
-Then bypass routing, select the alias explicitly, and speak the answer:
+Then bypass routing, select the saved shortcut explicitly, and speak the
+answer:
 
 ```bash
 /absolute/path/to/llm-now --alias haiku --speak --input 'Explain a perfect chord'
@@ -297,8 +302,8 @@ Pitch support can vary by installed voice, so a successful Shortcut run does
 not prove that the selected voice changed audibly.
 
 1. Choose an exact name from `/usr/bin/say -v '?'`, configure it for `slug` (or
-   substitute one of your aliases), omit `pitch`, and ask for a short repeatable
-   sentence. Treat that listening pass as the control.
+   substitute one of your saved shortcuts), omit `pitch`, and ask for a short
+   repeatable sentence. Treat that listening pass as the control.
 2. Add one legal pitch such as `pitch = 40`, repeat the same request, and compare
    it with the control.
 3. Repeat with a substantially different legal value such as `pitch = 80`.
@@ -309,7 +314,8 @@ not prove that the selected voice changed audibly.
 
 ### Rejection and failure safety
 
-Dictate `Bananas, answer this question` or another deliberately poor alias.
+Dictate `Bananas, answer this question` or another deliberately nonmatching
+saved-shortcut name.
 You should hear a retry notice and no model should run.
 
 For an ambiguity check, use a disposable unified configuration containing two harmless
@@ -317,9 +323,9 @@ near neighbors such as `qwen` and `when`, then say `Kwen, answer this`. The
 router must reject instead of choosing row order. Do not alter a production
 configuration only to run this check.
 
-Stop a local provider or otherwise make a test alias fail and ask it a question.
-You should hear only the stable request-failed notice. Provider stderr must not
-enter speech.
+Stop a local provider or otherwise make a test shortcut fail and ask it a
+question. You should hear only the stable request-failed notice. Provider
+stderr must not enter speech.
 
 Start a deliberately slow request and press the Shortcut's stop button. Wait
 past the provider's normal response time. The stop control is the supported
@@ -355,7 +361,7 @@ is the safe outcome.
 ### The shell action fails immediately
 
 Recheck the absolute `llm-now` path, **Pass Input: to stdin**, the selected
-alias's ordinary provider prerequisites, and the shell's script-running
+shortcut's ordinary provider prerequisites, and the shell's script-running
 permission. Paths in Shortcuts do not use your interactive shell aliases or
 startup files.
 
@@ -399,9 +405,9 @@ to the speech input.
 - macOS Dictation handles the transcript before `llm-now` receives it and may
   use Apple services. Review Apple's Dictation settings and policy for the
   selected mode.
-- A hosted alias sends the accepted question content to its selected provider.
-  Use a suitable local alias for material that should not leave the Mac, and do
-  not dictate sensitive material in an unsuitable setting.
+- A hosted shortcut sends the accepted question content to its selected
+  provider. Use a suitable local shortcut for material that should not leave
+  the Mac, and do not dictate sensitive material in an unsuitable setting.
 - Speech is audible to people and devices nearby.
 - The unified TOML contains plaintext alias targets, optional instructions,
   routing settings, and speech preferences, but never credentials. Migration
