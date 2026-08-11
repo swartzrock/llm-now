@@ -205,7 +205,10 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
 
     async generate(provider, model, prompt, signal, instructions) {
       try {
-        const result = await (await runtime(provider, model)).generateText(
+        signal?.throwIfAborted();
+        const selectedRuntime = await runtime(provider, model);
+        signal?.throwIfAborted();
+        const result = await selectedRuntime.generateText(
           {
             prompt,
             ...(instructions === undefined ? {} : { instructions }),

@@ -19,6 +19,7 @@ import {
   assembleReleaseAssets,
   assertNativeVaultGateTarget,
   runProcess,
+  validateVoiceDependencies,
 } from "../scripts/release-validate.ts";
 
 const temporaryDirectories: string[] = [];
@@ -142,9 +143,65 @@ describe("native release build", () => {
     expect(releaseValidation).toContain('name.toUpperCase() !== "PATH"');
     expect(releaseValidation).toContain("missing-login-shell");
     expect(releaseValidation).not.toContain("process.env.PATH");
+    expect(releaseValidation).toContain("llm-now --voice [--input <text>]");
+    expect(releaseValidation).toContain("non-macOS voice guard before scorer initialization");
+    expect(releaseValidation).toContain("voice: llm-now --voice currently supports macOS only.");
     expect(fakeCli).toContain("unexpected fake CLI instruction configuration");
     expect(fakeCli).toContain("unexpected fake CLI prompt");
     expect(fakeCli).not.toContain("args.join");
+  });
+
+  test("audits the exact embedded voice-routing dependency boundary", async () => {
+    const audit = await validateVoiceDependencies();
+
+    expect(audit.metric).toMatchObject({
+      name: "@3leaps/string-metrics-wasm",
+      version: "0.3.11",
+      integrity: "sha512-An4O6Dd0ZVSn9/xAPJhnLKfMjDvZ5Pa+YuhwnA0gzPRBtRlLkHvYDvi77p/xZORPOKDpm5CVR153NOa1XL/h/w==",
+      license: "MIT",
+      entrypoint: "./dist/index.js",
+      runtimeDependencies: [],
+      lifecycleScripts: ["prepare", "prepublishOnly", "pretest"],
+      installLifecycleScripts: [],
+      publicationLifecycleScripts: ["prepare", "prepublishOnly"],
+      jsImports: [
+        "./wasm.js",
+        "../pkg/web/string_metrics_wasm.js",
+        "./wasm-inline.js",
+      ],
+      standaloneWasmFiles: [],
+      loader: "lazy-embedded-base64-initSync",
+      inactiveGlueNetworkPath: "default async export contains fetch; active wrapper calls initSync only",
+      activeRuntimeAccess: [],
+      wasmImports: [{
+        module: "wbg",
+        name: "__wbindgen_init_externref_table",
+        kind: "function",
+      }],
+    });
+    expect(audit.metric.installedFiles).toContain("dist/wasm-inline.js");
+    expect(audit.metric.installedFiles).not.toContain("pkg/web/string_metrics_wasm_bg.wasm");
+
+    expect(audit.caseFolding).toMatchObject({
+      name: "unicode-case-folding",
+      version: "1.1.1",
+      integrity: "sha512-ZAYziAnMTBisO2dT5tyGvBFMNsIfonOS/BZTd3UZaKWtXMOZqK8s8HRUCrlKxGCTeCxCuCjS/6HW+4a6G+rbzw==",
+      license: "MIT",
+      entrypoint: "index.js",
+      runtimeDependencies: [],
+      lifecycleScripts: [],
+      installLifecycleScripts: [],
+      publicationLifecycleScripts: [],
+      jsImports: [],
+      activeRuntimeAccess: [],
+    });
+    expect(audit.caseFolding.installedFiles).toEqual([
+      "LICENSE",
+      "README.md",
+      "index.js",
+      "package.json",
+      "types.d.ts",
+    ]);
   });
 
   test("creates a deterministic archive containing one executable", () => {
@@ -153,6 +210,7 @@ describe("native release build", () => {
     const second = createExecutableArchive("llm-now", bytes, testArchiveMtime);
     expect(first).toEqual(second);
     expect(unzipSync(first)).toEqual({ "llm-now": bytes });
+    expect(Object.keys(unzipSync(first)).filter((name) => name.endsWith(".wasm"))).toEqual([]);
   });
 
   test("uses SOURCE_DATE_EPOCH for a meaningful reproducible archive date", () => {

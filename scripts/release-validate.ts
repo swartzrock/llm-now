@@ -13,6 +13,188 @@ import {
   extractExecutableArchive,
 } from "./build.ts";
 
+const VOICE_PACKAGES = {
+  metric: {
+    name: "@3leaps/string-metrics-wasm",
+    version: "0.3.11",
+    integrity: "sha512-An4O6Dd0ZVSn9/xAPJhnLKfMjDvZ5Pa+YuhwnA0gzPRBtRlLkHvYDvi77p/xZORPOKDpm5CVR153NOa1XL/h/w==",
+  },
+  caseFolding: {
+    name: "unicode-case-folding",
+    version: "1.1.1",
+    integrity: "sha512-ZAYziAnMTBisO2dT5tyGvBFMNsIfonOS/BZTd3UZaKWtXMOZqK8s8HRUCrlKxGCTeCxCuCjS/6HW+4a6G+rbzw==",
+  },
+} as const;
+
+type PackageManifest = {
+  name?: string;
+  version?: string;
+  license?: string;
+  main?: string;
+  files?: string[];
+  dependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
+  exports?: { "."?: { import?: string } };
+};
+
+async function installedFiles(directory: string): Promise<string[]> {
+  const files: string[] = [];
+  for await (const path of new Bun.Glob("**/*").scan({ cwd: directory, onlyFiles: true })) {
+    files.push(path);
+  }
+  return files.sort();
+}
+
+function jsImports(source: string): string[] {
+  return [...source.matchAll(/\b(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']/g)]
+    .map((match) => match[1]!);
+}
+
+function assertComputationOnly(label: string, sources: readonly string[]): void {
+  const joined = sources.join("\n");
+  const forbidden = [
+    ["network", /\b(?:fetch|WebSocket|XMLHttpRequest)\s*\(/],
+    ["filesystem", /\b(?:Bun\.file|readFile|writeFile|node:fs)\b/],
+    ["child process", /\b(?:Bun\.spawn|child_process|node:child_process)\b/],
+    ["environment", /\b(?:process\.env|Deno\.env)\b/],
+  ] as const;
+  for (const [capability, pattern] of forbidden) {
+    if (pattern.test(joined)) throw new Error(`${label} active entrypoint accesses ${capability}`);
+  }
+}
+
+export async function validateVoiceDependencies() {
+  const root = join(import.meta.dir, "..");
+  const lock = await Bun.file(join(root, "bun.lock")).text();
+  const dependencies = packageMetadata.dependencies as Record<string, string>;
+  for (const expected of Object.values(VOICE_PACKAGES)) {
+    if (dependencies[expected.name] !== expected.version) {
+      throw new Error(`${expected.name} must be exactly pinned to ${expected.version}`);
+    }
+    const lockEntry = `"${expected.name}": ["${expected.name}@${expected.version}", "", {}, "${expected.integrity}"]`;
+    if (!lock.includes(lockEntry)) throw new Error(`${expected.name} lock integrity does not match the audited package`);
+  }
+
+  const metricRoot = join(root, "node_modules", "@3leaps", "string-metrics-wasm");
+  const metricManifest = await Bun.file(join(metricRoot, "package.json")).json() as PackageManifest;
+  if (
+    metricManifest.name !== VOICE_PACKAGES.metric.name
+    || metricManifest.version !== VOICE_PACKAGES.metric.version
+    || metricManifest.license !== "MIT"
+  ) throw new Error("metric package manifest changed");
+  const metricIndex = await Bun.file(join(metricRoot, "dist", "index.js")).text();
+  const metricLoader = await Bun.file(join(metricRoot, "dist", "wasm.js")).text();
+  const metricGlue = await Bun.file(join(metricRoot, "pkg", "web", "string_metrics_wasm.js")).text();
+  const metricInline = await Bun.file(join(metricRoot, "dist", "wasm-inline.js")).text();
+  const metricFiles = await installedFiles(metricRoot);
+  const metricEntrypoint = metricManifest.exports?.["."]?.import;
+  if (metricEntrypoint !== "./dist/index.js") throw new Error("metric package root export changed");
+  const metricRuntimeDependencies = Object.keys(metricManifest.dependencies ?? {}).sort();
+  const metricInstallScripts = ["preinstall", "install", "postinstall"]
+    .filter((name) => metricManifest.scripts?.[name] !== undefined);
+  if (metricRuntimeDependencies.length > 0) throw new Error("metric package gained runtime dependencies");
+  if (metricInstallScripts.length > 0) throw new Error("metric package gained install lifecycle scripts");
+  const metricImports = [...jsImports(metricIndex), ...jsImports(metricLoader)];
+  if (metricImports.join("\n") !== [
+    "./wasm.js",
+    "../pkg/web/string_metrics_wasm.js",
+    "./wasm-inline.js",
+  ].join("\n")) throw new Error("metric package active JavaScript imports changed");
+  if (
+    !metricLoader.includes("const ensureInitialized = () =>")
+    || !metricLoader.includes("glue.initSync")
+    || !metricLoader.includes("WASM_BASE64")
+  ) {
+    throw new Error("metric package must initialize its embedded WASM synchronously");
+  }
+  if (
+    metricLoader.indexOf("const ensureInitialized = () =>") > metricLoader.indexOf("glue.initSync")
+    || metricLoader.indexOf("glue.initSync") > metricLoader.indexOf("export const getWasm = () =>")
+  ) throw new Error("metric package must keep WASM initialization lazy");
+  if ([...metricLoader.matchAll(/\bglue\.([A-Za-z_$][\w$]*)/g)].map((match) => match[1]).join("\n") !== "initSync") {
+    throw new Error("metric package loader must use only the synchronous glue entrypoint");
+  }
+  if (
+    !metricGlue.includes("export { initSync }")
+    || !metricGlue.includes("module_or_path = fetch(module_or_path)")
+  ) throw new Error("metric package WASM glue exports changed");
+  assertComputationOnly("metric package", [metricIndex, metricLoader]);
+  const base64 = metricInline.match(/export const WASM_BASE64 = '([A-Za-z0-9+/=]+)'/)?.[1];
+  if (!base64) throw new Error("metric package embedded WASM payload is missing");
+  const wasmImports = WebAssembly.Module.imports(
+    new WebAssembly.Module(Uint8Array.fromBase64(base64)),
+  ).map(({ module, name, kind }) => ({ module, name, kind }));
+  if (JSON.stringify(wasmImports) !== JSON.stringify([{
+    module: "wbg",
+    name: "__wbindgen_init_externref_table",
+    kind: "function",
+  }])) throw new Error("metric package WASM imports changed");
+  const metricWasmFiles = metricFiles.filter((name) => name.endsWith(".wasm"));
+  if (metricWasmFiles.length > 0) throw new Error("metric package contains a standalone WASM asset");
+  if (!(await Bun.file(join(metricRoot, "LICENSE")).exists())) throw new Error("metric package license file is missing");
+
+  const caseFoldingRoot = join(root, "node_modules", "unicode-case-folding");
+  const caseFoldingManifest = await Bun.file(join(caseFoldingRoot, "package.json")).json() as PackageManifest;
+  if (
+    caseFoldingManifest.name !== VOICE_PACKAGES.caseFolding.name
+    || caseFoldingManifest.version !== VOICE_PACKAGES.caseFolding.version
+    || caseFoldingManifest.license !== "MIT"
+  ) throw new Error("case-folding package manifest changed");
+  const caseFoldingIndex = await Bun.file(join(caseFoldingRoot, "index.js")).text();
+  const caseFoldingFiles = await installedFiles(caseFoldingRoot);
+  const caseFoldingEntrypoint = caseFoldingManifest.main;
+  if (caseFoldingEntrypoint !== "index.js") throw new Error("case-folding package entrypoint changed");
+  const caseFoldingImports = jsImports(caseFoldingIndex);
+  if (caseFoldingImports.length > 0) throw new Error("case-folding package gained JavaScript imports");
+  assertComputationOnly("case-folding package", [caseFoldingIndex]);
+  const caseFoldingRuntimeDependencies = Object.keys(caseFoldingManifest.dependencies ?? {}).sort();
+  const caseFoldingInstallScripts = ["preinstall", "install", "postinstall"]
+    .filter((name) => caseFoldingManifest.scripts?.[name] !== undefined);
+  if (caseFoldingRuntimeDependencies.length > 0) throw new Error("case-folding package gained runtime dependencies");
+  if (caseFoldingInstallScripts.length > 0) throw new Error("case-folding package gained install lifecycle scripts");
+  if (!(await Bun.file(join(caseFoldingRoot, "LICENSE")).exists())) {
+    throw new Error("case-folding package license file is missing");
+  }
+
+  return {
+    metric: {
+      ...VOICE_PACKAGES.metric,
+      license: metricManifest.license,
+      entrypoint: metricEntrypoint,
+      declaredFiles: metricManifest.files ?? [],
+      installedFiles: metricFiles,
+      runtimeDependencies: metricRuntimeDependencies,
+      lifecycleScripts: Object.keys(metricManifest.scripts ?? {})
+        .filter((name) => /^(?:pre|post)/.test(name)).sort(),
+      installLifecycleScripts: metricInstallScripts,
+      publicationLifecycleScripts: ["prepare", "prepublishOnly"]
+        .filter((name) => metricManifest.scripts?.[name] !== undefined),
+      jsImports: metricImports,
+      standaloneWasmFiles: metricWasmFiles,
+      loader: "lazy-embedded-base64-initSync" as const,
+      inactiveGlueNetworkPath: "default async export contains fetch; active wrapper calls initSync only",
+      activeRuntimeAccess: [] as const,
+      wasmImports,
+    },
+    caseFolding: {
+      ...VOICE_PACKAGES.caseFolding,
+      license: caseFoldingManifest.license,
+      entrypoint: caseFoldingEntrypoint,
+      declaredFiles: caseFoldingManifest.files ?? [],
+      installedFiles: caseFoldingFiles,
+      runtimeDependencies: caseFoldingRuntimeDependencies,
+      lifecycleScripts: Object.keys(caseFoldingManifest.scripts ?? {})
+        .filter((name) => /^(?:pre|post)/.test(name)).sort(),
+      installLifecycleScripts: caseFoldingInstallScripts,
+      publicationLifecycleScripts: ["prepare", "prepublishOnly"]
+        .filter((name) => caseFoldingManifest.scripts?.[name] !== undefined),
+      jsImports: caseFoldingImports,
+      standaloneWasmFiles: caseFoldingFiles.filter((name) => name.endsWith(".wasm")),
+      activeRuntimeAccess: [] as const,
+    },
+  };
+}
+
 async function zipFiles(directory: string): Promise<string[]> {
   const names: string[] = [];
   for await (const path of new Bun.Glob("**/*.zip").scan({ cwd: directory, absolute: true, onlyFiles: true })) {
@@ -248,8 +430,15 @@ async function smoke(archivePath: string): Promise<void> {
       ...aliasEnvironment,
     };
     const cases = [
-      { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --input <text>", stderrIncludes: "" },
+      { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --voice [--input <text>]\n  llm-now --input <text>", stderrIncludes: "" },
       { name: "version", args: ["--version"], code: 0, stdout: `${packageMetadata.version}\n`, stderrIncludes: "" },
+      ...(process.platform === "darwin" ? [] : [{
+        name: "non-macOS voice guard before scorer initialization",
+        args: ["--voice", "--input", "smoke"],
+        code: 1,
+        stdout: "",
+        stderr: "voice: llm-now --voice currently supports macOS only.\n",
+      }]),
       { name: "deterministic usage failure", args: ["--input", "smoke"], code: 2, stdout: "", stderrIncludes: "usage: non-interactive calls require" },
       {
         name: "alias inventory",
@@ -309,13 +498,16 @@ async function smoke(archivePath: string): Promise<void> {
 
 async function main(): Promise<void> {
   const [command, ...args] = Bun.argv.slice(2);
-  if (command === "secrets" && args.length === 1) await validateNativeSecrets(args[0]!);
+  if (command === "packages" && args.length === 0) {
+    console.log(JSON.stringify(await validateVoiceDependencies(), null, 2));
+  }
+  else if (command === "secrets" && args.length === 1) await validateNativeSecrets(args[0]!);
   else if (command === "archives" && args[0]) await validateArchives(args[0]);
   else if (command === "assemble" && args[0] && args[1]) {
     await assembleReleaseAssets(args[0], args[1], args.length > 2 ? args.slice(2) : undefined);
   }
   else if (command === "smoke" && args[0]) await smoke(args[0]);
-  else throw new Error("usage: release-validate <secrets TARGET | archives DIR | assemble INPUT OUTPUT [TARGET ...] | smoke ARCHIVE>");
+  else throw new Error("usage: release-validate <packages | secrets TARGET | archives DIR | assemble INPUT OUTPUT [TARGET ...] | smoke ARCHIVE>");
 }
 
 if (import.meta.main) await main();
