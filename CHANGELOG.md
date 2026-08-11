@@ -1,5 +1,26 @@
 # llm-now
 
+## 2.4.0
+
+### Minor Changes
+
+- 44cbe30: Add composable native voice routing and speech. `--voice-route` maps one
+  dictated transcript to a saved alias and question on every supported platform,
+  while macOS-only `--speak` adds concise speech guidance and speaks the validated
+  answer instead of writing it to stdout. They combine for a two-action global
+  Shortcut and `--speak` also works with ordinary alias or provider/model
+  selection. Optional per-alias voice, rate, and validated baseline-pitch
+  settings remain available without Python, uv, a repository checkout, or
+  clipboard mutation. Native input reads the file-backed stdin supplied by macOS
+  Shortcuts directly, without a `/bin/cat` adapter. Retain the locked uv-managed
+  Python example as an independent combined routing and speech oracle for
+  contributors.
+- 40e0b5a: Unify aliases and voice settings in one editable, versioned `config.toml` with
+  cross-platform path discovery, explicit or automatic legacy migration,
+  recoverable backups, sparse canonical rewrites, and configurable voice-routing
+  thresholds. Keep installed execution native and Python-free while retaining the
+  Python voice-router example as an independent contributor parity oracle.
+
 ## 2.3.0
 
 ### Minor Changes
