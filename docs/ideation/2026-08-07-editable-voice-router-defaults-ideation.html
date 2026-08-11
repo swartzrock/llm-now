@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: Editable Voice Router Defaults</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f6f3ec;
+      --surface: #fffdf8;
+      --ink: #18222b;
+      --muted: #5e6b72;
+      --line: #d7d2c7;
+      --navy: #173a4b;
+      --navy-soft: #e3eef1;
+      --mint: #126454;
+      --mint-soft: #dceee8;
+      --amber: #8a5412;
+      --amber-soft: #f4e7cc;
+      --rose: #8e3d43;
+      --rose-soft: #f4e0df;
+      --shadow: 0 14px 38px rgba(24, 34, 43, 0.08);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, rgba(23, 58, 75, 0.055), transparent 28rem),
+        var(--paper);
+      color: var(--ink);
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.62;
+    }
+    code, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    a { color: var(--mint); text-underline-offset: 0.18em; }
+    a:hover { color: var(--navy); }
+    strong { color: inherit; }
+
+    .page {
+      width: min(94vw, 960px);
+      margin: 0 auto;
+      padding: 56px 0 72px;
+    }
+    .hero {
+      padding: 38px 42px;
+      background: var(--navy);
+      color: #f8fbfb;
+      border-radius: 26px;
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 260px;
+      height: 260px;
+      border-radius: 50%;
+      right: -120px;
+      top: -120px;
+      background: rgba(123, 211, 189, 0.15);
+    }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: #bfe4da;
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.18; letter-spacing: -0.025em; }
+    h1 { margin: 0; max-width: 16ch; font-size: clamp(2.25rem, 6vw, 4.35rem); font-weight: 760; }
+    .dek { max-width: 66ch; margin: 22px 0 0; color: #dce9eb; font-size: 1.06rem; }
+    .meta {
+      margin: 28px 0 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      color: #f8fbfb;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      font-size: 0.77rem;
+      font-weight: 700;
+    }
+    .chip b { margin-right: 5px; color: #bfe4da; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0 0;
+    }
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 15px 17px;
+    }
+    .stat strong { display: block; color: var(--navy); font-size: 1.45rem; line-height: 1; }
+    .stat span { display: block; margin-top: 7px; color: var(--muted); font-size: 0.76rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+
+    nav {
+      margin: 20px 0 0;
+      padding: 13px 18px;
+      background: rgba(255, 253, 248, 0.78);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      backdrop-filter: blur(8px);
+    }
+    nav ul { display: flex; flex-wrap: wrap; gap: 8px 18px; list-style: none; margin: 0; padding: 0; }
+    nav a { font-size: 0.86rem; font-weight: 750; text-decoration: none; }
+
+    section { margin-top: 46px; }
+    section > h2 { margin: 0 0 18px; color: var(--navy); font-size: 1.52rem; }
+    .measure { max-width: 72ch; }
+    .callout {
+      padding: 20px 22px;
+      border: 1px solid #bdd8d0;
+      border-radius: var(--radius);
+      background: var(--mint-soft);
+      color: #164b40;
+    }
+    .callout p { margin: 0; max-width: 72ch; }
+    .callout .callout-label {
+      margin-bottom: 6px;
+      color: var(--mint);
+      font-size: 0.74rem;
+      font-weight: 850;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .grounding-grid, .axis-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .grounding-item, .axis {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 17px 18px;
+    }
+    .grounding-item b, .axis b { display: block; color: var(--navy); margin-bottom: 4px; }
+    .grounding-item p, .axis p { margin: 0; color: var(--muted); font-size: 0.93rem; }
+
+    .idea-jumps {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+      margin: 0 0 18px;
+      padding: 0;
+      list-style: none;
+    }
+    .idea-jumps a {
+      display: block;
+      min-height: 100%;
+      padding: 11px 13px;
+      border-radius: 11px;
+      background: var(--navy-soft);
+      color: var(--navy);
+      text-decoration: none;
+      font-size: 0.86rem;
+      font-weight: 750;
+    }
+    .idea-card {
+      margin-top: 18px;
+      padding: 27px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: 0 8px 25px rgba(24, 34, 43, 0.045);
+    }
+    .idea-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .idea-number {
+      display: inline-flex;
+      min-width: 34px;
+      min-height: 34px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: var(--mint-soft);
+      color: var(--mint);
+      font-weight: 850;
+      font-size: 0.9rem;
+    }
+    .idea-title-wrap { display: flex; gap: 13px; align-items: flex-start; }
+    .idea-card h3 { margin: 2px 0 0; color: var(--navy); font-size: 1.28rem; }
+    .score-row { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+    .score {
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: var(--navy-soft);
+      color: var(--navy);
+      font-size: 0.73rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .score.conf { background: var(--mint-soft); color: var(--mint); }
+    .idea-card > p { max-width: 75ch; }
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .field {
+      padding: 14px 15px;
+      border-radius: 12px;
+      background: #f7f5ef;
+      border: 1px solid #e2ded5;
+    }
+    .field dt { color: var(--muted); font-size: 0.69rem; font-weight: 850; letter-spacing: 0.1em; text-transform: uppercase; }
+    .field dd { margin: 5px 0 0; font-size: 0.92rem; }
+    .basis { grid-column: 1 / -1; }
+    .basis .tag { color: var(--mint); font-weight: 850; }
+    .diagram {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 16px;
+      background: #f0f3f1;
+      border: 1px solid #d4dfdb;
+      overflow-x: auto;
+    }
+    .diagram svg { display: block; width: 100%; min-width: 650px; height: auto; }
+    .diagram figcaption { margin-top: 9px; color: var(--muted); font-size: 0.78rem; }
+    .svg-label { font: 700 13px ui-sans-serif, -apple-system, sans-serif; fill: #173a4b; }
+    .svg-small { font: 600 11px ui-sans-serif, -apple-system, sans-serif; fill: #5e6b72; }
+    .svg-arrow { stroke: #126454; stroke-width: 2; fill: none; }
+
+    table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); font-size: 0.88rem; }
+    th, td { text-align: left; vertical-align: top; padding: 11px 12px; border-bottom: 1px solid var(--line); }
+    th { background: var(--navy); color: #f8fbfb; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .reject { color: var(--rose); font-weight: 800; }
+    .fold { color: var(--amber); font-weight: 800; }
+
+    .sources { padding-left: 1.2rem; }
+    .sources li { margin: 7px 0; }
+    footer {
+      margin-top: 54px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    @media (max-width: 720px) {
+      .page { width: min(92vw, 960px); padding-top: 24px; }
+      .hero { padding: 29px 25px; border-radius: 20px; }
+      .stats, .grounding-grid, .axis-grid, .field-grid, .idea-jumps { grid-template-columns: 1fr; }
+      .idea-head { flex-direction: column; }
+      .score-row { justify-content: flex-start; }
+      .basis { grid-column: auto; }
+    }
+    @media print {
+      body { background: #fff; }
+      .page { width: 100%; padding: 0; }
+      .hero, .idea-card { box-shadow: none; }
+      nav { display: none; }
+      .idea-card { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Repo-grounded ideation</p>
+      <h1>Editable Voice Router Defaults</h1>
+      <p class="dek">How llm-now can expose wake words and fuzzy-routing controls without surprising filesystem writes, weakening fail-closed routing, or letting the native and Python implementations drift.</p>
+      <div class="meta" aria-label="Document metadata">
+        <span class="chip"><b>Date</b><time datetime="2026-08-07">2026-08-07</time></span>
+        <span class="chip"><b>Topic</b><span class="mono">editable-voice-router-defaults</span></span>
+        <span class="chip"><b>Focus</b>Editable defaults, materialization, and fallbacks</span>
+        <span class="chip"><b>Mode</b>repo-grounded</span>
+      </div>
+    </header>
+
+    <div class="stats" aria-label="Ideation summary">
+      <div class="stat"><strong>27</strong><span>distinct raw candidates</span></div>
+      <div class="stat"><strong>5</strong><span>ranked directions</span></div>
+      <div class="stat"><strong>4</strong><span>topic axes covered</span></div>
+      <div class="stat"><strong>1</strong><span>recommended lifecycle</span></div>
+    </div>
+
+    <nav aria-label="Document navigation">
+      <ul>
+        <li><a href="#grounding-context">Grounding Context</a></li>
+        <li><a href="#topic-axes">Topic Axes</a></li>
+        <li><a href="#ranked-ideas">Ranked Ideas</a></li>
+        <li><a href="#rejection-summary">Rejection Summary</a></li>
+        <li><a href="#sources">Sources</a></li>
+      </ul>
+    </nav>
+
+    <section id="grounding-context">
+      <h2>Grounding Context</h2>
+      <div class="callout">
+        <p class="callout-label">Codebase Context</p>
+        <p><strong>The values are already defaults, not requirements.</strong> Today the native router embeds <code>hey</code>, minimum fuzzy phrase length <code>4</code>, minimum similarity <code>65</code>, and minimum margin <code>15</code>. A missing TOML file is valid and read-only. The useful design question is therefore not whether compiled fallbacks continue to exist—they must—but how users discover, override, inspect, and deliberately pin them.</p>
+      </div>
+      <div class="grounding-grid" style="margin-top: 14px">
+        <div class="grounding-item"><b>Two implementations</b><p>TypeScript runs natively; the retained Python example is an independent test oracle. Both currently duplicate the four defaults.</p></div>
+        <div class="grounding-item"><b>Closed TOML root</b><p><code>wake_words</code> is special and every other root table is parsed as an alias profile. New global controls need a reserved home.</p></div>
+        <div class="grounding-item"><b>Read-only zero config</b><p>Missing config resolves to working defaults. Ordinary commands do not enter the voice path, and voice config has no writer today.</p></div>
+        <div class="grounding-item"><b>Fail-closed router</b><p>Fuzzy scores are only part of selection. Digit equality, span length, stage order, and ambiguity rejection provide separate guardrails.</p></div>
+        <div class="grounding-item"><b>Durable write precedent</b><p>The alias store already uses explicit user action, restrictive permissions, locking, a temporary file, and atomic rename.</p></div>
+        <div class="grounding-item"><b>Observable evidence exists</b><p>Rejected route results retain best and runner-up scores, but current diagnostics surface only the reason.</p></div>
+      </div>
+    </section>
+
+    <section id="topic-axes">
+      <h2>Topic Axes</h2>
+      <div class="axis-grid">
+        <div class="axis"><b>1. Creation trigger and filesystem ownership</b><p>When is llm-now entitled to create durable user state, and how does the user inspect or opt into it?</p></div>
+        <div class="axis"><b>2. Schema, precedence, and fallback semantics</b><p>Where do global controls live, and what precisely happens when the file or one field is absent?</p></div>
+        <div class="axis"><b>3. Routing tunability and safety feedback</b><p>Which controls are safe to expose, and how can users tune them without guesswork or privacy leakage?</p></div>
+        <div class="axis"><b>4. Compatibility, evolution, and parity</b><p>How do native behavior, the Python oracle, existing files, docs, and release boundaries remain aligned?</p></div>
+      </div>
+    </section>
+
+    <section id="ranked-ideas">
+      <h2>Ranked Ideas</h2>
+      <ol class="idea-jumps">
+        <li><a href="#idea-1">1. Explicit and Observable Voice Configuration</a></li>
+        <li><a href="#idea-2">2. Safe Routing Policy Contract</a></li>
+        <li><a href="#idea-3">3. Rolling Defaults, Optional Pinning</a></li>
+        <li><a href="#idea-4">4. Explain and Replay Before Tuning</a></li>
+        <li><a href="#idea-5">5. Configuration Parity as an Executable Contract</a></li>
+      </ol>
+
+      <article class="idea-card" id="idea-1">
+        <div class="idea-head">
+          <div class="idea-title-wrap"><span class="idea-number">1</span><h3>Explicit and Observable Voice Configuration</h3></div>
+          <div class="score-row"><span class="score conf">Confidence 93%</span><span class="score">Complexity Medium</span></div>
+        </div>
+        <p><strong>Description:</strong> Make configuration a deliberate CLI lifecycle—conceptually <code>voice config init</code>, <code>show</code>, <code>check</code>, and <code>path</code>. Ordinary <code>--voice</code> routing remains side-effect-free. <code>show</code> works even with no file and labels each effective value as a compiled fallback or TOML override; <code>init</code> atomically writes a commented, owner-controlled snapshot after explicit user action.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Axis</dt><dd>Creation trigger and filesystem ownership</dd></div>
+          <div class="field"><dt>Rationale</dt><dd>Users gain discoverability and editability without a file appearing merely because they routed one prompt. The same surface becomes the support contract for path, parsing, and provenance.</dd></div>
+          <div class="field basis"><dt>Basis</dt><dd><span class="tag">direct:</span> missing voice config is currently a valid read-only state, docs assign creation to the user, and the alias store already demonstrates explicit atomic persistence. <span class="tag">external:</span> Ansible and AWS separate configuration initialization and inspection from ordinary execution.</dd></div>
+          <div class="field"><dt>Downsides</dt><dd>Adds a small command surface and a writer. Command naming must fit llm-now's existing CLI grammar rather than forcing a nested shape that feels foreign.</dd></div>
+          <div class="field"><dt>Decision test</dt><dd>Can a user discover every effective value and deliberately create an editable file without normal routing mutating their config directory?</dd></div>
+        </dl>
+        <figure class="diagram">
+          <svg viewBox="0 0 760 210" role="img" aria-label="Explicit configuration lifecycle keeps ordinary voice routing read-only and puts file creation behind init">
+            <defs><marker id="arrow-1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#126454"/></marker></defs>
+            <rect x="18" y="55" width="155" height="72" rx="14" fill="#ffffff" stroke="#9fb6bd"/>
+            <text x="95" y="84" text-anchor="middle" class="svg-label">No TOML file</text>
+            <text x="95" y="105" text-anchor="middle" class="svg-small">valid zero-config state</text>
+            <path d="M173 78 H270" class="svg-arrow" marker-end="url(#arrow-1)"/>
+            <text x="220" y="67" text-anchor="middle" class="svg-small">--voice</text>
+            <rect x="272" y="31" width="202" height="70" rx="14" fill="#dceee8" stroke="#71aa9a"/>
+            <text x="373" y="60" text-anchor="middle" class="svg-label">Use virtual defaults</text>
+            <text x="373" y="81" text-anchor="middle" class="svg-small">no filesystem mutation</text>
+            <path d="M173 111 H270" class="svg-arrow" marker-end="url(#arrow-1)"/>
+            <text x="220" y="142" text-anchor="middle" class="svg-small">config init</text>
+            <rect x="272" y="119" width="202" height="70" rx="14" fill="#f4e7cc" stroke="#c99c57"/>
+            <text x="373" y="148" text-anchor="middle" class="svg-label">Write owned snapshot</text>
+            <text x="373" y="169" text-anchor="middle" class="svg-small">locked + atomic + commented</text>
+            <path d="M474 66 H585" class="svg-arrow" marker-end="url(#arrow-1)"/>
+            <path d="M474 154 H585" class="svg-arrow" marker-end="url(#arrow-1)"/>
+            <rect x="587" y="55" width="155" height="105" rx="14" fill="#e3eef1" stroke="#89a7b4"/>
+            <text x="664" y="87" text-anchor="middle" class="svg-label">config show</text>
+            <text x="664" y="109" text-anchor="middle" class="svg-small">value + provenance</text>
+            <text x="664" y="129" text-anchor="middle" class="svg-small">path + validation</text>
+          </svg>
+          <figcaption>Illustrative lifecycle: execution reads; explicit configuration actions inspect or write.</figcaption>
+        </figure>
+      </article>
+
+      <article class="idea-card" id="idea-2">
+        <div class="idea-head">
+          <div class="idea-title-wrap"><span class="idea-number">2</span><h3>Safe Routing Policy Contract</h3></div>
+          <div class="score-row"><span class="score conf">Confidence 91%</span><span class="score">Complexity Medium</span></div>
+        </div>
+        <p><strong>Description:</strong> Reserve a global <code>[routing]</code> table for <code>min_fuzzy_phrase_length</code>, <code>min_similarity</code>, and <code>min_margin</code>. Validate them as bounded soft controls. Keep digit equality, candidate-span compatibility, route-stage priority, and fail-closed ambiguity behavior as non-overridable invariants. Configuration then changes sensitivity, not the router's fundamental safety model.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Axis</dt><dd>Routing tunability and safety feedback</dd></div>
+          <div class="field"><dt>Rationale</dt><dd>The user can edit the values that actually govern fuzzy acceptance while the product stays honest about which protections are never disabled.</dd></div>
+          <div class="field basis"><dt>Basis</dt><dd><span class="tag">direct:</span> the three values are already coherent fuzzy-policy constants, while digit equality, length compatibility, stage ordering, and ambiguity rejection are separate checks. The closed TOML root requires a reserved namespace to avoid treating a global table as an alias profile.</dd></div>
+          <div class="field"><dt>Downsides</dt><dd>The name <code>routing</code> becomes reserved and may collide with a user's alias of the same name. Bounds need justification and clear validation messages.</dd></div>
+          <div class="field"><dt>Decision test</dt><dd>Can users tune false rejects without gaining a way to bypass guards that prevent costly or wrong-destination requests?</dd></div>
+        </dl>
+        <figure class="diagram">
+          <svg viewBox="0 0 760 230" role="img" aria-label="Hard routing guards surround a bounded fuzzy policy">
+            <defs><marker id="arrow-2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#126454"/></marker></defs>
+            <rect x="22" y="82" width="118" height="66" rx="14" fill="#ffffff" stroke="#9fb6bd"/>
+            <text x="81" y="110" text-anchor="middle" class="svg-label">Candidate</text>
+            <text x="81" y="130" text-anchor="middle" class="svg-small">spoken alias</text>
+            <path d="M140 115 H205" class="svg-arrow" marker-end="url(#arrow-2)"/>
+            <rect x="207" y="28" width="190" height="174" rx="18" fill="#f4e0df" stroke="#c18a8f"/>
+            <text x="302" y="57" text-anchor="middle" class="svg-label">Invariant safety rails</text>
+            <text x="302" y="86" text-anchor="middle" class="svg-small">digits equal</text>
+            <text x="302" y="109" text-anchor="middle" class="svg-small">span lengths compatible</text>
+            <text x="302" y="132" text-anchor="middle" class="svg-small">stage priority preserved</text>
+            <text x="302" y="155" text-anchor="middle" class="svg-small">ambiguity fails closed</text>
+            <text x="302" y="180" text-anchor="middle" class="svg-small">not configurable</text>
+            <path d="M397 115 H462" class="svg-arrow" marker-end="url(#arrow-2)"/>
+            <rect x="464" y="58" width="176" height="114" rx="18" fill="#dceee8" stroke="#71aa9a"/>
+            <text x="552" y="86" text-anchor="middle" class="svg-label">Bounded soft policy</text>
+            <text x="552" y="111" text-anchor="middle" class="svg-small">minimum length</text>
+            <text x="552" y="133" text-anchor="middle" class="svg-small">similarity + margin</text>
+            <text x="552" y="155" text-anchor="middle" class="svg-small">editable in TOML</text>
+            <path d="M640 115 H717" class="svg-arrow" marker-end="url(#arrow-2)"/>
+            <text x="720" y="108" class="svg-label">Route</text>
+            <text x="720" y="128" class="svg-small">or reject</text>
+          </svg>
+          <figcaption>Illustrative policy boundary: configurable sensitivity sits inside invariant guards.</figcaption>
+        </figure>
+      </article>
+
+      <article class="idea-card" id="idea-3">
+        <div class="idea-head">
+          <div class="idea-title-wrap"><span class="idea-number">3</span><h3>Rolling Defaults, Optional Pinning</h3></div>
+          <div class="score-row"><span class="score conf">Confidence 90%</span><span class="score">Complexity Low</span></div>
+        </div>
+        <p><strong>Description:</strong> Define absence as inheritance. With no file—or with one field removed—llm-now uses the current compiled fallback. An explicitly initialized file is a user-owned snapshot of the values written and is never silently refreshed. The template explains “delete this line to inherit the application default”; <code>wake_words = []</code> remains the explicit way to disable stripping.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Axis</dt><dd>Schema, precedence, and removed-field fallback semantics</dd></div>
+          <div class="field"><dt>Rationale</dt><dd>This resolves the tension between safe evolution and reproducibility. Users can follow future defaults, pin today's behavior, or restore one value to inheritance without deleting the rest of their profiles.</dd></div>
+          <div class="field basis"><dt>Basis</dt><dd><span class="tag">direct:</span> missing TOML, omitted <code>wake_words</code>, and omitted speech-profile values already inherit independently. <span class="tag">reasoned:</span> auto-created complete files would otherwise ossify every current default even for users who never intended to customize them.</dd></div>
+          <div class="field"><dt>Downsides</dt><dd>A generated complete snapshot opts users out of future default improvements until they delete fields. Comments and effective-value provenance must make that consequence clear.</dd></div>
+          <div class="field"><dt>Decision test</dt><dd>Is the result deterministic for no file, a complete initialized file, and that same file with any one key removed?</dd></div>
+        </dl>
+        <figure class="diagram">
+          <svg viewBox="0 0 760 205" role="img" aria-label="Rolling inherited defaults contrasted with a pinned user snapshot">
+            <rect x="22" y="25" width="336" height="155" rx="18" fill="#dceee8" stroke="#71aa9a"/>
+            <text x="190" y="56" text-anchor="middle" class="svg-label">Rolling channel</text>
+            <text x="190" y="84" text-anchor="middle" class="svg-small">no file or field removed</text>
+            <text x="190" y="112" text-anchor="middle" class="svg-label">current compiled fallback</text>
+            <text x="190" y="139" text-anchor="middle" class="svg-small">future safe defaults may evolve</text>
+            <rect x="402" y="25" width="336" height="155" rx="18" fill="#f4e7cc" stroke="#c99c57"/>
+            <text x="570" y="56" text-anchor="middle" class="svg-label">Pinned channel</text>
+            <text x="570" y="84" text-anchor="middle" class="svg-small">field explicitly present in TOML</text>
+            <text x="570" y="112" text-anchor="middle" class="svg-label">user-owned snapshot value</text>
+            <text x="570" y="139" text-anchor="middle" class="svg-small">delete one line to rejoin rolling</text>
+          </svg>
+          <figcaption>Illustrative precedence: absence follows the release; presence pins the user's value.</figcaption>
+        </figure>
+      </article>
+
+      <article class="idea-card" id="idea-4">
+        <div class="idea-head">
+          <div class="idea-title-wrap"><span class="idea-number">4</span><h3>Explain and Replay Before Tuning</h3></div>
+          <div class="score-row"><span class="score conf">Confidence 84%</span><span class="score">Complexity Medium</span></div>
+        </div>
+        <p><strong>Description:</strong> Add a local, no-LLM way to evaluate an utterance against the effective configuration. It reports the deciding stage, best and runner-up scores, configured boundaries, and the exact failed gate. Default diagnostics remain privacy-preserving by omitting transcript and question content; an explicit replay input can provide richer local analysis.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Axis</dt><dd>Routing tunability and safety feedback</dd></div>
+          <div class="field"><dt>Rationale</dt><dd>Three editable numbers are otherwise opaque. Explain/replay lets users determine whether length, similarity, margin, digits, or ambiguity rejected a route before they weaken a threshold by guesswork.</dd></div>
+          <div class="field basis"><dt>Basis</dt><dd><span class="tag">direct:</span> route results already retain best and runner-up scores; rejection happens before any LLM request, and current diagnostics discard those score details. <span class="tag">external:</span> sensitivity controls are meaningful only when users can observe their false-positive/false-negative tradeoff.</dd></div>
+          <div class="field"><dt>Downsides</dt><dd>Adds a diagnostic surface and requires careful redaction. It should remain a focused evaluator, not grow into recording, calibration, or telemetry machinery.</dd></div>
+          <div class="field"><dt>Decision test</dt><dd>Can a user explain “why did this almost match?” without submitting a prompt, collecting audio, or exposing the question text in routine diagnostics?</dd></div>
+        </dl>
+      </article>
+
+      <article class="idea-card" id="idea-5">
+        <div class="idea-head">
+          <div class="idea-title-wrap"><span class="idea-number">5</span><h3>Configuration Parity as an Executable Contract</h3></div>
+          <div class="score-row"><span class="score conf">Confidence 92%</span><span class="score">Complexity Medium</span></div>
+        </div>
+        <p><strong>Description:</strong> Expand the shared parity corpus to include configuration state and expected behavior: absent file, each omitted field, explicit thresholds at important boundaries, effective values, route outcomes, scores, and diagnostic categories. Native TypeScript and the retained Python example remain independent consumers of the same behavioral cases; packaged execution stays Python-free.</p>
+        <dl class="field-grid">
+          <div class="field"><dt>Axis</dt><dd>Compatibility, evolution, and native/Python parity</dd></div>
+          <div class="field"><dt>Rationale</dt><dd>Every newly editable value creates another drift opportunity. Shared cases protect semantics without making the Python example a runtime dependency or forcing both implementations to import one generated defaults module.</dd></div>
+          <div class="field basis"><dt>Basis</dt><dd><span class="tag">direct:</span> both suites already consume one language-neutral routing corpus, including scores and offsets, while release-policy tests explicitly keep Python out of native jobs. Configuration cases extend an established contract rather than introducing a new dependency.</dd></div>
+          <div class="field"><dt>Downsides</dt><dd>The corpus grows and must distinguish parser-specific validation from cross-language behavior. Over-sharing implementation data would weaken the oracle's independence.</dd></div>
+          <div class="field"><dt>Decision test</dt><dd>Could a default, omission rule, or threshold boundary change in TypeScript while the Python oracle still passes? If so, the contract is incomplete.</dd></div>
+        </dl>
+        <figure class="diagram">
+          <svg viewBox="0 0 760 210" role="img" aria-label="Shared behavioral cases feed independent native and Python implementations">
+            <defs><marker id="arrow-5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#126454"/></marker></defs>
+            <rect x="22" y="58" width="220" height="96" rx="16" fill="#e3eef1" stroke="#89a7b4"/>
+            <text x="132" y="86" text-anchor="middle" class="svg-label">Shared behavior cases</text>
+            <text x="132" y="110" text-anchor="middle" class="svg-small">absence · omission · bounds</text>
+            <text x="132" y="132" text-anchor="middle" class="svg-small">routes · scores · diagnostics</text>
+            <path d="M242 83 H350" class="svg-arrow" marker-end="url(#arrow-5)"/>
+            <path d="M242 129 H350" class="svg-arrow" marker-end="url(#arrow-5)"/>
+            <rect x="352" y="31" width="180" height="67" rx="14" fill="#dceee8" stroke="#71aa9a"/>
+            <text x="442" y="60" text-anchor="middle" class="svg-label">Native TypeScript</text>
+            <text x="442" y="81" text-anchor="middle" class="svg-small">production behavior</text>
+            <rect x="352" y="116" width="180" height="67" rx="14" fill="#f4e7cc" stroke="#c99c57"/>
+            <text x="442" y="145" text-anchor="middle" class="svg-label">Python example</text>
+            <text x="442" y="166" text-anchor="middle" class="svg-small">independent oracle</text>
+            <path d="M532 65 H638" class="svg-arrow" marker-end="url(#arrow-5)"/>
+            <path d="M532 149 H638" class="svg-arrow" marker-end="url(#arrow-5)"/>
+            <rect x="640" y="62" width="98" height="90" rx="14" fill="#ffffff" stroke="#9fb6bd"/>
+            <text x="689" y="94" text-anchor="middle" class="svg-label">Same</text>
+            <text x="689" y="116" text-anchor="middle" class="svg-label">outcomes</text>
+            <text x="689" y="138" text-anchor="middle" class="svg-small">no runtime link</text>
+          </svg>
+          <figcaption>Illustrative contract: shared expectations, independent implementations, Python-free release execution.</figcaption>
+        </figure>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <h2>Rejection Summary</h2>
+      <p class="measure">The cut is intentionally skeptical. Useful implementation details were folded into stronger directions; larger workflows were rejected when the codebase did not demonstrate enough need.</p>
+      <table>
+        <thead><tr><th>Candidate</th><th>Disposition</th><th>Reason</th></tr></thead>
+        <tbody>
+          <tr><td>Automatic first-voice-use creation</td><td class="reject">Rejected</td><td>Implicit mutation conflicts with current manual ownership and explicit-save precedent; a stateful-daemon analogy does not justify it for a one-shot CLI.</td></tr>
+          <tr><td><code>--materialize-config</code> during routing</td><td class="reject">Rejected</td><td>Narrower duplicate of explicit initialization that mixes configuration work with execution.</td></tr>
+          <tr><td>Freeze current behavior</td><td class="fold">Folded</td><td>The rolling-versus-pinned contract captures the value without requiring a separate verb yet.</td></tr>
+          <tr><td>Template to stdout as the whole solution</td><td class="reject">Rejected</td><td>Useful affordance, but below the meeting-test by itself; it fits inside the explicit lifecycle.</td></tr>
+          <tr><td>Caller-prebound alias</td><td class="reject">Rejected</td><td>Replaces the routing subject and conflicts with the settled <code>--voice</code>/<code>--alias</code> boundary.</td></tr>
+          <tr><td>Sparse overrides plus provenance</td><td class="fold">Folded</td><td>Became part of Explicit and Observable Voice Configuration.</td></tr>
+          <tr><td>Materialized baseline boundary</td><td class="fold">Folded</td><td>Became Rolling Defaults, Optional Pinning.</td></tr>
+          <tr><td>Commented deletion inheritance</td><td class="fold">Folded</td><td>Kept as an important template behavior, not a standalone direction.</td></tr>
+          <tr><td>Reserved <code>[routing]</code> table</td><td class="fold">Folded</td><td>Became the schema half of the Safe Routing Policy Contract.</td></tr>
+          <tr><td>Versioned router/profile envelope</td><td class="reject">Rejected</td><td>Rewrites the deliberately flat schema without evidence that three editable thresholds require migration now.</td></tr>
+          <tr><td>Absence as a rolling channel</td><td class="fold">Folded</td><td>Became the central inheritance rule of Rolling Defaults, Optional Pinning.</td></tr>
+          <tr><td>Wake words as an optional adapter</td><td class="reject">Rejected</td><td>Explicit empty-list behavior is already implemented and documented; no new product move remains.</td></tr>
+          <tr><td>Single defaults manifest</td><td class="reject">Rejected</td><td>Centralizing both languages risks weakening the Python oracle's independence; shared behavioral cases provide safer leverage.</td></tr>
+          <tr><td>Hard rails around soft knobs</td><td class="fold">Folded</td><td>Became the safety half of the Safe Routing Policy Contract.</td></tr>
+          <tr><td>Named strict/balanced/forgiving postures</td><td class="reject">Rejected</td><td>Uncalibrated labels could imply unsupported safety guarantees and obscure the actual values users asked to control.</td></tr>
+          <tr><td>Rejection receipts</td><td class="fold">Folded</td><td>Combined with local replay so feedback has a concrete, privacy-preserving use.</td></tr>
+          <tr><td>Speaker-specific calibration</td><td class="reject">Rejected</td><td>Requires a new labeled-audio workflow absent from the repository and is disproportionate to editing three controls.</td></tr>
+          <tr><td>Shadow routing before promotion</td><td class="reject">Rejected</td><td>Assumes observation and promotion machinery that a one-shot local CLI does not have.</td></tr>
+          <tr><td>Alias-level routing contracts</td><td class="reject">Rejected</td><td>Plausible, but unsupported by observed pain and well beyond the requested global defaults.</td></tr>
+          <tr><td>Named policy envelope</td><td class="fold">Folded</td><td>Validation belongs inside the stronger safe-policy direction.</td></tr>
+          <tr><td>Config doctor</td><td class="fold">Folded</td><td>The useful validation surface became the explicit lifecycle's <code>check</code> action.</td></tr>
+          <tr><td>Version persisted files only on write</td><td class="reject">Rejected</td><td>Defensible later, but conditional on an unproven schema migration and not required for the first editable controls.</td></tr>
+          <tr><td>Exact generated-template oracle</td><td class="reject">Rejected</td><td>Implementation detail below the meeting-test and unnecessarily couples the independent oracle to the writer.</td></tr>
+          <tr><td>Read-compatibility / explicit-write migration</td><td class="reject">Rejected</td><td>Duplicates premature versioning variants and lacks a concrete compatibility rule.</td></tr>
+          <tr><td>Broad defaults/template/parity bundle</td><td class="reject">Rejected</td><td>Expanded parity is sound; a generated source of truth is not necessary and would over-couple the implementations.</td></tr>
+          <tr><td>Calibration + shadow-evaluation bundle</td><td class="reject">Rejected</td><td>Provenance and replay survive, but calibration and shadow machinery overrun the scope.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="sources">
+      <h2>Sources</h2>
+      <ul class="sources">
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/voice-routing.ts">Native voice-routing policy and TOML parsing</a></li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/voice.ts">Voice invocation and rejection diagnostics</a></li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/aliases.ts">Explicit, locked, atomic alias persistence pattern</a></li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/examples/macos-voice-router/src/llm_now_voice/cli.py">Retained Python reference implementation</a></li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/tests/voice-routing.test.ts">Native routing and parity tests</a></li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/examples/macos-voice-shortcut.md">Current voice-router configuration guide</a></li>
+        <li><a href="https://docs.ansible.com/ansible/latest/cli/ansible-config.html">Ansible configuration initialization and inspection prior art</a></li>
+        <li><a href="https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html">AWS CLI configuration and provenance prior art</a></li>
+      </ul>
+    </section>
+
+    <footer class="composition-signal">Composed <time datetime="2026-08-07T00:00:00-07:00">2026-08-07</time> by <code>ce-ideate</code> from the user's editable voice-router defaults prompt and the llm-now repository.</footer>
+  </main>
+</body>
+</html>

@@ -2,7 +2,8 @@ import { BYOK_API_KEY_ENV_VARS, type ByokEnvironment } from "@swartzrock/byok-ru
 import { caseFold } from "unicode-case-folding";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import type { AliasDocument } from "./aliases.ts";
+import type { AliasRecord } from "./aliases.ts";
+import type { ConfigSnapshot } from "./config.ts";
 import {
   createSensitiveValueRegistry,
   type SensitiveValueRegistry,
@@ -12,18 +13,15 @@ import { stripTerminalSequences } from "./prompts.ts";
 import type { RuntimeGateway } from "./runtime.ts";
 import {
   formatTrustedPitchCommand,
-  parseVoiceConfig,
   parseVoiceInventory,
-  resolveVoiceConfigPath,
   routeTranscript,
   validateSpeechAnswer,
+  type VoiceConfig,
 } from "./voice-routing.ts";
 
 const SAY = "/usr/bin/say";
-const PBCOPY = "/usr/bin/pbcopy";
 const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
 const DEFAULT_INVENTORY_TIMEOUT_MS = 5_000;
-const DEFAULT_CLIPBOARD_TIMEOUT_MS = 5_000;
 const DEFAULT_SPEECH_TIMEOUT_MS = 120_000;
 const DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS = 500;
 const FORCE_KILL_DELAY_MS = 250;
@@ -32,8 +30,6 @@ export const RETRY_NOTICE = "I couldn't match an alias and question. Please try 
 export const REQUEST_FAILED_NOTICE = "The request failed. Please try again.";
 export const CONFIG_FAILED_NOTICE =
   "The voice router needs attention. Check the Shortcut result.";
-export const COPY_FAILED_NOTICE =
-  "I couldn't copy the answer. Check the Shortcut result.";
 export const CREATE_ALIAS_NOTICE = "No aliases are configured. Create an alias and try again.";
 export const VOICE_PROMPT =
   "Answer concisely in plain text suitable for speech. Do not use Markdown or code fences unless the question requires code.";
@@ -69,7 +65,7 @@ export function installVoiceCancellation(
 }
 
 export interface VoiceProcessRequest {
-  readonly executable: typeof SAY | typeof PBCOPY;
+  readonly executable: typeof SAY;
   readonly args: readonly string[];
   readonly stdin: Uint8Array;
   readonly env: ByokEnvironment;
@@ -225,39 +221,26 @@ export interface VoiceDependencies {
   readonly runtime: RuntimeGateway;
   readonly sensitive: SensitiveValueRegistry;
   readonly env: ByokEnvironment;
-  readonly home: string;
-  readonly aliasPath: string;
-  readonly loadAliases: (path: string) => Promise<AliasDocument>;
-  readonly readConfig?: (path: string) => Promise<Uint8Array | null>;
+  readonly snapshot: ConfigSnapshot;
   readonly runner: VoiceProcessRunner;
   readonly signal: AbortSignal;
   readonly diagnostic: (detail: string) => void;
   readonly generationTimeoutMs?: number;
   readonly generationCleanupTimeoutMs?: number;
   readonly inventoryTimeoutMs?: number;
-  readonly clipboardTimeoutMs?: number;
   readonly speechTimeoutMs?: number;
 }
 
 export type VoiceExitCode = 0 | 1 | 130;
 
-async function readVoiceConfig(path: string): Promise<Uint8Array | null> {
-  try {
-    return new Uint8Array(await Bun.file(path).arrayBuffer());
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-function strictUtf8(value: Uint8Array): string {
-  return new TextDecoder("utf-8", { fatal: true }).decode(value);
-}
-
 function filteredEnvironment(env: ByokEnvironment): ByokEnvironment {
   const filtered = { ...env };
   for (const name of BYOK_API_KEY_ENV_VARS) delete filtered[name];
   return filtered;
+}
+
+function strictUtf8(value: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(value);
 }
 
 function redactionVariants(value: string): readonly string[] {
@@ -301,7 +284,6 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
   const generationCleanupTimeoutMs = deps.generationCleanupTimeoutMs
     ?? DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS;
   const inventoryTimeoutMs = deps.inventoryTimeoutMs ?? DEFAULT_INVENTORY_TIMEOUT_MS;
-  const clipboardTimeoutMs = deps.clipboardTimeoutMs ?? DEFAULT_CLIPBOARD_TIMEOUT_MS;
   const speechTimeoutMs = deps.speechTimeoutMs ?? DEFAULT_SPEECH_TIMEOUT_MS;
   let cancellationReported = false;
 
@@ -320,7 +302,7 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
     return 130;
   };
   const runChild = async (
-    executable: typeof SAY | typeof PBCOPY,
+    executable: typeof SAY,
     args: readonly string[],
     stdin: Uint8Array,
     timeoutMs: number,
@@ -386,51 +368,20 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
   if (deps.signal.aborted) return cancelled();
   if (!sayAvailable) return await configFailure("required executable is unavailable: /usr/bin/say", false);
 
-  let copyAvailable = false;
-  try {
-    copyAvailable = await deps.runner.isExecutable(PBCOPY);
-  } catch (error) {
-    return await configFailure(error, true);
-  }
-  if (deps.signal.aborted) return cancelled();
-  if (!copyAvailable) {
-    return await configFailure("required executable is unavailable: /usr/bin/pbcopy", true);
-  }
-
   if (invalidTranscript !== undefined) {
     diagnostic("voice input rejected", invalidTranscript);
     return await speakNotice(RETRY_NOTICE, 0);
   }
 
-  let configText: string | null;
-  try {
-    const path = resolveVoiceConfigPath(deps.home, deps.env.XDG_CONFIG_HOME);
-    const configBytes = await (deps.readConfig ?? readVoiceConfig)(path);
-    configText = configBytes === null ? null : strictUtf8(configBytes);
-  } catch (error) {
-    return await configFailure(error, true);
-  }
-  if (deps.signal.aborted) return cancelled();
+  const aliases: Readonly<Record<string, AliasRecord>> = deps.snapshot.aliases;
+  const config: VoiceConfig = deps.snapshot.voice;
 
-  let document: AliasDocument;
-  try {
-    document = await deps.loadAliases(deps.aliasPath);
-  } catch (error) {
-    return await configFailure(error, true);
-  }
-  if (deps.signal.aborted) return cancelled();
-  const aliasNames = Object.keys(document.aliases);
+  const aliasNames = Object.keys(aliases);
   if (aliasNames.length === 0) {
     diagnostic("voice alias store is empty");
     return await speakNotice(CREATE_ALIAS_NOTICE, 1);
   }
 
-  let config;
-  try {
-    config = parseVoiceConfig(configText, aliasNames);
-  } catch (error) {
-    return await configFailure(error, true);
-  }
   if (deps.signal.aborted) return cancelled();
 
   const route = routeTranscript(transcript, aliasNames, config);
@@ -438,7 +389,7 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
     diagnostic("voice request rejected", route.reason);
     return await speakNotice(RETRY_NOTICE, 0);
   }
-  const selection = document.aliases[route.alias];
+  const selection = aliases[route.alias];
   if (selection === undefined) {
     return await configFailure("selected alias is missing from the loaded snapshot", true);
   }
@@ -533,14 +484,6 @@ export async function runVoice(deps: VoiceDependencies): Promise<VoiceExitCode> 
   ) {
     diagnostic("voice generation returned credential-bearing text");
     return await speakNotice(REQUEST_FAILED_NOTICE, 0);
-  }
-
-  const answerBytes = new TextEncoder().encode(answer);
-  const copy = await runChild(PBCOPY, [], answerBytes, clipboardTimeoutMs);
-  if (deps.signal.aborted || copy.kind === "cancelled") return cancelled();
-  if (copy.kind !== "completed") {
-    diagnostic(`voice clipboard ${copy.kind}`, childDetail(copy));
-    return await speakNotice(COPY_FAILED_NOTICE, 1);
   }
 
   const speechPrefix = profile?.pitch === undefined

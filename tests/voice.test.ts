@@ -1,15 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { BYOK_API_KEY_ENV_VARS, type ByokEnvironment } from "@swartzrock/byok-runtime";
 import type { AliasDocument } from "../src/aliases.ts";
+import type { ConfigSnapshot } from "../src/config.ts";
 import { createSensitiveValueRegistry } from "../src/credentials.ts";
 import type { PromptInput } from "../src/io.ts";
 import type { RuntimeGateway } from "../src/runtime.ts";
 import {
   CONFIG_FAILED_NOTICE,
-  COPY_FAILED_NOTICE,
   CREATE_ALIAS_NOTICE,
   REQUEST_FAILED_NOTICE,
   RETRY_NOTICE,
+  VOICE_PROMPT,
   createBunVoiceProcessRunner,
   installVoiceCancellation,
   runVoice,
@@ -17,6 +18,7 @@ import {
   type VoiceProcessRequest,
   type VoiceProcessRunner,
 } from "../src/voice.ts";
+import { parseVoiceConfig } from "../src/voice-routing.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -41,7 +43,7 @@ function completed(stdout = "", stderr = ""): VoiceProcessOutcome {
 class FakeRunner implements VoiceProcessRunner {
   readonly accesses: string[] = [];
   readonly requests: VoiceProcessRequest[] = [];
-  available = new Set(["/usr/bin/say", "/usr/bin/pbcopy"]);
+  available = new Set(["/usr/bin/say"]);
   outcomes: VoiceProcessOutcome[] = [];
   onAccess?: (path: string) => void;
   onRun?: (request: VoiceProcessRequest, index: number) => void;
@@ -73,16 +75,13 @@ interface HarnessOptions {
   generationTimeoutMs?: number;
   generationCleanupTimeoutMs?: number;
   sensitiveValues?: readonly string[];
-  onReadConfig?: () => void;
-  onLoadAliases?: () => void;
+  snapshot?: ConfigSnapshot;
 }
 
 function harness(options: HarnessOptions = {}) {
   const runner = options.runner ?? new FakeRunner();
   const operations: string[] = [];
   const diagnostics: string[] = [];
-  let aliasLoads = 0;
-  let configReads = 0;
   const runtimeCalls: Parameters<RuntimeGateway["generate"]>[] = [];
   const aliases = options.aliases ?? {
     version: 2,
@@ -111,14 +110,25 @@ function harness(options: HarnessOptions = {}) {
     operations.push(`${request.executable}${request.args.length ? ` ${request.args.join(" ")}` : ""}`);
     return originalRun(request);
   };
+  const configText = options.config === null || options.config === undefined
+    ? null
+    : typeof options.config === "string"
+    ? options.config
+    : new TextDecoder("utf-8", { fatal: true }).decode(options.config);
+  const snapshot = options.snapshot ?? Object.freeze({
+    authority: "legacy" as const,
+    document: null,
+    aliases: Object.freeze({ ...aliases.aliases }),
+    voice: parseVoiceConfig(configText, Object.keys(aliases.aliases)),
+  });
 
   return {
     runner,
     operations,
     diagnostics,
     runtimeCalls,
-    aliasLoads: () => aliasLoads,
-    configReads: () => configReads,
+    aliasLoads: () => 0,
+    configReads: () => 0,
     run: () => runVoice({
       inputFlag: options.inputFlag,
       stdin: options.stdin
@@ -126,21 +136,7 @@ function harness(options: HarnessOptions = {}) {
       runtime,
       sensitive: createSensitiveValueRegistry(options.sensitiveValues),
       env: options.env ?? {},
-      home: "/Users/test",
-      aliasPath: "/config/aliases.json",
-      loadAliases: async () => {
-        operations.push("load aliases");
-        aliasLoads += 1;
-        options.onLoadAliases?.();
-        return aliases;
-      },
-      readConfig: async (path) => {
-        operations.push(`read config ${path}`);
-        configReads += 1;
-        options.onReadConfig?.();
-        if (options.config === null || options.config === undefined) return null;
-        return typeof options.config === "string" ? encoder.encode(options.config) : options.config;
-      },
+      snapshot,
       runner,
       signal: options.signal ?? new AbortController().signal,
       diagnostic: (detail) => diagnostics.push(detail),
@@ -151,7 +147,34 @@ function harness(options: HarnessOptions = {}) {
 }
 
 describe("native voice coordinator", () => {
-  test("loads one snapshot, generates once, copies exact answer, then speaks configured bytes", async () => {
+  test("uses a provided immutable snapshot once with configurable fuzzy thresholds", async () => {
+    const snapshot: ConfigSnapshot = Object.freeze({
+      authority: "legacy",
+      document: null,
+      aliases: Object.freeze({
+        ai: Object.freeze({ provider: "ollama", model: "snapshot-model" }),
+      }),
+      voice: Object.freeze({
+        wakeWords: Object.freeze(["hey"]),
+        minFuzzyPhraseLength: 2,
+        minSimilarity: 0,
+        minMargin: 0,
+        profiles: Object.freeze({}),
+      }),
+    });
+    const app = harness({ transcript: "aj question", snapshot });
+
+    expect(await app.run()).toBe(0);
+    expect(app.aliasLoads()).toBe(0);
+    expect(app.configReads()).toBe(0);
+    expect(app.runtimeCalls[0]?.slice(0, 3)).toEqual([
+      "ollama",
+      "snapshot-model",
+      `${VOICE_PROMPT}\n\nquestion`,
+    ]);
+  });
+
+  test("loads one snapshot, generates once, then speaks configured bytes", async () => {
     const secrets = Object.fromEntries(
       BYOK_API_KEY_ENV_VARS.map((name) => [name, `${name}-secret`]),
     );
@@ -159,19 +182,18 @@ describe("native voice coordinator", () => {
     runner.outcomes = [
       completed("Samantha en_US    # Hello\n"),
       completed(),
-      completed(),
     ];
     const app = harness({
       transcript: "Tara, keep punctuation?!",
-      config: "[terra]\nmatch_phrases = ['tara']\nvoice = 'samantha'\nrate = 205\npitch = 50\n",
+      config: "[terra]\nspoken_names = ['tara']\nvoice = 'samantha'\nrate = 205\npitch = 50\n",
       answer: "-v --flag '$HOME'\nsecond line",
       env: { ...secrets, PATH: "/trusted/path", ORDINARY: "kept" },
       runner,
     });
 
     expect(await app.run()).toBe(0);
-    expect(app.aliasLoads()).toBe(1);
-    expect(app.configReads()).toBe(1);
+    expect(app.aliasLoads()).toBe(0);
+    expect(app.configReads()).toBe(0);
     expect(app.runtimeCalls).toHaveLength(1);
     expect(app.runtimeCalls[0]?.slice(0, 3)).toEqual([
       "openai",
@@ -181,14 +203,11 @@ describe("native voice coordinator", () => {
     expect(app.runtimeCalls[0]?.[3]).toBeInstanceOf(AbortSignal);
     expect(app.runtimeCalls[0]?.[4]).toBeUndefined();
     expect(app.operations).toEqual([
-      "read config /Users/test/.config/llm-now/voice-router.toml",
-      "load aliases",
       "/usr/bin/say -v ?",
       "generate",
-      "/usr/bin/pbcopy",
       "/usr/bin/say -v Samantha -r 205",
     ]);
-    expect(runner.accesses).toEqual(["/usr/bin/say", "/usr/bin/pbcopy"]);
+    expect(runner.accesses).toEqual(["/usr/bin/say"]);
     expect(runner.requests.map((request) => [
       request.executable,
       request.args,
@@ -196,7 +215,6 @@ describe("native voice coordinator", () => {
       request.timeoutMs,
     ])).toEqual([
       ["/usr/bin/say", ["-v", "?"], "", 5_000],
-      ["/usr/bin/pbcopy", [], "-v --flag '$HOME'\nsecond line", 5_000],
       ["/usr/bin/say", ["-v", "Samantha", "-r", "205"], "[[pbas 50]]-v --flag '$HOME'\nsecond line", 120_000],
     ]);
     for (const request of runner.requests) {
@@ -212,7 +230,7 @@ describe("native voice coordinator", () => {
 
     expect(await app.run()).toBe(0);
     expect(app.runtimeCalls[0]?.[4]).toBe("Keep the saved instructions unchanged.\nEven here.");
-    expect(app.aliasLoads()).toBe(1);
+    expect(app.aliasLoads()).toBe(0);
   });
 
   test("maps rejected and invalid UTF-8 transcripts to the unconfigured retry notice", async () => {
@@ -244,19 +262,11 @@ describe("native voice coordinator", () => {
     expect(app.runtimeCalls).toHaveLength(0);
   });
 
-  test("maps config, generation, clipboard, and answer-speech failures to stable outcomes", async () => {
-    for (const config of ["[haiku]\npitch = 500\n", Uint8Array.of(0xff)]) {
-      const malformed = harness({ config });
-      expect(await malformed.run()).toBe(1);
-      expect(decoder.decode(malformed.runner.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
-    }
-
+  test("maps config, generation, and answer-speech failures to stable outcomes", async () => {
     for (const answer of ["", "unsafe [[slnc 100]]", "unsafe\x1b[31m", "unsafe\x00text"]) {
       const app = harness({ answer });
       expect(await app.run()).toBe(0);
       expect(decoder.decode(app.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
-      expect(app.runner.requests.some((request) => request.executable === "/usr/bin/pbcopy"))
-        .toBeFalse();
     }
 
     const generation = harness({
@@ -267,21 +277,11 @@ describe("native voice coordinator", () => {
     expect(await generation.run()).toBe(0);
     expect(decoder.decode(generation.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
 
-    const copyRunner = new FakeRunner();
-    copyRunner.outcomes = [{ kind: "failed", detail: "copy failed" }, completed()];
-    const copy = harness({ runner: copyRunner });
-    expect(await copy.run()).toBe(1);
-    expect(copy.runner.requests.map((request) => request.executable)).toEqual([
-      "/usr/bin/pbcopy",
-      "/usr/bin/say",
-    ]);
-    expect(decoder.decode(copy.runner.requests.at(-1)?.stdin)).toBe(COPY_FAILED_NOTICE);
-
     const speechRunner = new FakeRunner();
-    speechRunner.outcomes = [completed(), { kind: "failed", detail: "speech failed" }];
+    speechRunner.outcomes = [{ kind: "failed", detail: "speech failed" }];
     const speech = harness({ runner: speechRunner });
     expect(await speech.run()).toBe(1);
-    expect(speech.runner.requests).toHaveLength(2);
+    expect(speech.runner.requests).toHaveLength(1);
     expect(decoder.decode(speech.runner.requests[0]?.stdin)).toBe("-v --flag '$HOME'\nsecond line");
   });
 
@@ -291,12 +291,6 @@ describe("native voice coordinator", () => {
     const unavailableSay = harness({ runner: missingSay });
     expect(await unavailableSay.run()).toBe(1);
     expect(missingSay.requests).toEqual([]);
-
-    const missingCopy = new FakeRunner();
-    missingCopy.available.delete("/usr/bin/pbcopy");
-    const unavailableCopy = harness({ runner: missingCopy });
-    expect(await unavailableCopy.run()).toBe(1);
-    expect(decoder.decode(missingCopy.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
 
     const voices = new FakeRunner();
     voices.outcomes = [completed("Alex en_US    # Hello\n"), completed()];
@@ -322,8 +316,8 @@ describe("native voice coordinator", () => {
     expect(decoder.decode(inventoryTimeout.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
 
     const relativeConfig = harness({ env: { XDG_CONFIG_HOME: "relative" } });
-    expect(await relativeConfig.run()).toBe(1);
-    expect(decoder.decode(relativeConfig.runner.requests.at(-1)?.stdin)).toBe(CONFIG_FAILED_NOTICE);
+    expect(await relativeConfig.run()).toBe(0);
+    expect(relativeConfig.diagnostics).toEqual([]);
   });
 
   test("keeps request payload sentinels and child credentials out of diagnostics and notices", async () => {
@@ -344,7 +338,7 @@ describe("native voice coordinator", () => {
       "\u001b[31mcontrol\u0000",
     ].join(" | ");
     const runner = new FakeRunner();
-    runner.outcomes = [completed(), { kind: "failed", detail }];
+    runner.outcomes = [{ kind: "failed", detail }];
     const app = harness({
       transcript,
       answer,
@@ -381,7 +375,7 @@ describe("native voice coordinator", () => {
     expect(decoder.decode(app.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
   });
 
-  test("withholds registered credentials before clipboard and answer speech", async () => {
+  test("withholds registered credentials before answer speech", async () => {
     const app = harness({
       answer: "Never expose registered-secret in an answer.",
       sensitiveValues: ["registered-secret"],
@@ -440,20 +434,14 @@ describe("native voice coordinator", () => {
     expect(duringGeneration.runner.requests).toEqual([]);
     expect(duringGeneration.diagnostics).toEqual(["voice request cancelled"]);
 
-    for (const cancelledExecutable of ["/usr/bin/pbcopy", "/usr/bin/say"] as const) {
-      const root = new AbortController();
-      const runner = new FakeRunner();
-      runner.onRun = (request) => {
-        if (request.executable === cancelledExecutable) root.abort();
-      };
-      runner.outcomes = cancelledExecutable === "/usr/bin/pbcopy"
-        ? [{ kind: "cancelled" }]
-        : [completed(), { kind: "cancelled" }];
-      const app = harness({ runner, signal: root.signal });
-      expect(await app.run()).toBe(130);
-      expect(app.diagnostics).toEqual(["voice request cancelled"]);
-      expect(runner.requests.at(-1)?.executable).toBe(cancelledExecutable);
-    }
+    const speech = new AbortController();
+    const speechRunner = new FakeRunner();
+    speechRunner.onRun = () => speech.abort();
+    speechRunner.outcomes = [{ kind: "cancelled" }];
+    const duringSpeech = harness({ runner: speechRunner, signal: speech.signal });
+    expect(await duringSpeech.run()).toBe(130);
+    expect(duringSpeech.diagnostics).toEqual(["voice request cancelled"]);
+    expect(speechRunner.requests.at(-1)?.executable).toBe("/usr/bin/say");
   });
 
   test("external cancellation during setup and voice inventory suppresses every notice", async () => {
@@ -462,16 +450,6 @@ describe("native voice coordinator", () => {
         runner.onAccess = () => root.abort();
         return { runner, signal: root.signal };
       },
-      (root, runner) => ({
-        runner,
-        signal: root.signal,
-        onReadConfig: () => root.abort(),
-      }),
-      (root, runner) => ({
-        runner,
-        signal: root.signal,
-        onLoadAliases: () => root.abort(),
-      }),
       (root, runner) => {
         runner.onRun = () => root.abort();
         runner.outcomes = [{ kind: "cancelled" }];
@@ -506,11 +484,11 @@ describe("native voice coordinator", () => {
     expect(await generation.run()).toBe(0);
     expect(decoder.decode(generation.runner.requests.at(-1)?.stdin)).toBe(REQUEST_FAILED_NOTICE);
 
-    const timedOutCopy = new FakeRunner();
-    timedOutCopy.outcomes = [{ kind: "timed_out", detail: "clipboard deadline" }, completed()];
-    const copy = harness({ runner: timedOutCopy });
-    expect(await copy.run()).toBe(1);
-    expect(decoder.decode(timedOutCopy.requests.at(-1)?.stdin)).toBe(COPY_FAILED_NOTICE);
+    const timedOutSpeech = new FakeRunner();
+    timedOutSpeech.outcomes = [{ kind: "timed_out", detail: "speech deadline" }];
+    const speech = harness({ runner: timedOutSpeech });
+    expect(await speech.run()).toBe(1);
+    expect(speech.diagnostics).toEqual(["voice answer speech timed_out: speech deadline"]);
   });
 
   test("enforces the generation deadline when a runtime ignores its signal", async () => {
@@ -609,7 +587,7 @@ describe("voice process and signal adapters", () => {
     });
 
     expect(await runner.run({
-      executable: "/usr/bin/pbcopy",
+      executable: "/usr/bin/say",
       args: [],
       stdin: encoder.encode("answer"),
       env: {},

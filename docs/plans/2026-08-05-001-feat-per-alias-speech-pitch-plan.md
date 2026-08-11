@@ -12,6 +12,11 @@ execution: code
 
 # Per-Alias Speech Pitch Configuration - Plan
 
+> **Superseded behavior (2026-08-09):** The clipboard requirements in this
+> historical plan no longer apply. Pitch remains a trusted prefix applied only
+> to `/usr/bin/say`; the router does not invoke `pbcopy` or otherwise read or
+> modify the clipboard.
+
 ## Goal Capsule
 
 - **Objective:** Let a macOS user assign a validated baseline pitch to each `llm-now` alias in the existing voice-router configuration while keeping copied model output unchanged.
@@ -49,7 +54,7 @@ The model response is untrusted because macOS speech synthesizers interpret `[[.
 **Configuration**
 
 - R1. The router must continue resolving `$XDG_CONFIG_HOME/llm-now/voice-router.toml` when XDG configuration is absolute and otherwise use `~/.config/llm-now/voice-router.toml`.
-- R2. Each canonical alias table may independently configure `match_phrases`, `voice`, `rate`, and optional `pitch`; a missing profile or pitch must preserve current behavior.
+- R2. Each canonical alias table may independently configure `spoken_names`, `voice`, `rate`, and optional `pitch`; a missing profile or pitch must preserve current behavior.
 - R3. `pitch` must accept finite TOML integers and floats from 1 through 127 inclusive and reject booleans, strings, non-finite values, relative syntax, and values outside that range.
 - R4. Unknown profile fields, including raw speech-prefix or embedded-command fields, must remain configuration errors.
 

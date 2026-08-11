@@ -85,9 +85,9 @@ try {
     {
       name: "runtime boundary",
       executable: runtimeSmoke,
-      args: [fakeCli],
+      args: [fakeCli, directory],
       exitCode: 0,
-      stdout: "http-ok\nfake:instruction-absent\n",
+      stdout: "http-ok\nfake:instruction-absent\nconfig-defaults-ok\nmigration-routing-ok\n",
       stderr: "",
     },
     {
@@ -95,15 +95,15 @@ try {
       executable: spike,
       args: ["--help"],
       exitCode: 0,
-      stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --voice [--input <text>]\n  llm-now --input <text>\n  llm-now <alias>",
+      stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --config-path\n  llm-now --migrate-config\n  llm-now --voice [--input <text>]\n  llm-now --input <text>\n  llm-now <alias>",
       stdoutLandmarks: [
-        "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --voice [--input <text>]\n  llm-now --input <text>\n  llm-now <alias>",
+        "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --config-path\n  llm-now --migrate-config\n  llm-now --voice [--input <text>]\n  llm-now --input <text>\n  llm-now <alias>",
         "Rules:\n  Run llm-now with no arguments in a terminal to open the adaptive launcher.",
         "With shortcuts: “Run with a saved shortcut…”, “Create a new shortcut…”,\n  “Run once with another provider and model…”, then “Manage connections…”.\n  Without shortcuts: “Create a new shortcut…”, “Run once with a provider and model…”,\n  then “Manage connections…”.",
         "Creation uses “Use an available provider…” or “Add a provider with an API key…”.\n  Creation saves the provider/model target and optional instructions before its first prompt.\n  Saved instructions are sent separately on every shortcut run.\n  Run once generates without saving or offering a shortcut.",
         "Manage connections owns discovery and API-key addition, replacement, and deletion.\n  Opening a launcher menu performs no provider discovery or credential access.",
         "Arguments, --input, piped input, and noninteractive calls bypass the launcher.\n  Deterministic calls use an alias or both --provider and --model.",
-        "Options:\n  --aliases            List saved aliases\n  --voice              Route one dictated transcript on macOS\n  --input <text>       Prompt text\n  --instruction <text> Request-scoped behavioral instruction",
+        "Options:\n  --aliases            List saved aliases\n  --config-path        Print the unified configuration path\n  --migrate-config     Migrate legacy configuration without changing aliases\n  --voice              Route one dictated transcript on macOS\n  --input <text>       Prompt text\n  --instruction <text> Request-scoped behavioral instruction",
         "API key environment variables:\n  ANTHROPIC_API_KEY",
         "  DEEPINFRA_TOKEN",
         "  XAI_API_KEY",
@@ -174,6 +174,7 @@ try {
 
   for (const smoke of cases) {
     const result = Bun.spawnSync([smoke.executable, ...smoke.args], {
+      cwd: directory,
       env,
       stdin: new Uint8Array(),
     });

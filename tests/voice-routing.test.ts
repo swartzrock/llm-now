@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parseConfigDocument, projectVoiceConfig } from "../src/config-schema.ts";
 import {
   VoiceRouterError,
   compactKey,
@@ -40,6 +41,12 @@ interface RouteCase {
   transcript: string;
   aliases: string[];
   config_toml?: string;
+  expected_config?: {
+    wake_words: string[];
+    min_fuzzy_phrase_length: number;
+    min_similarity: number;
+    min_margin: number;
+  };
   expected: RouteExpectation;
 }
 
@@ -73,8 +80,19 @@ describe("shared routing parity corpus", () => {
 
   test("matches route decisions and Unicode-scalar question offsets", () => {
     for (const fixture of corpus.routes) {
-      const config = parseVoiceConfig(fixture.config_toml ?? null, fixture.aliases);
+      const config = fixture.config_toml === undefined
+        ? parseVoiceConfig(null, fixture.aliases)
+        : projectVoiceConfig(parseConfigDocument(fixture.config_toml));
       const result = routeTranscript(fixture.transcript, fixture.aliases, config);
+
+      if (fixture.expected_config !== undefined) {
+        expect({
+          wake_words: config.wakeWords,
+          min_fuzzy_phrase_length: config.minFuzzyPhraseLength,
+          min_similarity: config.minSimilarity,
+          min_margin: config.minMargin,
+        }, fixture.id).toEqual(fixture.expected_config);
+      }
 
       expect(result.alias, fixture.id).toBe(fixture.expected.alias);
       expect(result.question, fixture.id).toBe(fixture.expected.question);
@@ -105,8 +123,8 @@ describe("voice router configuration", () => {
       .toBe("/Users/test/.config/llm-now/voice-router.toml");
     expect(resolveVoiceConfigPath("/Users/test", ""))
       .toBe("/Users/test/.config/llm-now/voice-router.toml");
-    expect(() => resolveVoiceConfigPath("/Users/test", "relative"))
-      .toThrow("XDG_CONFIG_HOME must be an absolute path");
+    expect(resolveVoiceConfigPath("/Users/test", "relative"))
+      .toBe("/Users/test/.config/llm-now/voice-router.toml");
   });
 
   test("uses defaults and parses the closed profile schema", () => {
@@ -118,7 +136,7 @@ describe("voice router configuration", () => {
       wake_words = ["hey", "computer"]
 
       [terra]
-      match_phrases = ["tara"]
+      spoken_names = ["tara"]
       voice = " Samantha "
       rate = 205
       pitch = 50
@@ -129,14 +147,17 @@ describe("voice router configuration", () => {
 
     expect(config).toEqual({
       wakeWords: ["hey", "computer"],
+      minFuzzyPhraseLength: 4,
+      minSimilarity: 65,
+      minMargin: 15,
       profiles: {
         terra: {
-          matchPhrases: ["tara"],
+          spokenNames: ["tara"],
           voice: "Samantha",
           rate: 205,
           pitch: 50,
         },
-        opus47: { matchPhrases: [], pitch: 50.5 },
+        opus47: { spokenNames: [], pitch: 50.5 },
       },
     });
     expect(Object.isFrozen(config)).toBeTrue();
@@ -150,8 +171,8 @@ describe("voice router configuration", () => {
       "enabled = true",
       'wake_words = "hey"',
       'wake_words = [""]',
-      "[terra]\nmatch_phrases = 'tara'",
-      "[terra]\nmatch_phrases = ['...']",
+      "[terra]\nspoken_names = 'tara'",
+      "[terra]\nspoken_names = ['...']",
       "[terra]\nvoice = ''",
       "[terra]\nrate = 79",
       "[terra]\nrate = 501",
@@ -169,17 +190,17 @@ describe("voice router configuration", () => {
     }
   });
 
-  test("validates stale profiles structurally but keeps their phrases inert", () => {
+  test("validates stale profiles structurally but keeps their spoken names inert", () => {
     const config = parseVoiceConfig(`
       [retired]
-      match_phrases = ["terra"]
+      spoken_names = ["terra"]
       voice = "Old Voice"
       rate = 180
       pitch = 70
     `, aliases);
 
     expect(config.profiles.retired).toEqual({
-      matchPhrases: ["terra"],
+      spokenNames: ["terra"],
       voice: "Old Voice",
       rate: 180,
       pitch: 70,
@@ -191,17 +212,63 @@ describe("voice router configuration", () => {
       .toThrow("unknown profile field");
   });
 
-  test("rejects duplicate and active canonical phrase collisions", () => {
+  test("applies configurable fuzzy thresholds without changing the safety gates", () => {
+    const shortAliases = ["ai"];
+    const shortDefaults = parseVoiceConfig(null, shortAliases);
+    expect(routeTranscript("aj question", shortAliases, shortDefaults).reason).toBe("no_match");
+    expect(routeTranscript("aj question", shortAliases, {
+      ...shortDefaults,
+      minFuzzyPhraseLength: 2,
+      minSimilarity: 0,
+    }).reason).toBe("fuzzy");
+
+    const thresholdAliases = ["abcdefghijklmnopqrst"];
+    const thresholdDefaults = parseVoiceConfig(null, thresholdAliases);
+    expect(routeTranscript(
+      "abcdefghijklmuuuuuuu question",
+      thresholdAliases,
+      thresholdDefaults,
+    ).reason).toBe("fuzzy");
+    expect(routeTranscript("abcdefghijklmuuuuuuu question", thresholdAliases, {
+      ...thresholdDefaults,
+      minSimilarity: 66,
+    }).reason).toBe("no_match");
+
+    const marginAliases = ["abcdefghijklmnopuuuu", "abcdefghijklmnvvvvvv"];
+    const marginDefaults = parseVoiceConfig(null, marginAliases);
+    expect(routeTranscript(
+      "abcdefghijklmnopqrst question",
+      marginAliases,
+      marginDefaults,
+    ).reason).toBe("ambiguous");
+    expect(routeTranscript("abcdefghijklmnopqrst question", marginAliases, {
+      ...marginDefaults,
+      minMargin: 10,
+    }).reason).toBe("fuzzy");
+
+    expect(routeTranscript("opus48 question", ["opus47"], {
+      ...parseVoiceConfig(null, ["opus47"]),
+      minSimilarity: 0,
+      minMargin: 0,
+    }).reason).toBe("no_match");
+    expect(routeTranscript("terraxx question", ["terra"], {
+      ...parseVoiceConfig(null, ["terra"]),
+      minSimilarity: 0,
+      minMargin: 0,
+    }).reason).toBe("no_match");
+  });
+
+  test("rejects duplicate and active canonical spoken-name collisions", () => {
     expect(() => parseVoiceConfig(
-      "[terra]\nmatch_phrases = ['tara']\n[fred]\nmatch_phrases = ['tara']",
+      "[terra]\nspoken_names = ['tara']\n[fred]\nspoken_names = ['tara']",
       aliases,
-    )).toThrow("match phrase");
+    )).toThrow("spoken name");
     expect(() => parseVoiceConfig(
-      "[qwen]\nmatch_phrases = ['terra']",
+      "[qwen]\nspoken_names = ['terra']",
       aliases,
     )).toThrow("canonical alias");
     expect(() => parseVoiceConfig(
-      "[terra]\nmatch_phrases = ['tara', 'TARA']",
+      "[terra]\nspoken_names = ['tara', 'TARA']",
       aliases,
     )).toThrow("duplicate phrase");
   });

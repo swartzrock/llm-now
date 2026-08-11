@@ -10,7 +10,7 @@ A candidate is ready when:
 - help, version, prompt input, provider selection, aliases, output separation, diagnostics, and exit codes match the documented CLI contract;
 - every target with native credential storage enabled passes the compiled production-adapter lifecycle gate in its representative user session;
 - each supported provider completes at least one successful generation on a reference platform;
-- no credential appears in stdout, stderr, alias files, or captured shell logs;
+- no credential appears in stdout, stderr, unified or legacy configuration, or captured shell logs;
 - shortcut inventory and diagnostics do not disclose saved instruction text or instruction-bearing child-process arguments;
 - no unexplained release-blocking manual failure remains.
 
@@ -50,7 +50,7 @@ It is not necessary to test all nine providers on all five operating-system targ
 
 ## Prepare an isolated test environment
 
-Download the `release-assets` artifact from the successful workflow run for the exact commit under test. Perform functional tests outside the source checkout and never use the tester's real alias store.
+Download the `release-assets` artifact from the successful workflow run for the exact commit under test. Perform functional tests outside the source checkout and never use the tester's real configuration directory.
 
 ### macOS and Linux
 
@@ -127,7 +127,13 @@ It must not show a saved-shortcut row. Merely rendering the root must perform no
 
 From the empty root, choose `Create a new shortcut…`. Confirm `How should this shortcut connect?` offers exactly `Use an available provider…` followed by `Add a provider with an API key…`, with no discovery before a source is chosen. Select the available-provider route, then the fake Codex provider and its safe model. At `Name this shortcut`, enter `daily`. Confirm the visible `Optional instructions for this shortcut (press Enter to skip)` field and `Press Tab to select [ save ], then Enter to save` callout appear next. Paste `Use "quoted" runtime smoke \ transport.` followed by a newline and `Keep each answer concise.`, press Tab, confirm the callout changes to `[ save ] selected — press Enter to save`, then press Enter to submit it.
 
-When `Prompt for daily · Codex CLI · MODEL` appears, inspect the isolated alias file from a second terminal before entering a prompt. It must be a version 2 document whose `daily` record contains only `provider`, `model`, and the exact `instructions` string; no prompt, response, or credential may be present. Enter `smoke`. The command must generate exactly once, exit `0`, and write only `fake:instruction-present` to `stdout.bin`. The shortcut-save receipt must precede the work prompt on stderr.
+When `Prompt for daily · Codex CLI · MODEL` appears, inspect the isolated
+`config.toml` from a second terminal before entering a prompt. It must be a
+version 1 TOML document whose `[aliases.daily]` table contains only `provider`,
+`model`, and the exact `instructions` string; no comment, default voice field,
+prompt, response, or credential may be present. Enter `smoke`. The command must
+generate exactly once, exit `0`, and write only `fake:instruction-present` to
+`stdout.bin`. The shortcut-save receipt must precede the work prompt on stderr.
 
 ### SC-03: Configured root and saved-shortcut route
 
@@ -142,9 +148,9 @@ Choose the saved-shortcut route, filter to `daily`, and confirm `Prompt for dail
 
 ### SC-04: True run once never saves
 
-Record a checksum or byte-for-byte copy of the alias file. From both empty and configured roots, choose the state-appropriate `Run once…` action, select the fake provider/model, and enter `smoke` at `Prompt for Codex CLI · MODEL`.
+Record a checksum or byte-for-byte copy of `config.toml`. From both empty and configured roots, choose the state-appropriate `Run once…` action, select the fake provider/model, and enter `smoke` at `Prompt for Codex CLI · MODEL`.
 
-Each invocation must write only `fake:instruction-absent`, generate exactly once, and exit without showing an instruction, naming, save, or overwrite prompt. The alias file must remain byte-for-byte unchanged, including when the selected target already belongs to instructed shortcut `daily`.
+Each invocation must write only `fake:instruction-absent`, generate exactly once, and exit without showing an instruction, naming, save, or overwrite prompt. `config.toml` must remain byte-for-byte unchanged, including when the selected target already belongs to instructed shortcut `daily`.
 
 ### SC-05: Cancellation before durable work
 
@@ -191,7 +197,7 @@ Arguments, `--input`, piped stdin, and noninteractive execution must bypass the 
 
 ### SC-11: Request-scoped instruction isolation
 
-Keep the instructed `daily` shortcut from SC-02 and record its alias file byte-for-byte. The maintained fixture accepts this second, distinct multiline sentinel:
+Keep the instructed `daily` shortcut from SC-02 and record `config.toml` byte-for-byte. The maintained fixture accepts this second, distinct multiline sentinel:
 
 ```bash
 OVERRIDE=$'  Replace saved smoke instructions.\nUse the one-run override.  '
@@ -200,7 +206,7 @@ OVERRIDE=$'  Replace saved smoke instructions.\nUse the one-run override.  '
 "$BRANCH_BIN" --provider codex-cli --model default --instruction "$OVERRIDE" --input "smoke" >stdout.bin 2>stderr.txt
 ```
 
-Each call must exit `0`, leave stderr empty, and write only `fake:instruction-override`. This proves the exact leading/trailing spaces and line feed survive argv and remain separate from the `smoke` prompt. The two alias calls must replace the different saved sentinel for one request, not append to it. The alias file must remain byte-for-byte unchanged, and a later `daily` call without the option must again write `fake:instruction-present`. Also verify `--instruction=-brief` is accepted with a real provider; a separated dash-leading value is standard option syntax and is not accepted.
+Each call must exit `0`, leave stderr empty, and write only `fake:instruction-override`. This proves the exact leading/trailing spaces and line feed survive argv and remain separate from the `smoke` prompt. The two alias calls must replace the different saved sentinel for one request, not append to it. `config.toml` must remain byte-for-byte unchanged, and a later `daily` call without the option must again write `fake:instruction-present`. Also verify `--instruction=-brief` is accepted with a real provider; a separated dash-leading value is standard option syntax and is not accepted.
 
 Run representative parser failures with a blank-after-trimming value, a tab-bearing value, and a Unicode line-separator-bearing value. Each must exit `2`, leave stdout empty, emit a fixed `usage:` diagnostic without either the raw or JSON-serialized submitted value, and perform no prompt, alias, provider, or generation work. Separately confirm that `--instruction` alone does not supply a prompt, simultaneous `--input` and piped stdin remains invalid, and a selectorless noninteractive call remains nondeterministic.
 
@@ -349,7 +355,7 @@ Repeat with `codex-cli`. Both must use the authenticated CLI's default model. Co
 
 ### MT-10: Adaptive launcher and interactive discovery
 
-Repeat SC-01 through SC-10 against the packaged candidate, starting with an isolated empty alias store and at least two available providers. Run the bare executable with stdout redirected:
+Repeat SC-01 through SC-10 against the packaged candidate, starting with an isolated empty configuration directory and at least two available providers. Run the bare executable with stdout redirected:
 
 ```bash
 "$BIN" >stdout.txt
@@ -376,38 +382,38 @@ Cancel before and after each durable boundary. Pre-write cancellation must exit 
 
 ### MT-11: Save an alias
 
-Run an interactive direct fresh selection such as `"$BIN" --input "Save this target"` with no alias or explicit provider/model. After generation, enter `daily` in the optional contextual alias field. Confirm the green success message names `daily` and the exact provider/model target, then inspect the isolated alias file. It must have this shape:
+Run an interactive direct fresh selection such as `"$BIN" --input "Save this target"` with no alias or explicit provider/model. After generation, enter `daily` in the optional contextual alias field. Submit a blank value at the visible optional-instructions field. Confirm the green success message names `daily` and the exact provider/model target, then inspect the isolated path printed by `"$BIN" --config-path`. It must be a sparse, comment-free document with this semantic shape:
 
-```json
-{
-  "version": 1,
-  "aliases": {
-    "daily": {
-      "provider": "PROVIDER_ID",
-      "model": "MODEL_ID"
-    }
-  }
-}
+```toml
+version = 1
+
+[aliases.daily]
+provider = "PROVIDER_ID"
+model = "MODEL_ID"
 ```
 
-Submit a blank value at the visible optional-instructions field for this first save. The model value is `null` when a supported CLI provider uses its default. Confirm that no key, token, endpoint credential, prompt, generated text, or `instructions` key is stored and that the file remains version 1.
+For a supported CLI provider's default model, the stored value must be the
+string `"default"`, never TOML null. Confirm that no key, token, endpoint
+credential, prompt, generated text, `instructions`, `[voice]`, routing default,
+speech default, or example alias is stored.
 
-Next recreate `daily` and paste two visible instruction lines: `You are a Realtime Voice Agent Architect` and `Focus on interruption handling.` Accept the default-No overwrite only after confirming the transition is `none → set`. The alias file must become version 2 and preserve the exact line break:
+Next recreate `daily` and paste two visible instruction lines: `You are a Realtime Voice Agent Architect` and `Focus on interruption handling.` Accept the default-No overwrite only after confirming the transition is `none → set`. The document must remain version 1 and preserve the exact line break in a TOML multiline or escaped string accepted by both Bun and Python `tomllib`:
 
-```json
-{
-  "version": 2,
-  "aliases": {
-    "daily": {
-      "provider": "PROVIDER_ID",
-      "model": "MODEL_ID",
-      "instructions": "You are a Realtime Voice Agent Architect\nFocus on interruption handling."
-    }
-  }
-}
+```toml
+version = 1
+
+[aliases.daily]
+provider = "PROVIDER_ID"
+model = "MODEL_ID"
+instructions = "You are a Realtime Voice Agent Architect\nFocus on interruption handling."
 ```
 
-Confirm that ordinary multiline input is accepted, while tabs, non-newline control characters, and Unicode line separators are rejected. Do not enter a secret or data that cannot be disclosed to the provider: instructions are plaintext configuration. On Unix, the directory must have mode `700` and the file mode `600`. No lock or temporary file should remain.
+Confirm that ordinary multiline input is accepted, while tabs, non-newline
+control characters, and Unicode line or paragraph separators are rejected. Do
+not enter a secret or data that cannot be disclosed to the provider:
+instructions and exact migration backups are plaintext configuration. On Unix,
+the directory must have mode `700` and unified, backup, lock, and temporary
+files mode `600`. No lock or temporary file should remain.
 
 ### MT-12: Use an alias from another directory
 
@@ -447,22 +453,20 @@ opening the alias-only prompt.
 
 ### MT-13: List configured aliases
 
-Write this document to the isolated alias path (`$XDG_CONFIG_HOME/llm-now/aliases.json`
-on macOS/Linux or `$env:APPDATA\llm-now\aliases.json` on Windows), preserving
-the deliberately unsorted source order:
+Write this document to the isolated unified path printed by
+`"$BIN" --config-path`, preserving the deliberately unsorted source order:
 
-```json
-{
-  "version": 2,
-  "aliases": {
-    "zeta": { "provider": "openai", "model": "gpt-5" },
-    "aliases": {
-      "provider": "codex-cli",
-      "model": null,
-      "instructions": "inventory must not print this"
-    }
-  }
-}
+```toml
+version = 1
+
+[aliases.zeta]
+provider = "openai"
+model = "gpt-5"
+
+[aliases.aliases]
+provider = "codex-cli"
+model = "default"
+instructions = "inventory must not print this"
 ```
 
 Run the standalone inventory with piped input to prove stdin is ignored:
@@ -483,11 +487,11 @@ zeta → OpenAI · gpt-5
 
 It must not print instruction text or an instruction-presence marker, prompt,
 discover providers, list models, access credentials, generate text, or mutate
-the alias file.
+`config.toml`.
 
 ### MT-14: List an empty inventory
 
-Remove the alias file from the isolated config directory and run:
+Remove `config.toml` and both legacy files from the isolated config directory and run:
 
 ```bash
 "$BIN" --aliases >stdout.bin 2>stderr.txt
@@ -497,7 +501,8 @@ test ! -s stdout.bin
 test ! -s stderr.txt
 ```
 
-A missing store and a valid store with an empty `aliases` object must both exit
+A missing store and a valid version 1 TOML document with an empty `[aliases]`
+table must both exit
 `0` with zero stdout and stderr bytes and no prompt, provider, runtime,
 credential, or mutation work.
 
@@ -515,25 +520,28 @@ Every combination must exit `2`, leave stdout empty, write a `usage:`
 diagnostic to stderr, and perform no alias load, prompt, provider, runtime,
 credential, or mutation work.
 
-### MT-16: Reject invalid alias stores during inventory
+### MT-16: Reject invalid unified configuration during inventory
 
-Replace the isolated alias file with malformed JSON and run `"$BIN" --aliases`.
-Then repeat with case-only entries that point to different targets:
+Replace the isolated `config.toml` with malformed TOML and run
+`"$BIN" --aliases`. Then repeat with case-only entries that point to different
+targets:
 
-```json
-{
-  "version": 1,
-  "aliases": {
-    "Fred": { "provider": "claude-cli", "model": null },
-    "FRED": { "provider": "openai", "model": "gpt-5" }
-  }
-}
+```toml
+version = 1
+
+[aliases.Fred]
+provider = "claude-cli"
+model = "default"
+
+[aliases.FRED]
+provider = "openai"
+model = "gpt-5"
 ```
 
 Where the operating system supports a reliable permission-denied fixture,
-repeat once with an unreadable alias file. Every invalid, unreadable, or
-case-conflicting store must exit `1`, leave stdout empty, write the existing
-actionable `config:` diagnostic to stderr, preserve the store, and perform no
+repeat once with an unreadable `config.toml`. Every invalid, unreadable, or
+case-conflicting document must exit `1`, leave stdout empty, write an actionable
+sanitized `config:` diagnostic to stderr, preserve the document, and perform no
 prompt, provider, runtime, credential, or mutation work.
 
 ### MT-17: Preserve a positional alias named aliases
@@ -553,7 +561,7 @@ inventory mode.
 
 ### MT-18: Decline alias saving
 
-Complete an interactive direct fresh selection using `--input`, then press Enter without typing a name in its legacy optional alias follow-up. Repeat and cancel the field with Ctrl-C. Both commands must exit `0` without creating or modifying the alias file. Launcher run-once work must not show this field at all.
+Complete an interactive direct fresh selection using `--input`, then press Enter without typing a name in its legacy optional alias follow-up. Repeat and cancel the field with Ctrl-C. Both commands must exit `0` without creating or modifying `config.toml` or legacy configuration. Launcher run-once work must not show this field at all.
 
 ### MT-19: Validate alias names
 
@@ -570,7 +578,7 @@ coexist as separate targets.
 
 ### MT-20: Handle alias collisions
 
-Save `Daily` and confirm the file contains the canonical key `daily`. Complete
+Save `Daily` and confirm `config.toml` contains the canonical table `[aliases.daily]`. Complete
 `Create a new shortcut…` with the same provider/model, instructions, and the
 name `DAILY`. The CLI must report that the shortcut is already saved and
 continue to the first prompt without asking to overwrite it. Repeat with the
@@ -590,45 +598,145 @@ printf 'hello' | "$BIN" --alias missing
 
 Then edit an isolated alias to reference a nonexistent model and run it. A missing alias must exit `1` with a `config:` diagnostic. A stale model must exit `1` with a `generation (provider):` diagnostic. Neither case may select or invoke a replacement provider.
 
-### MT-22: Reject corrupt alias files
+### MT-22: Fail closed on corrupt unified configuration
 
-Replace the isolated alias file first with malformed JSON, then with a
-structurally invalid record containing an extra `apiKey` field. Both calls must
-exit `1`, identify a configuration load failure, preserve the corrupt content
-for diagnosis, and avoid generation.
+Keep valid legacy `aliases.json` and `voice-router.toml` files in the isolated
+directory, then create malformed `config.toml`. Run inventory, an explicit
+provider/model generation, and, on macOS, a voice invocation. Repeat with
+version `2`, an unknown root field, an alias `api_key` field, an invalid model
+`"default"` for a non-CLI provider, and out-of-range routing or speech values.
 
-Next write a valid legacy file containing `fred` and `Fred` with identical
-provider/model records. Loading or invoking either capitalization must succeed
-without rewriting the file. Save an unrelated alias, then confirm that the
-successful write persists `fred` and the new alias as lowercase keys with only
-one `fred` record.
+Every configuration-backed command must exit `1`, leave stdout empty, preserve
+all files byte-for-byte, and perform no provider call, generation,
+configuration change, speech, alias mutation, backup, or temporary publication.
+Existing `config.toml` is the sole authority even when invalid: none of these cases may
+fall back to the valid legacy files or migration backups. Put non-secret
+credential-shaped and instruction sentinels in the malformed document and
+confirm diagnostics identify only the sanitized path, field, source location,
+or error category, never a raw TOML line or value.
 
-Restore a clean version 1 file and save a shortcut with blank instructions;
-the file must remain version 1. Add instructions to any shortcut and confirm
-the whole document upgrades to version 2 while all provider/model records are
-preserved. Remove the final instruction and confirm the document remains
-version 2 rather than silently downgrading.
+### MT-22A: Migrate automatically and explicitly
 
-Exercise downgrade recovery without risking the only copy: copy the version 2
-file while preserving its original mode, leave that backup untouched, and
-manually create a restrictive-permission version 1 file containing only each
-alias's `provider` and `model`. Confirm this intentionally drops every
-instruction and works with the older binary under test. Prefer reinstalling a
-version-2-compatible binary instead; a pre-version-2 binary may reject alias
-operations while the version 2 file is present. Confirm an explicit
-`--provider`/`--model` call remains available for recovery without using an
-alias.
+In a fresh isolated directory, create a valid legacy `aliases.json` with active
+aliases and a valid legacy `voice-router.toml` containing `wake_words`, settings
+for an active alias, and structurally valid profiles named `zed` and `alpha`
+that have no alias. Preserve exact byte copies of both sources. Trigger an
+otherwise successful alias save and accept any required overwrite.
 
-Finally, give `fred` and `Fred` different provider/model records. Any command
-that loads aliases must exit `1` before generation, preserve the file, and
-report a configuration diagnostic that identifies both conflicting entries,
-their targets, the canonical name `fred`, and the alias-file path with repair
-guidance. It must never select either target.
+The save must merge the requested alias change and active voice settings into
+`config.toml`, leave the legacy files untouched, and first create exact backups
+named `aliases.json.pre-unified-v1.bak` and
+`voice-router.toml.pre-unified-v1.bak`. The backup bytes must match the saved
+source copies. `config.toml` must be sparse and comment-free, omit `zed` and
+`alpha`, and become the only automatic authority. Stderr must contain one
+successful warning with the names sorted exactly as `alpha, zed`; no incomplete
+aliases may be invented. On Unix, verify the directory is mode `700` and all
+unified, backup, lock, and temporary files are owner-only mode `600`.
+
+Repeat in a separate fresh directory with the same two legacy sources, but run:
+
+```bash
+"$BIN" --migrate-config >stdout.txt 2>stderr.txt
+```
+
+It must perform the same merge and backup sequence without adding, removing, or
+changing an alias, contact no provider or credential store, and report the
+unified path on stdout. Stale profiles must again be reported once and sorted on
+stderr. Repeat the command; it must exit `0`, report that configuration is
+already unified, and leave every file byte-for-byte unchanged. Also verify that
+explicit migration with no legacy files creates only a minimal version 1
+document with an empty `[aliases]` table, while a missing single legacy source
+creates no backup for that source.
+
+### MT-22B: Canonically rewrite without pinning defaults
+
+Manually edit valid `config.toml` to add comments, irregular spacing, two
+unsorted aliases, explicit empty `wake_words` and `spoken_names`, routing
+thresholds, instructions, and per-alias voice, rate, and pitch. Save one alias
+through llm-now. The result may remove every comment and normalize all spacing,
+but it must preserve every valid unrelated value, retain explicitly configured
+empty lists, sort aliases, and remain valid TOML. A second semantically
+unchanged rewrite must be byte-identical.
+
+Delete each optional field separately and verify only that field resumes its
+fallback: `wake_words = ["hey"]`, minimum fuzzy phrase length `4`, minimum
+similarity `65`, minimum runner-up margin `15`, empty additional spoken names,
+and the current macOS system voice, speech rate, or selected voice's normal
+baseline pitch. Generated output must not materialize any of those omitted
+values, comments, or example aliases. Check the accepted boundaries
+`min_fuzzy_phrase_length = 1` and `64`, `min_similarity = 0` and `100`,
+`min_margin = 0` and `100`, `rate = 80` and `500`, and `pitch = 1` and `127`;
+each value just outside a boundary must fail before mutation.
+
+Confirm routing still tries canonical aliases before configured spoken names
+and configured spoken names before fuzzy matching. Threshold changes must not bypass
+candidate-length compatibility, exact digit-sequence equality, the minimum
+score, or the runner-up margin; weak and ambiguous requests remain rejected.
+
+### MT-22C: Keep voice execution read-only and native
+
+In a fresh isolated directory with only valid legacy alias and voice files,
+record directory contents and checksums, then run one successful exact-alias
+voice request and one rejected or failed request. Neither invocation may create
+`config.toml`, a migration backup, lock, temporary file, or changed legacy file.
+Repeat with valid unified configuration and confirm it too remains byte-for-byte
+unchanged. On Linux and Windows, `--voice` must still reject at the established
+platform boundary while retaining configured voice fields through a normal
+alias save.
+
+Run the packaged executable with Python and uv absent from `PATH` and outside a
+repository checkout. Config discovery, migration, alias save, and supported
+native voice execution must remain available without launching Python. The
+source-only Python example remains an independent contributor parity oracle,
+not an installed runtime dependency.
+
+### MT-22D: Recover deliberately before a downgrade
+
+Use a disposable directory in which both legacy sources were migrated, so both
+deterministic backups exist. After migration, make a recognizable valid change
+only in `config.toml`; confirm the change is not mirrored to either legacy file
+or backup. Close other llm-now processes and record the path from the newer
+binary before installing an older one.
+
+On macOS or Linux, recover in this exact order:
+
+```bash
+CONFIG_PATH="$("$BIN" --config-path)"
+CONFIG_DIR="$(dirname "$CONFIG_PATH")"
+test ! -e "$CONFIG_DIR/config.toml.pre-downgrade"
+mv "$CONFIG_PATH" "$CONFIG_DIR/config.toml.pre-downgrade"
+cp -p "$CONFIG_DIR/aliases.json.pre-unified-v1.bak" "$CONFIG_DIR/aliases.json"
+cp -p "$CONFIG_DIR/voice-router.toml.pre-unified-v1.bak" "$CONFIG_DIR/voice-router.toml"
+```
+
+On Windows PowerShell, perform the same ordered transition:
+
+```powershell
+$ConfigPath = & $Bin --config-path
+$ConfigDir = Split-Path $ConfigPath
+$MovedConfig = Join-Path $ConfigDir "config.toml.pre-downgrade"
+if (Test-Path $MovedConfig) { throw "preserved config already exists" }
+Move-Item $ConfigPath $MovedConfig
+Copy-Item (Join-Path $ConfigDir "aliases.json.pre-unified-v1.bak") (Join-Path $ConfigDir "aliases.json") -Force
+Copy-Item (Join-Path $ConfigDir "voice-router.toml.pre-unified-v1.bak") (Join-Path $ConfigDir "voice-router.toml") -Force
+```
+
+The first mutation must move `config.toml` out of its authoritative path; never
+copy backups over legacy files while unified authority is still active. Verify
+the moved file still contains the post-migration-only change, the restored
+legacy files exactly match their deterministic backups, and the older binary
+reads the restored state. Keep the moved unified file: post-migration aliases,
+instructions, routing thresholds, and speech changes were never mirrored and
+would otherwise be lost. If one legacy source was absent during migration, its
+backup is absent too; leave that legacy path absent rather than inventing it.
 
 ### MT-23: Resolve platform config paths
 
 Verify that:
 
+- `"$BIN" --config-path` prints exactly the resolved `config.toml` path with a
+  trailing newline, reads no application configuration, writes nothing, and
+  rejects all other options and positionals;
 - an absolute `XDG_CONFIG_HOME` is used on macOS and Linux;
 - an absolute `APPDATA` is used on Windows;
 - when those variables are absent, the documented home-directory fallback is used; and
@@ -643,7 +751,7 @@ sentinels. The packaged smoke must pass the saved sentinel for an alias call and
 receive `fake:instruction-present`; the otherwise identical explicit call must
 receive `fake:instruction-absent`. A second alias call supplies the distinct
 command-line sentinel and must receive `fake:instruction-override`, proving
-replacement rather than mere presence. The alias store must remain unchanged.
+replacement rather than mere presence. `config.toml` must remain unchanged.
 The fixture `PATH` must contain only the temporary fixture directory, and
 non-Windows runs must set `SHELL` to a nonexistent file, so no real CLI or LLM
 can be selected. The loopback fake Ollama check may still run, but no external
@@ -965,32 +1073,27 @@ repository checkout.
 The finished Shortcut must contain only `Dictate Text` followed by
 `Run Shell Script`. It must pass `Dictated Text` to stdin, and the shell action
 must invoke the absolute installed path to `llm-now --voice`. No `--input`,
-marker parser, clipboard action, separate `Speak Text` action, or Python/uv
-launcher may remain.
+marker parser, separate `Speak Text` action, or Python/uv launcher may remain.
 
 Complete the guide's exact, configured-phrase, unique-fuzzy, poor, and ambiguous
 routes; optional/omitted/configured wake words; per-alias voice/rate/pitch;
-clipboard sentinel and clean-answer checks; audible pitch A/B; one local and one
-hosted alias; provider and configuration failures; permissions; and recovery.
+audible pitch A/B; one local and one hosted alias; provider and configuration
+failures; permissions; and recovery.
 A successful process exit alone is not evidence that an installed voice honored
-the pitch setting. Confirm failed or ambiguous routing preserves the sentinel,
-successful copying contains no pitch command, and a speech failure after copy
-does not remove the answer.
+the pitch setting. Confirm failed or ambiguous routing does not invoke a model,
+and a speech failure does not trigger a replacement notice.
 
 For cancellation, start a slow request and use the Shortcut's stop control. The
 command must handle its root interrupt, reap the active operation, exit `130`,
-report `voice request cancelled`, and start no later notice, copy, or speech.
-An answer copied before cancellation is not rolled back. Run only one invocation
-at a time; overlapping invocations are unsupported because global clipboard and
-speech effects can interleave.
+report `voice request cancelled`, and start no later notice or speech.
+Run only one invocation at a time; overlapping invocations are unsupported
+because audible speech can interleave.
 
 Record the macOS version, Dictation mode, shortcut key, absolute binary path,
 aliases/providers and their prerequisites, installed voices, elapsed setup time,
-pitch values and audible comparison, clean-clipboard result, clipboard sentinel
-result, cancellation exit/diagnostic, and permission prompts. Also record that
-Dictation may use Apple services, hosted aliases send accepted question content
-to their provider, speech is audible, and clipboard contents persist until
-replaced.
+pitch values and audible comparison, cancellation exit/diagnostic, and
+permission prompts. Also record that Dictation may use Apple services, hosted
+aliases send accepted question content to their provider, and speech is audible.
 
 ## Automation-backed coverage
 
@@ -1003,12 +1106,15 @@ Keep the Bun test suite as the authority for behavior that is difficult or unrel
 - Picocolors output under TTY, `NO_COLOR`, and non-TTY conditions;
 - ANSI and control-sequence stripping;
 - diagnostic truncation at 1,024 characters;
-- v1-to-v2 instruction migration, add/change/remove transitions, and plaintext validation;
+- unified TOML validation, sparse canonical rewrites, omission preservation,
+  deterministic legacy backups, migration retries, and add/change/remove
+  instruction transitions;
 - exact per-invocation instruction forwarding with absent instructions on explicit and run-once calls;
 - Homebrew exact/older/drift/newer/invalid classification, one-write concurrency, nullable response metadata, and credential-safe diagnostics in `tests/homebrew-reconcile.test.ts`;
 - fixed fake-CLI diagnostics that never echo instruction-bearing arguments;
-- concurrent alias writers and stale-lock recovery; and
-- atomic rename failure handling.
+- concurrent alias writers and ownership-aware stale-lock recovery; and
+- no-clobber first publication, atomic replacement, and injected migration
+  failure handling.
 
 ## Test report
 
@@ -1033,13 +1139,16 @@ Pass/fail:
 Observed exit code:
 stdout evidence:
 stderr evidence:
-Alias-file evidence:
+Configuration-file evidence:
 Duration:
 Cleanup completed:
 Credential-store cleanup evidence:
 Notes/issues:
 ```
 
-Any secret leakage, wrong-source/provider fallback, stdout contamination, corrupt-alias replacement, credential-store unavailability misclassification, missing store cleanup, absent compiled lifecycle evidence, checksum mismatch, or inability to run without Bun or Node.js blocks release.
+Any secret leakage, wrong-source/provider fallback, stdout contamination,
+corrupt unified replacement or legacy fallback, credential-store unavailability
+misclassification, missing store cleanup, absent compiled lifecycle evidence,
+checksum mismatch, or inability to run without Bun or Node.js blocks release.
 
 See the [README](../README.md), [CLI argument contract](../src/args.ts), and [release workflow](../.github/workflows/release.yml) for the source-of-truth behavior.

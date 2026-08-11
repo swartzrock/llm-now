@@ -1,17 +1,16 @@
 # Talk to an llm-now alias from a macOS shortcut
 
 Press a keyboard shortcut, dictate an alias and question, then hear the answer.
-The same answer is copied to the clipboard. The Shortcut itself has only two
-actions:
+The Shortcut itself has only two actions:
 
 1. `Dictate Text`
 2. `Run Shell Script`
 
 The shell action passes the dictated text through stdin to the installed
 `llm-now --voice` command. The native command loads the current aliases, rejects
-uncertain matches, calls the selected alias once, copies the answer, and speaks
-it with macOS `say`. Normal use does not require Python, uv, this repository, or
-a second launcher.
+uncertain matches, calls the selected alias once, and speaks the answer with
+macOS `say`. Normal use does not require Python, uv, this repository, or a
+second launcher.
 
 ## Before you start
 
@@ -72,13 +71,11 @@ native credential storage.
 
 Run the Shortcut from the editor. Success means:
 
-- the answer is spoken;
-- the identical answer is on the clipboard; and
-- the shell action needs no `Speak Text` or clipboard action after it.
+- the answer is spoken; and
+- the shell action needs no `Speak Text` action after it.
 
-Paste somewhere to confirm the clipboard. Fix this Text test before involving
-the microphone; it isolates paths, dependencies, aliases, and providers from
-Dictation permissions.
+Fix this Text test before involving the microphone; it isolates paths,
+dependencies, aliases, and providers from Dictation permissions.
 
 For manual Terminal testing, `--input` is also available:
 
@@ -113,8 +110,8 @@ accepts both `Hey haiku, ...` and `haiku, ...`.
 Open the Shortcut's details, choose **Add Keyboard Shortcut**, and press an
 unused key combination. Switch to another application and invoke it. Wait for
 the current run to finish before starting another one. Only one active voice
-invocation is supported: overlapping runs can interleave writes to the global
-clipboard and audible speech.
+invocation is supported: overlapping runs can produce interleaved audible
+speech.
 
 If macOS asks whether Shortcuts may run shell scripts, allow it. Managed Macs
 may require an administrator to permit that capability.
@@ -127,7 +124,7 @@ editing the Shortcut or copying an alias roster into another file.
 The router examines only the leading spoken phrase and tries these stages:
 
 1. normalized canonical alias;
-2. configured `match_phrases`; and
+2. configured `spoken_names`; and
 3. conservative native similarity scoring.
 
 Normalization is case-insensitive and removes punctuation and spacing for the
@@ -144,59 +141,94 @@ follows:
 | --- | --- | --- |
 | `Deep seek 32, explain mixture of experts` | `deepseek32` | normalized canonical |
 | `haiku, write a love poem` | `haiku` | canonical |
-| `Tara, write a haiku about smoked brisket` | `terra` | unique fuzzy |
-| `Op. 47, explain this chord` | `opus47` | configured phrase |
+| `Tara, write a haiku about smoked brisket` | `terra` | configured spoken name |
+| `Op. 47, explain this chord` | `opus47` | configured spoken name |
 | `Kwen, explain perfect chords` | `qwen` | unique fuzzy |
 
-`Tara` and `Kwen` work only when no competing alias makes the result ambiguous.
+`Kwen` works only when no competing alias makes the fuzzy result ambiguous.
 
-## Optional names and speech
+## Optional names, routing, and speech
 
-The zero-configuration path is usually enough. To customize it, create:
+Aliases and voice settings share llm-now's unified configuration. Print its
+exact location with this read-only command:
 
-```text
-~/.config/llm-now/voice-router.toml
+```bash
+llm-now --config-path
 ```
 
-If `XDG_CONFIG_HOME` is available to Shortcuts, the file instead lives at
-`$XDG_CONFIG_HOME/llm-now/voice-router.toml`.
+On macOS the path is `$XDG_CONFIG_HOME/llm-now/config.toml` when
+`XDG_CONFIG_HOME` is absolute, otherwise `~/.config/llm-now/config.toml`.
+Relative `XDG_CONFIG_HOME` values use the home-directory fallback.
 
-Use one flat section per canonical lowercase alias:
+Each voice profile lives with its canonical lowercase alias rather than in a
+separate voice file. For example, add the optional values to existing alias
+tables:
 
 ```toml
-wake_words = ["hey", "computer"]
+version = 1
 
-[terra]
-match_phrases = ["tara"]
+[voice]
+wake_words = ["hey", "computer"]
+min_fuzzy_phrase_length = 4
+min_similarity = 65
+min_margin = 15
+
+[aliases.terra]
+provider = "openai"
+model = "gpt-5"
+spoken_names = ["tara"]
 voice = "Samantha"
 rate = 205
 
-[opus47]
-match_phrases = ["op 47"]
+[aliases.opus47]
+provider = "claude-cli"
+model = "default"
+spoken_names = ["op 47"]
 
-[slug]
+[aliases.slug]
+provider = "ollama"
+model = "qwen3"
 voice = "Eddy (English (US))"
 rate = 180
 pitch = 50
 ```
 
-Every field is optional:
+`version = 1`, `[aliases]`, and each alias's `provider` and `model` are required.
+`model = "default"` is valid only for `codex-cli` and `claude-cli`. The example
+shows every global voice field and every per-alias speech or routing field;
+`instructions` is the remaining optional alias field and contains the same
+plaintext reusable guidance described in the main README.
 
-- omit `wake_words` to use `["hey"]`;
-- use `wake_words = []` to disable wake-word stripping;
-- omit `match_phrases` to rely on canonical and fuzzy matching;
-- omit `voice` and `rate` to inherit the current macOS defaults;
-- omit `pitch` to use the voice's normal baseline pitch;
-- keep `rate` between 80 and 500; and
+Omission applies independently to every optional voice field:
+
+- omit `wake_words` to use `["hey"]`; use `wake_words = []` to disable
+  wake-word stripping;
+- omit `min_fuzzy_phrase_length` to use `4`; configured values must be integers
+  from 1 through 64;
+- omit `min_similarity` to use `65`; configured values must be integers from 0
+  through 100;
+- omit `min_margin` to use `15`; configured values must be integers from 0
+  through 100;
+- `spoken_names` lists additional exact spoken names that select this alias
+  during voice routing; omit it to rely on canonical and fuzzy matching, or
+  set it to `[]` for no additional spoken names;
+- omit `voice`, `rate`, or `pitch` to inherit the current macOS system voice,
+  system speech rate, or selected voice's normal baseline pitch independently;
+- keep `rate` at an integer from 80 through 500; and
 - keep `pitch` between 1 and 127, inclusive. Integers and fractional values such
   as `50.5` are accepted.
 
+Routing always checks the canonical alias, configured spoken names, and then
+fuzzy similarity in that order. Threshold changes do not disable the
+digit-equality, candidate-length, minimum-score, or runner-up-margin safety
+gates; ambiguous input remains rejected. Empty or duplicate normalized spoken
+names and spoken-name collisions between aliases are invalid.
+
 `pitch` uses Apple's legacy unsigned, absolute baseline-pitch (`pbas`) scale; it
 is not a percentage or a relative adjustment. The router turns `pitch = 50`
-into a trusted `[[pbas 50]]` command for `/usr/bin/say` only. The original model
-answer is still copied to the clipboard without that command. Raw embedded
-speech commands are not configurable, and model output containing `[[...]]` is
-rejected before copying or speaking.
+into a trusted `[[pbas 50]]` command for `/usr/bin/say`. Raw embedded speech
+commands are not configurable, and model output containing `[[...]]` is
+rejected before speaking.
 
 List the exact voices installed on this Mac:
 
@@ -206,12 +238,18 @@ List the exact voices installed on this Mac:
 
 Voice lookup is case-insensitive and speech uses the installed canonical name.
 An unavailable selected voice fails before model generation instead of silently
-changing the voice or alias. A profile for a removed alias is inert, but its TOML
-must still be structurally valid.
+changing the voice or alias.
 
-The root name `wake_words` is reserved by this flat format. A literal llm-now
-alias named `wake_words` still routes with system speech defaults, but cannot
-have a profile in this version.
+An alias save may canonically rewrite all of `config.toml`, removing comments
+and custom spacing while preserving valid unrelated values. Generated and
+migrated files remain sparse and comment-free; llm-now does not write the
+omitted defaults or example aliases. Running `llm-now --voice` is read-only with
+respect to configuration: it never creates the unified file, migrates legacy
+files, creates backups, or saves inferred speech settings. Use
+`llm-now --migrate-config` if you want to migrate legacy `aliases.json` and
+`voice-router.toml` before the next successful alias save. Any structurally
+valid legacy voice profiles that cannot attach to an active alias are reported
+once in sorted order and retained in the exact plaintext legacy backup.
 
 ## Manual verification
 
@@ -227,9 +265,7 @@ that apply to your alias inventory.
 4. Configure different voices, rates, or pitches for two aliases that point to
    the same model. Confirm the profile follows the alias, not the model.
 5. Ask one local Ollama alias and one hosted API- or CLI-backed alias. Ordinary
-   unmarked text from both must follow the same clipboard-and-speech path.
-6. After each success, paste the clipboard and confirm it contains the original
-   answer text with no `[[pbas ...]]` command.
+   safe text from both must follow the same speech path.
 
 ### Pitch A/B check
 
@@ -240,8 +276,7 @@ not prove that the selected voice changed audibly.
    substitute one of your aliases), omit `pitch`, and ask for a short repeatable
    sentence. Treat that listening pass as the control.
 2. Add one legal pitch such as `pitch = 40`, repeat the same request, and compare
-   it with the control. Paste the clipboard and confirm that it contains only
-   the model answer, with no speech command.
+   it with the control.
 3. Repeat with a substantially different legal value such as `pitch = 80`.
    Record the voice, values, and whether the difference was audible.
 4. If the two legal values sound unchanged, repeat with another installed
@@ -250,33 +285,24 @@ not prove that the selected voice changed audibly.
 
 ### Rejection and failure safety
 
-Put a recognizable sentinel on the clipboard:
-
-```bash
-printf 'VOICE-ROUTER-SENTINEL' | /usr/bin/pbcopy
-```
-
 Dictate `Bananas, answer this question` or another deliberately poor alias.
-You should hear a retry notice, no model should run, and `pbpaste` should still
-print the sentinel.
+You should hear a retry notice and no model should run.
 
-For an ambiguity check, use a disposable alias store containing two harmless
+For an ambiguity check, use a disposable unified configuration containing two harmless
 near neighbors such as `qwen` and `when`, then say `Kwen, answer this`. The
 router must reject instead of choosing row order. Do not alter a production
-alias store only to run this check.
+configuration only to run this check.
 
-Stop a local provider or otherwise make a test alias fail, reset the clipboard
-sentinel, and ask it a question. You should hear only the stable request-failed
-notice. Provider stderr must not enter speech or the clipboard.
+Stop a local provider or otherwise make a test alias fail and ask it a question.
+You should hear only the stable request-failed notice. Provider stderr must not
+enter speech.
 
 Start a deliberately slow request and press the Shortcut's stop button. Wait
 past the provider's normal response time. The stop control is the supported
 cancellation affordance: `llm-now` handles the interrupt as one root request,
 terminates and reaps the active operation, exits `130`, and writes
 `voice request cancelled` to the Shortcut result. There must be no later notice,
-speech, or downstream action. If cancellation occurs after copying completed,
-the clipboard may already contain the answer; the command does not attempt an
-unsafe restore.
+speech, or downstream action.
 
 ## Troubleshooting
 
@@ -298,9 +324,9 @@ unsafe restore.
 ### Text works but Dictate Text returns the retry notice
 
 Use the temporary Show Result check above and inspect the leading words macOS
-actually produced. Add a narrow `match_phrases` entry for a repeatable
-transcription. Do not add broad phrases just to force a match; rejection is the
-safe outcome.
+actually produced. Add a narrow `spoken_names` entry for a repeatable
+transcription. Do not add broad spoken names just to force a match; rejection
+is the safe outcome.
 
 ### The shell action fails immediately
 
@@ -318,15 +344,14 @@ printf 'haiku, explain a perfect chord' | /absolute/path/to/llm-now --voice
 
 Rejected input says `I couldn't match an alias and question. Please try again.`
 A generation failure says `The request failed. Please try again.` Configuration
-problems say `The voice router needs attention. Check the Shortcut result.` A
-clipboard failure says `I couldn't copy the answer. Check the Shortcut result.`
+problems say `The voice router needs attention. Check the Shortcut result.`
 These notices use the unconfigured system speech defaults and never include
 provider or request detail.
 
 Handled routing and generation failures exit `0` only when their notice is
-spoken successfully. Configuration, missing-command, clipboard, and answer
-speech failures exit `1`; if answer speech fails after copying, the answer stays
-on the clipboard and no replacement notice is spoken. Cancellation exits `130`.
+spoken successfully. Configuration, missing-command, and answer-speech failures
+exit `1`; an answer-speech failure does not trigger a replacement notice.
+Cancellation exits `130`.
 Shortcuts may otherwise show little beyond the sanitized diagnostic in the
 shell action result.
 
@@ -341,9 +366,9 @@ through 127; do not put `[[...]]` commands in the profile.
 ### A local model returns plain text without markers
 
 That is supported. The router never asks a model for control markers, JSON, or a
-separate summary. It makes one generation request and copies the safe UTF-8
-response unchanged. If `pitch` is configured, the router adds its validated
-command only to the separate speech input.
+separate summary. It makes one generation request and speaks the safe UTF-8
+response. If `pitch` is configured, the router adds its validated command only
+to the speech input.
 
 ## Privacy and state
 
@@ -354,14 +379,14 @@ command only to the separate speech input.
   Use a suitable local alias for material that should not leave the Mac, and do
   not dictate sensitive material in an unsuitable setting.
 - Speech is audible to people and devices nearby.
-- The optional TOML file contains presentation preferences, not credentials.
-- A successful answer replaces the clipboard before speech begins and remains
-  there until another application replaces it; `llm-now` does not clear it.
+- The unified TOML contains plaintext alias targets, optional instructions,
+  routing settings, and speech preferences, but never credentials. Migration
+  backups are plaintext too; protect the configuration directory.
 - Only one invocation is supported at a time. Overlapping requests can
-  interleave global clipboard writes and audible speech.
-- Technical diagnostics stay on stderr and are never copied or spoken. Model
+  interleave audible speech.
+- Technical diagnostics stay on stderr and are never spoken. Model
   output containing terminal controls or macOS `[[...]]` speech commands is
-  rejected before either side effect.
+  rejected before speech.
 
 ## Contributor-only Python parity oracle
 

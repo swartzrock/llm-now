@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { validateVoiceDependencies } from "../scripts/release-validate.ts";
 import { NATIVE_VAULT_COMPATIBILITY } from "../src/credentials.ts";
 
 const releaseWorkflow = await Bun.file(
@@ -178,6 +179,8 @@ describe("release workflow policy", () => {
     expect(nativeJob).not.toContain("setup-python");
     expect(nativeJob).not.toContain("setup-uv");
     expect(nativeJob).not.toContain("macos-voice-router");
+    expect(nativeJob.toLowerCase()).not.toContain("python");
+    expect(nativeJob).not.toMatch(/\buv\b/);
     expect(nativeJob).toContain("if: startsWith(matrix.target, 'macos-')");
     expect(nativeJob).toContain("run: bun run runtime:smoke");
     expect(nativeJob.indexOf("run: bun run runtime:smoke")).toBeLessThan(
@@ -191,6 +194,32 @@ describe("release workflow policy", () => {
     expect(releaseWorkflow).not.toContain("setup-python");
     expect(releaseWorkflow).not.toContain("setup-uv");
     expect(releaseWorkflow).not.toContain("macos-voice-router");
+  });
+
+  test("audits the serializer as a self-contained pure-JavaScript runtime dependency", async () => {
+    const audit = await validateVoiceDependencies();
+
+    expect(audit.metric).toMatchObject({
+      loader: "lazy-embedded-base64-initSync",
+      standaloneWasmFiles: [],
+    });
+    expect(audit.serializer).toMatchObject({
+      name: "smol-toml",
+      version: "1.7.1",
+      integrity: "sha512-PPlsspAZ4jbMBu5DMFhfUGDQLu/vrL4SyBROVS37x8ynnVmFIs1VPBz1Co8Xks3TvpIaZXmU85y4DrQ+UyVFoQ==",
+      license: "BSD-3-Clause",
+      entrypoint: "./dist/index.js",
+      runtimeDependencies: [],
+      installLifecycleScripts: [],
+      standaloneAssets: [],
+      nativeAddons: [],
+      standaloneWasmFiles: [],
+      embeddedWasmMarkers: [],
+      activeRuntimeAccess: [],
+    });
+    expect(audit.serializer.jsImports.length).toBeGreaterThan(0);
+    expect(audit.serializer.jsImports.every((specifier) => /^\.\/.+\.js$/.test(specifier)))
+      .toBeTrue();
   });
 
   test("maintains one version-only release PR with narrow cancelable permissions", () => {

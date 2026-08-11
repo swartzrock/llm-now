@@ -26,6 +26,12 @@ const VOICE_PACKAGES = {
   },
 } as const;
 
+const CONFIG_SERIALIZER_PACKAGE = {
+  name: "smol-toml",
+  version: "1.7.1",
+  integrity: "sha512-PPlsspAZ4jbMBu5DMFhfUGDQLu/vrL4SyBROVS37x8ynnVmFIs1VPBz1Co8Xks3TvpIaZXmU85y4DrQ+UyVFoQ==",
+} as const;
+
 type PackageManifest = {
   name?: string;
   version?: string;
@@ -34,7 +40,7 @@ type PackageManifest = {
   files?: string[];
   dependencies?: Record<string, string>;
   scripts?: Record<string, string>;
-  exports?: { "."?: { import?: string } };
+  exports?: { import?: string; "."?: { import?: string } };
 };
 
 async function installedFiles(directory: string): Promise<string[]> {
@@ -156,6 +162,67 @@ export async function validateVoiceDependencies() {
     throw new Error("case-folding package license file is missing");
   }
 
+  if (dependencies[CONFIG_SERIALIZER_PACKAGE.name] !== CONFIG_SERIALIZER_PACKAGE.version) {
+    throw new Error(
+      `${CONFIG_SERIALIZER_PACKAGE.name} must be exactly pinned to ${CONFIG_SERIALIZER_PACKAGE.version}`,
+    );
+  }
+  const serializerLockEntry = `"${CONFIG_SERIALIZER_PACKAGE.name}": ["${CONFIG_SERIALIZER_PACKAGE.name}@${CONFIG_SERIALIZER_PACKAGE.version}", "", {}, "${CONFIG_SERIALIZER_PACKAGE.integrity}"]`;
+  if (!lock.includes(serializerLockEntry)) {
+    throw new Error(`${CONFIG_SERIALIZER_PACKAGE.name} lock integrity does not match the audited package`);
+  }
+
+  const serializerRoot = join(root, "node_modules", CONFIG_SERIALIZER_PACKAGE.name);
+  const serializerManifest = await Bun.file(join(serializerRoot, "package.json")).json() as PackageManifest;
+  if (
+    serializerManifest.name !== CONFIG_SERIALIZER_PACKAGE.name
+    || serializerManifest.version !== CONFIG_SERIALIZER_PACKAGE.version
+    || serializerManifest.license !== "BSD-3-Clause"
+  ) throw new Error("serializer package manifest changed");
+  const serializerEntrypoint = serializerManifest.exports?.import;
+  if (serializerEntrypoint !== "./dist/index.js") {
+    throw new Error("serializer package import entrypoint changed");
+  }
+  const serializerRuntimeDependencies = Object.keys(serializerManifest.dependencies ?? {}).sort();
+  if (serializerRuntimeDependencies.length > 0) {
+    throw new Error("serializer package gained runtime dependencies");
+  }
+  const serializerInstallScripts = ["preinstall", "install", "postinstall"]
+    .filter((name) => serializerManifest.scripts?.[name] !== undefined);
+  if (serializerInstallScripts.length > 0) {
+    throw new Error("serializer package gained install lifecycle scripts");
+  }
+  const serializerFiles = await installedFiles(serializerRoot);
+  const serializerJavaScriptFiles = serializerFiles
+    .filter((name) => /^dist\/.+\.js$/.test(name));
+  const serializerSources = await Promise.all(
+    serializerJavaScriptFiles.map((name) => Bun.file(join(serializerRoot, name)).text()),
+  );
+  const serializerImports = serializerSources.flatMap(jsImports);
+  const serializerStandaloneAssets = serializerImports
+    .filter((specifier) => !/^\.\/.+\.js$/.test(specifier));
+  if (serializerStandaloneAssets.length > 0) {
+    throw new Error("serializer package imports an external runtime asset");
+  }
+  assertComputationOnly("serializer package", serializerSources);
+  const serializerNativeAddons = serializerFiles.filter((name) => name.endsWith(".node"));
+  if (serializerNativeAddons.length > 0) {
+    throw new Error("serializer package contains a native addon");
+  }
+  const serializerWasmFiles = serializerFiles.filter((name) => name.endsWith(".wasm"));
+  if (serializerWasmFiles.length > 0) {
+    throw new Error("serializer package contains a standalone WASM asset");
+  }
+  const embeddedWasmMarkers = serializerSources.flatMap((source) => [
+    ...source.matchAll(/\b(?:WebAssembly|WASM_BASE64)\b/g),
+  ]).map((match) => match[0]);
+  if (embeddedWasmMarkers.length > 0) {
+    throw new Error("serializer package contains an embedded WASM payload");
+  }
+  if (!(await Bun.file(join(serializerRoot, "LICENSE")).exists())) {
+    throw new Error("serializer package license file is missing");
+  }
+
   return {
     metric: {
       ...VOICE_PACKAGES.metric,
@@ -190,6 +257,23 @@ export async function validateVoiceDependencies() {
         .filter((name) => caseFoldingManifest.scripts?.[name] !== undefined),
       jsImports: caseFoldingImports,
       standaloneWasmFiles: caseFoldingFiles.filter((name) => name.endsWith(".wasm")),
+      activeRuntimeAccess: [] as const,
+    },
+    serializer: {
+      ...CONFIG_SERIALIZER_PACKAGE,
+      license: serializerManifest.license,
+      entrypoint: serializerEntrypoint,
+      declaredFiles: serializerManifest.files ?? [],
+      installedFiles: serializerFiles,
+      runtimeDependencies: serializerRuntimeDependencies,
+      lifecycleScripts: Object.keys(serializerManifest.scripts ?? {})
+        .filter((name) => /^(?:pre|post)/.test(name)).sort(),
+      installLifecycleScripts: serializerInstallScripts,
+      jsImports: serializerImports,
+      standaloneAssets: serializerStandaloneAssets,
+      nativeAddons: serializerNativeAddons,
+      standaloneWasmFiles: serializerWasmFiles,
+      embeddedWasmMarkers,
       activeRuntimeAccess: [] as const,
     },
   };
@@ -430,7 +514,7 @@ async function smoke(archivePath: string): Promise<void> {
       ...aliasEnvironment,
     };
     const cases = [
-      { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --voice [--input <text>]\n  llm-now --input <text>", stderrIncludes: "" },
+      { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --config-path\n  llm-now --migrate-config\n  llm-now --voice [--input <text>]\n  llm-now --input <text>", stderrIncludes: "" },
       { name: "version", args: ["--version"], code: 0, stdout: `${packageMetadata.version}\n`, stderrIncludes: "" },
       ...(process.platform === "darwin" ? [] : [{
         name: "non-macOS voice guard before scorer initialization",

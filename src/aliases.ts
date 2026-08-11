@@ -200,11 +200,22 @@ function summarizeDiagnosticValue(value: string): string {
   return `${value.slice(0, startLength)}…${value.slice(-endLength)}`;
 }
 
-export async function loadAliases(path: string): Promise<AliasDocument> {
+export function parseAliasDocument(text: string, path: string): AliasDocument {
   try {
-    const parsed: unknown = JSON.parse(await Bun.file(path).text());
+    const parsed: unknown = JSON.parse(text);
     if (!validateDocument(parsed)) throw new Error("invalid alias document schema");
     return canonicalizeDocument(parsed, path);
+  } catch (error) {
+    if (error instanceof AliasStoreError) throw error;
+    throw new AliasStoreError(`failed to load alias store: ${path}`, {
+      cause: new Error("legacy alias configuration is invalid"),
+    });
+  }
+}
+
+export async function loadAliases(path: string): Promise<AliasDocument> {
+  try {
+    return parseAliasDocument(await Bun.file(path).text(), path);
   } catch (error) {
     if (hasErrorCode(error, "ENOENT")) return emptyDocument();
     if (error instanceof AliasStoreError) throw error;

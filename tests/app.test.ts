@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   BYOK_API_KEY_ENV_VARS,
@@ -16,6 +16,7 @@ import { renderHelpText } from "../src/args.ts";
 import { resolveInputSource } from "../src/io.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import {
+  CONFIG_FAILED_NOTICE,
   type VoiceCancellation,
   type VoiceProcessRequest,
   type VoiceProcessRunner,
@@ -167,6 +168,7 @@ function dependencies(options: {
   }>;
   resolveAlias?: (path: string, name: string) => Promise<AliasRecord>;
   saveAlias?: (...args: Parameters<NonNullable<Parameters<typeof runApplication>[0]["saveAlias"]>>) => Promise<SaveAliasResult>;
+  migrateConfig?: NonNullable<Parameters<typeof runApplication>[0]["migrateConfig"]>;
   generationTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault?: CredentialVault;
@@ -176,6 +178,8 @@ function dependencies(options: {
   platform?: NodeJS.Platform;
   home?: string;
   aliasPath?: string;
+  configPath?: string;
+  voiceConfigPath?: string;
   credentialMutationLock?: CredentialMutationLock;
   runVoice?: NonNullable<Parameters<typeof runApplication>[0]["runVoice"]>;
   installVoiceCancellation?: () => VoiceCancellation;
@@ -212,9 +216,12 @@ function dependencies(options: {
       home: options.home ?? "/home/test",
       version: "1.2.3",
       aliasPath: options.aliasPath ?? "/config/aliases.json",
+      configPath: options.configPath ?? "/config/config.toml",
+      voiceConfigPath: options.voiceConfigPath ?? "/config/voice-router.toml",
       loadAliases: options.loadAliases,
       resolveAlias: options.resolveAlias,
       saveAlias: options.saveAlias,
+      migrateConfig: options.migrateConfig,
       generationTimeoutMs: options.generationTimeoutMs,
       modelListTimeoutMs: options.modelListTimeoutMs,
       credentialVault,
@@ -337,6 +344,396 @@ describe("help output", () => {
   });
 });
 
+describe("unified read authority", () => {
+  test("lists unified aliases over conflicting legacy aliases without writing", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const aliasPath = join(directory, "aliases.json");
+    await writeFile(join(directory, "config.toml"), `
+      version = 1
+      [aliases.primary]
+      provider = "ollama"
+      model = "unified-model"
+    `);
+    await writeFile(aliasPath, JSON.stringify({
+      version: 1,
+      aliases: { legacy: { provider: "ollama", model: "legacy-model" } },
+    }));
+    const before = await readdir(directory);
+    const app = dependencies({
+      args: ["--aliases"],
+      env: { XDG_CONFIG_HOME: root },
+      aliasPath,
+      configPath: join(directory, "config.toml"),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("primary → Ollama · unified-model\n");
+    expect(await readdir(directory)).toEqual(before);
+  });
+
+  test("blocks alias and explicit generation on malformed unified content before runtime work", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const aliasPath = join(directory, "aliases.json");
+    await writeFile(join(directory, "config.toml"), "version = 2\n[aliases]\n");
+    await writeFile(aliasPath, JSON.stringify({
+      version: 1,
+      aliases: { legacy: { provider: "ollama", model: "legacy-model" } },
+    }));
+
+    for (const args of [
+      ["legacy", "--input", "hello"],
+      ["--provider", "ollama", "--model", "qwen", "--input", "hello"],
+    ]) {
+      const app = dependencies({
+        args,
+        env: { XDG_CONFIG_HOME: root },
+        aliasPath,
+        configPath: join(directory, "config.toml"),
+      });
+      expect(await runApplication(app.value), args.join(" ")).toBe(1);
+      expect(app.runtime.calls.generate).toBe(0);
+      expect(app.stdout.text()).toBe("");
+    }
+  });
+
+  test("keeps missing-unified legacy listing compatible without creating config", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const aliasPath = join(directory, "aliases.json");
+    await writeFile(aliasPath, JSON.stringify({
+      version: 1,
+      aliases: { legacy: { provider: "ollama", model: "legacy-model" } },
+    }));
+    const before = await readdir(directory);
+    const app = dependencies({
+      args: ["--aliases"],
+      env: { XDG_CONFIG_HOME: root },
+      aliasPath,
+      configPath: join(directory, "config.toml"),
+      voiceConfigPath: join(directory, "voice-router.toml"),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("legacy → Ollama · legacy-model\n");
+    expect(await readdir(directory)).toEqual(before);
+  });
+
+  test("does not let malformed legacy voice settings block alias-only reads", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const aliasPath = join(directory, "aliases.json");
+    await writeFile(aliasPath, JSON.stringify({
+      version: 1,
+      aliases: { legacy: { provider: "ollama", model: "legacy-model" } },
+    }));
+    await writeFile(join(directory, "voice-router.toml"), "broken =");
+    const app = dependencies({
+      args: ["--aliases"],
+      env: { XDG_CONFIG_HOME: root },
+      aliasPath,
+      configPath: join(directory, "config.toml"),
+      voiceConfigPath: join(directory, "voice-router.toml"),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("legacy → Ollama · legacy-model\n");
+  });
+
+  test("routes voice from the unified snapshot and leaves every config file unchanged", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const aliasPath = join(directory, "aliases.json");
+    const configPath = join(directory, "config.toml");
+    const voiceConfigPath = join(directory, "voice-router.toml");
+    await writeFile(configPath, `
+      version = 1
+      [aliases.primary]
+      provider = "ollama"
+      model = "unified-model"
+      spoken_names = ["chosen"]
+    `);
+    await writeFile(aliasPath, JSON.stringify({
+      version: 1,
+      aliases: { chosen: { provider: "ollama", model: "legacy-model" } },
+    }));
+    await writeFile(voiceConfigPath, "[chosen]\nspoken_names = ['primary']\n");
+    const before = await Promise.all([
+      Bun.file(configPath).text(),
+      Bun.file(aliasPath).text(),
+      Bun.file(voiceConfigPath).text(),
+      readdir(directory),
+    ]);
+    const generated = runtime({
+      generate: async (provider, model) => {
+        expect({ provider, model }).toEqual({ provider: "ollama", model: "unified-model" });
+        return "unified answer";
+      },
+    });
+    const voiceRunner: VoiceProcessRunner = {
+      isExecutable: async () => true,
+      run: async () => ({
+        kind: "completed",
+        stdout: new Uint8Array(),
+        stderr: new Uint8Array(),
+      }),
+    };
+    const app = dependencies({
+      args: ["--voice", "--input", "chosen question"],
+      platform: "darwin",
+      env: { XDG_CONFIG_HOME: root },
+      aliasPath,
+      configPath,
+      voiceConfigPath,
+      runtime: generated,
+      voiceRunner,
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(generated.calls.generate).toBe(1);
+    expect(await Promise.all([
+      Bun.file(configPath).text(),
+      Bun.file(aliasPath).text(),
+      Bun.file(voiceConfigPath).text(),
+      readdir(directory),
+    ])).toEqual(before);
+  });
+
+  test("rejects malformed unified voice config before generation or speech", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const configPath = join(directory, "config.toml");
+    await writeFile(configPath, "version = 2\n[aliases]\n");
+    const childWork: string[] = [];
+    const voiceRunner: VoiceProcessRunner = {
+      isExecutable: async (path) => {
+        childWork.push(`access:${path}`);
+        return true;
+      },
+      run: async (request) => {
+        childWork.push(`run:${request.executable}`);
+        return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+      },
+    };
+    const app = dependencies({
+      args: ["--voice", "--input", "legacy question"],
+      platform: "darwin",
+      env: { XDG_CONFIG_HOME: root },
+      configPath,
+      voiceRunner,
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.runtime.calls.generate).toBe(0);
+    expect(childWork).toEqual([]);
+    expect(app.stderr.text()).not.toContain(CONFIG_FAILED_NOTICE);
+  });
+
+  test("redacts malformed legacy voice values before any voice side effect", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const sentinel = "PRIVATE-LEGACY-VOICE-SENTINEL";
+    await writeFile(join(directory, "aliases.json"), JSON.stringify({
+      version: 1,
+      aliases: { legacy: { provider: "ollama", model: "legacy-model" } },
+    }));
+    await writeFile(
+      join(directory, "voice-router.toml"),
+      `[legacy]\nspoken_names = ["${sentinel}"]\nbroken =`,
+    );
+    const childWork: string[] = [];
+    const app = dependencies({
+      args: ["--voice", "--input", "legacy question"],
+      platform: "darwin",
+      env: { XDG_CONFIG_HOME: root },
+      aliasPath: join(directory, "aliases.json"),
+      configPath: join(directory, "config.toml"),
+      voiceConfigPath: join(directory, "voice-router.toml"),
+      voiceRunner: {
+        isExecutable: async () => {
+          childWork.push("access");
+          return true;
+        },
+        run: async () => {
+          childWork.push("run");
+          return { kind: "completed", stdout: new Uint8Array(), stderr: new Uint8Array() };
+        },
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(childWork).toEqual([]);
+    expect(app.runtime.calls.generate).toBe(0);
+    expect(app.stderr.text()).not.toContain(sentinel);
+  });
+});
+
+describe("configuration maintenance", () => {
+  test("a default alias save migrates legacy sources only after the save boundary", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const aliasPath = join(directory, "aliases.json");
+    const voiceConfigPath = join(directory, "voice-router.toml");
+    const configPath = join(directory, "config.toml");
+    const aliases = '{"version":1,"aliases":{"legacy":{"provider":"ollama","model":"old"}}}\n';
+    const voice = "[fresh]\nvoice = 'Samantha'\n[stale]\nrate = 205\n";
+    await writeFile(aliasPath, aliases);
+    await writeFile(voiceConfigPath, voice);
+    const app = dependencies({
+      args: ["--provider", "ollama", "--model", "new", "--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { XDG_CONFIG_HOME: root, NO_COLOR: "1" },
+      aliasPath,
+      voiceConfigPath,
+      configPath,
+      prompter: prompts({ names: ["fresh"], instructions: [""] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    const parsed = Bun.TOML.parse(await Bun.file(configPath).text()) as {
+      aliases: Record<string, Record<string, unknown>>;
+    };
+    expect(parsed.aliases.legacy).toMatchObject({ provider: "ollama", model: "old" });
+    expect(parsed.aliases.fresh).toMatchObject({
+      provider: "ollama",
+      model: "new",
+      voice: "Samantha",
+    });
+    expect(parsed.aliases.stale).toBeUndefined();
+    expect(app.stderr.text()).toContain("config: stale voice profiles not attached: stale\n");
+    expect(await Bun.file(aliasPath).text()).toBe(aliases);
+    expect(await Bun.file(voiceConfigPath).text()).toBe(voice);
+    expect(await Bun.file(`${aliasPath}.pre-unified-v1.bak`).text()).toBe(aliases);
+    expect(await Bun.file(`${voiceConfigPath}.pre-unified-v1.bak`).text()).toBe(voice);
+  });
+
+  test("cancelling a default overwrite leaves legacy authority untouched", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const aliasPath = join(directory, "aliases.json");
+    const configPath = join(directory, "config.toml");
+    const aliases = '{"version":1,"aliases":{"daily":{"provider":"ollama","model":"old"}}}\n';
+    await writeFile(aliasPath, aliases);
+    const app = dependencies({
+      args: ["--provider", "ollama", "--model", "new", "--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      env: { XDG_CONFIG_HOME: root, NO_COLOR: "1" },
+      aliasPath,
+      configPath,
+      voiceConfigPath: join(directory, "voice-router.toml"),
+      prompter: prompts({ names: ["daily"], instructions: [""], confirms: [null] }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(await Bun.file(configPath).exists()).toBeFalse();
+    expect(await Bun.file(aliasPath).text()).toBe(aliases);
+    expect((await readdir(directory)).sort()).toEqual(["aliases.json"]);
+  });
+
+  test("prints the config path without reading stdin, config, providers, credentials, or voice", async () => {
+    const app = dependencies({
+      args: ["--config-path"],
+      stdin: {
+        isTTY: false,
+        async *[Symbol.asyncIterator]() {
+          throw new Error("stdin must stay closed");
+        },
+      },
+      configPath: "/chosen/config.toml",
+      loadAliases: async () => { throw new Error("aliases must not load"); },
+      saveAlias: async () => { throw new Error("aliases must not save"); },
+      migrateConfig: async () => { throw new Error("migration must not run"); },
+      runVoice: async () => { throw new Error("voice must not run"); },
+      installVoiceCancellation: () => { throw new Error("voice cancellation must not install"); },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.stdout.text()).toBe("/chosen/config.toml\n");
+    expect(app.stderr.text()).toBe("");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("migrates without unrelated work and reports sorted stale profiles once", async () => {
+    const calls: string[] = [];
+    const app = dependencies({
+      args: ["--migrate-config"],
+      stdin: {
+        isTTY: false,
+        async *[Symbol.asyncIterator]() {
+          throw new Error("stdin must stay closed");
+        },
+      },
+      configPath: "/chosen/config.toml",
+      loadAliases: async () => { throw new Error("application aliases must not load"); },
+      saveAlias: async () => { throw new Error("alias save must not run"); },
+      migrateConfig: async (paths) => {
+        calls.push(paths.configPath);
+        return { kind: "migrated", staleProfiles: ["zed", "alpha"] };
+      },
+      runVoice: async () => { throw new Error("voice must not run"); },
+      installVoiceCancellation: () => { throw new Error("voice cancellation must not install"); },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(calls).toEqual(["/chosen/config.toml"]);
+    expect(app.stdout.text()).toBe("Migrated configuration to /chosen/config.toml.\n");
+    expect(app.stderr.text()).toBe("config: stale voice profiles not attached: alpha, zed\n");
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+
+  test("distinguishes already-unified and empty migration outcomes", async () => {
+    for (const [kind, outputText] of [
+      ["already-unified", "Configuration already unified at /chosen/config.toml.\n"],
+      ["created-empty", "Created empty configuration at /chosen/config.toml.\n"],
+    ] as const) {
+      const app = dependencies({
+        args: ["--migrate-config"],
+        configPath: "/chosen/config.toml",
+        migrateConfig: async () => ({ kind, staleProfiles: [] }),
+      });
+      expect(await runApplication(app.value)).toBe(0);
+      expect(app.stdout.text()).toBe(outputText);
+      expect(app.stderr.text()).toBe("");
+    }
+  });
+
+  test("redacts legacy values from explicit migration diagnostics", async () => {
+    const root = await temporaryDirectory();
+    const directory = join(root, "llm-now");
+    await mkdir(directory);
+    const sentinel = "sk-live-MAINTENANCE-SENTINEL";
+    await writeFile(
+      join(directory, "voice-router.toml"),
+      `[stale]\nvoice = "${sentinel}"\nbroken =\n`,
+    );
+    const app = dependencies({
+      args: ["--migrate-config"],
+      env: { XDG_CONFIG_HOME: root },
+      aliasPath: join(directory, "aliases.json"),
+      configPath: join(directory, "config.toml"),
+      voiceConfigPath: join(directory, "voice-router.toml"),
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).not.toContain(sentinel);
+    expect(await Bun.file(join(directory, "config.toml")).exists()).toBeFalse();
+    expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
+  });
+});
+
 describe("voice boundary", () => {
   test("rejects non-macOS before stdin, aliases, runtime, or injected voice work", async () => {
     let stdinReads = 0;
@@ -432,7 +829,6 @@ describe("voice boundary", () => {
     expect(await runApplication(app.value)).toBe(0);
     expect(generated.calls.generate).toBe(1);
     expect(requests.map((request) => request.executable)).toEqual([
-      "/usr/bin/pbcopy",
       "/usr/bin/say",
     ]);
     expect(new TextDecoder().decode(requests[0]?.stdin)).toBe("integrated answer");
@@ -470,7 +866,7 @@ describe("voice boundary", () => {
     });
 
     expect(await runApplication(app.value)).toBe(1);
-    expect(app.stderr.text()).toContain("voice clipboard failed");
+    expect(app.stderr.text()).toContain("voice answer speech failed");
     expect(app.stderr.text()).not.toContain(answer);
     expect(app.stderr.text()).not.toContain(apiKey);
     expect(app.stderr.text()).not.toContain("\u001b");
