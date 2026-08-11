@@ -12,6 +12,12 @@ import { installVoiceCancellation } from "./src/voice.ts";
 
 const sensitive = createSensitiveValueRegistry();
 const credentialVault = createBunCredentialVault();
+const stdin = {
+  isTTY: process.stdin.isTTY,
+  [Symbol.asyncIterator]() {
+    return Bun.stdin.stream()[Symbol.asyncIterator]();
+  },
+};
 const nativeVaultEnabled = isNativeVaultEnabled({
   bunVersion: Bun.version,
   platform: process.platform,
@@ -25,7 +31,7 @@ const credentialResolver = createCredentialResolver({
 
 process.exitCode = await runApplication({
   args: Bun.argv.slice(2),
-  stdin: process.stdin,
+  stdin,
   stdout: process.stdout,
   stderr: process.stderr,
   runtime: createRuntimeGateway({ env: process.env, credentialResolver, sensitive }),

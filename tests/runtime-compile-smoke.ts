@@ -24,6 +24,7 @@ const voiceRoutingSmoke = join(
   directory,
   process.platform === "win32" ? "voice-routing-smoke.exe" : "voice-routing-smoke",
 );
+const shortcutInput = join(directory, "shortcut-input.txt");
 const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
 const overrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
 
@@ -42,6 +43,7 @@ try {
     model: null,
     instructions: smokeInstructions,
   });
+  await Bun.write(shortcutInput, "daily, smoke\n");
 
   const builds: Array<[string, string]> = [
     [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
@@ -165,6 +167,15 @@ try {
       stdout: "fake:instruction-present",
       stderr: "",
     },
+    {
+      name: "file-backed stdin voice routing",
+      executable: spike,
+      args: ["--voice-route"],
+      stdin: Bun.file(shortcutInput),
+      exitCode: 0,
+      stdout: "fake:instruction-present",
+      stderr: "",
+    },
     ...(process.platform === "darwin" ? [] : [{
       name: "non-macOS speech guard before scorer initialization",
       executable: spike,
@@ -187,7 +198,7 @@ try {
     const result = Bun.spawnSync([smoke.executable, ...smoke.args], {
       cwd: directory,
       env,
-      stdin: new Uint8Array(),
+      stdin: "stdin" in smoke ? smoke.stdin : new Uint8Array(),
     });
     const stdout = result.stdout.toString();
     const stderr = result.stderr.toString();
