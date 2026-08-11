@@ -19,69 +19,44 @@ import {
 } from "../src/io.ts";
 import { stripTerminalSequences } from "../src/prompts.ts";
 
-const APPROVED_HELP_TEXT = `A tiny CLI to send text-generation prompts to the models you already run.
+const APPROVED_HELP_TEXT = `A tiny CLI for prompting models you already use.
 
 Usage:
-  llm-now
+  llm-now [<alias> | --alias <name>] [--input <text>]
+          [--instruction <text>] [--speak]
+  llm-now --provider <id> --model <id|default> [--input <text>]
+          [--instruction <text>] [--speak]
+  llm-now --voice-route [--input <text>] [--instruction <text>] [--speak]
   llm-now --aliases
   llm-now --config-path
   llm-now --migrate-config
-  llm-now --voice [--input <text>]
-  llm-now --input <text>
-  llm-now <alias>
-  llm-now <alias> --input <text>
-  llm-now <alias> --instruction <text> --input <text>
-  llm-now --provider <id> --model <id|default> --input <text>
 
-Rules:
-  Run llm-now with no arguments in a terminal to open the adaptive launcher.
-  With shortcuts: “Run with a saved shortcut…”, “Create a new shortcut…”,
-  “Run once with another provider and model…”, then “Manage connections…”.
-  Without shortcuts: “Create a new shortcut…”, “Run once with a provider and model…”,
-  then “Manage connections…”.
-  Creation uses “Use an available provider…” or “Add a provider with an API key…”.
-  Creation saves the provider/model target and optional instructions before its first prompt.
-  Saved instructions are sent separately on every shortcut run.
-  Run once generates without saving or offering a shortcut.
-  Manage connections owns discovery and API-key addition, replacement, and deletion.
-  Opening a launcher menu performs no provider discovery or credential access.
-  A terminal alias with no input source also asks for one prompt.
-  Otherwise, input comes from exactly one of --input or stdin.
-  On macOS, --voice routes one dictated transcript without changing positional aliases.
-  --instruction is separate from prompt input and applies only to the current request.
-  A command-line instruction replaces saved shortcut instructions for that request.
-  Arguments, --input, piped input, and noninteractive calls bypass the launcher.
-  Deterministic calls use an alias or both --provider and --model.
-  Model "default" is available only for codex-cli and claude-cli.
+Notes:
+  Run without arguments to open the interactive launcher.
+  Read input from --input, stdin, or a terminal prompt; choose one.
 
 Options:
-  --aliases            List saved aliases
-  --config-path        Print the unified configuration path
-  --migrate-config     Migrate legacy configuration without changing aliases
-  --voice              Route one dictated transcript on macOS
-  --input <text>       Prompt text
-  --instruction <text> Request-scoped behavioral instruction
-  --alias <name>       Saved shortcut selection
-  --provider <id>      Explicit provider
-  --model <id>         Explicit model, or default for a supported CLI provider
+  --aliases            List saved shortcuts
+  --config-path        Print the config.toml path
+  --migrate-config     Migrate legacy configuration to config.toml
+  --voice-route        Parse “[wake word] <shortcut> <question>” from input
+  --speak              Speak the response on macOS instead of using stdout
+  --input <text>       Prompt or dictated input
+  --instruction <text> Override saved instructions for this request
+  --alias <name>       Select a saved shortcut
+  --provider <id>      Select a provider
+  --model <id|default> Select a model; default supports codex-cli and claude-cli
   -h, --help           Show help
   --version            Show version
 
 API key environment variables:
-  ANTHROPIC_API_KEY
-  DEEPINFRA_TOKEN
-  DEEPSEEK_API_KEY
-  GEMINI_API_KEY
-  GOOGLE_API_KEY
-  GROQ_API_KEY
-  MISTRAL_API_KEY
-  OPENAI_API_KEY
-  OPENROUTER_API_KEY
-  XAI_API_KEY
+  ANTHROPIC_API_KEY     DEEPINFRA_TOKEN
+  DEEPSEEK_API_KEY      GEMINI_API_KEY
+  GOOGLE_API_KEY        GROQ_API_KEY
+  MISTRAL_API_KEY       OPENAI_API_KEY
+  OPENROUTER_API_KEY    XAI_API_KEY
 
-Secure API-key storage:
-  llm-now can save provider API keys securely for reuse.
-  Linux requires GNOME Keyring or KWallet in your user session.`;
+API keys can also be stored securely through the interactive launcher.`;
 
 function input(text: string, isTTY = false) {
   return {
@@ -153,29 +128,95 @@ describe("arguments and input", () => {
     });
   });
 
-  test("parses --voice as a standalone mode while preserving the positional alias", () => {
-    expect(parseArguments(["--voice"])).toEqual({ kind: "voice" });
-    expect(parseArguments(["--voice", "--input", "  dictated text  "])).toEqual({
-      kind: "voice",
-      input: "  dictated text  ",
-    });
-    expect(parseArguments(["voice"])).toEqual({
+  test("parses voice routing and speech as independent run modifiers", () => {
+    expect(parseArguments(["--voice-route"])).toEqual({
       kind: "run",
-      selection: { kind: "alias", alias: "voice" },
+      voiceRoute: true,
+      selection: { kind: "interactive" },
+    });
+    expect(parseArguments(["--speak"])).toEqual({
+      kind: "run",
+      speak: true,
+      selection: { kind: "interactive" },
+    });
+    expect(
+      parseArguments([
+        "--voice-route",
+        "--speak",
+        "--instruction",
+        "  temporary\nrule  ",
+        "--input",
+        "  dictated text  ",
+      ]),
+    ).toEqual({
+      kind: "run",
+      input: "  dictated text  ",
+      instruction: "  temporary\nrule  ",
+      voiceRoute: true,
+      speak: true,
+      selection: { kind: "interactive" },
     });
   });
 
-  test("rejects voice mode combined with positionals, selection, instructions, or other modes", () => {
+  test("composes speech with every ordinary selection surface", () => {
+    expect(parseArguments(["daily", "--speak", "--input", "hello"])).toEqual({
+      kind: "run",
+      input: "hello",
+      speak: true,
+      selection: { kind: "alias", alias: "daily" },
+    });
+    expect(parseArguments(["--alias", "daily", "--speak"])).toEqual({
+      kind: "run",
+      speak: true,
+      selection: { kind: "alias", alias: "daily" },
+    });
+    expect(
+      parseArguments([
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen",
+        "--speak",
+      ]),
+    ).toEqual({
+      kind: "run",
+      speak: true,
+      selection: { kind: "explicit", provider: "ollama", model: "qwen" },
+    });
+  });
+
+  test("rejects routing combined with another selection", () => {
     const conflicts = [
-      ["--voice", "daily"],
-      ["--voice", "--alias", "daily"],
-      ["--voice", "--provider", "ollama", "--model", "qwen"],
-      ["--voice", "--instruction", "temporary"],
-      ["--voice", "--aliases"],
-      ["--voice", "--help"],
-      ["--voice", "--version"],
+      ["--voice-route", "daily"],
+      ["--voice-route", "--alias", "daily"],
+      ["--voice-route", "--provider", "ollama", "--model", "qwen"],
+      ["--voice-route", "--provider", "ollama"],
+      ["--voice-route", "--model", "qwen"],
     ];
-    for (const args of conflicts) expect(() => parseArguments(args)).toThrow(UsageError);
+    for (const args of conflicts) {
+      expect(() => parseArguments(args)).toThrow(
+        "--voice-route cannot be combined with an alias, --provider, or --model",
+      );
+    }
+  });
+
+  test("retires --voice while preserving voice-related positional aliases", () => {
+    try {
+      parseArguments(["--voice"]);
+      throw new Error("expected retired option to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(UsageError);
+      expect((error as UsageError).exitCode).toBe(2);
+      expect((error as Error).message).toContain("Unknown option '--voice'");
+    }
+
+    for (const alias of ["voice", "voice-route", "speak"]) {
+      expect(parseArguments([alias, "--input", "hello"])).toEqual({
+        kind: "run",
+        input: "hello",
+        selection: { kind: "alias", alias },
+      });
+    }
   });
 
   test("preserves an exact request instruction across every selection surface", () => {
@@ -445,6 +486,10 @@ describe("arguments and input", () => {
     expect(() => parseArguments(["--version", "--instruction", "temporary"])).toThrow(
       UsageError,
     );
+    for (const option of ["--voice-route", "--speak"]) {
+      expect(() => parseArguments(["--help", option])).toThrow(UsageError);
+      expect(() => parseArguments(["--version", option])).toThrow(UsageError);
+    }
   });
 
   test("aliases is a standalone option while the bare word remains an alias", () => {
@@ -457,6 +502,8 @@ describe("arguments and input", () => {
     expect(() => parseArguments(["--aliases", "--instruction", "temporary"])).toThrow(
       UsageError,
     );
+    expect(() => parseArguments(["--aliases", "--voice-route"])).toThrow(UsageError);
+    expect(() => parseArguments(["--aliases", "--speak"])).toThrow(UsageError);
   });
 
   test("configuration maintenance flags are standalone and mutually exclusive", () => {
@@ -466,21 +513,26 @@ describe("arguments and input", () => {
       ["--config-path", "daily"],
       ["--config-path", "--aliases"],
       ["--migrate-config", "--input", "prompt"],
-      ["--migrate-config", "--voice"],
       ["--migrate-config", "--config-path"],
       ["--migrate-config", "--provider", "ollama", "--model", "qwen"],
     ]) expect(() => parseArguments(args)).toThrow(UsageError);
+    for (const mode of ["--config-path", "--migrate-config"]) {
+      for (const option of ["--voice-route", "--speak"]) {
+        expect(() => parseArguments([mode, option])).toThrow(UsageError);
+      }
+    }
   });
 
   test("renders the exact approved compact plain help", () => {
     const linuxHelp = renderHelpText(
       pc.createColors(false),
       BYOK_API_KEY_ENV_VARS,
-      "linux",
     );
     expect(linuxHelp).toBe(APPROVED_HELP_TEXT);
+    expect(linuxHelp).not.toContain("llm-now --voice [");
+    expect(linuxHelp).not.toContain("\n  --voice              ");
     expect(HELP_TEXT).toBe(
-      renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS, process.platform),
+      renderHelpText(pc.createColors(false), BYOK_API_KEY_ENV_VARS),
     );
     for (const rejectedCopy of [
       "printf",
@@ -495,18 +547,6 @@ describe("arguments and input", () => {
     }
   });
 
-  test("describes the native secure credential store for the running platform", () => {
-    const colors = pc.createColors(false);
-    const macHelp = renderHelpText(colors, BYOK_API_KEY_ENV_VARS, "darwin");
-    const linuxHelp = renderHelpText(colors, BYOK_API_KEY_ENV_VARS, "linux");
-
-    expect(macHelp).toContain("llm-now can save provider API keys securely for reuse.");
-    expect(macHelp).toContain("macOS Keychain");
-    expect(macHelp).not.toContain("GNOME Keyring");
-    expect(linuxHelp).toContain("GNOME Keyring or KWallet");
-    expect(linuxHelp).not.toContain("macOS Keychain");
-  });
-
   test("copies and ASCII-sorts credential names without mutating the input", () => {
     const credentialNames = Object.freeze([
       "ZETA_API_KEY",
@@ -514,11 +554,11 @@ describe("arguments and input", () => {
       "MIDDLE_TOKEN",
     ]);
     const originalOrder = [...credentialNames];
-    const rendered = renderHelpText(pc.createColors(false), credentialNames, "linux");
+    const rendered = renderHelpText(pc.createColors(false), credentialNames);
 
     expect(credentialNames).toEqual(originalOrder);
     expect(rendered).toContain(
-      `API key environment variables:\n  ALPHA_API_KEY\n  MIDDLE_TOKEN\n  ZETA_API_KEY`,
+      `API key environment variables:\n  ALPHA_API_KEY    MIDDLE_TOKEN\n  ZETA_API_KEY`,
     );
     for (const name of credentialNames) {
       expect(rendered.split(name)).toHaveLength(2);
@@ -533,19 +573,19 @@ describe("arguments and input", () => {
 
   test("applies semantic ANSI roles without changing the plain layout", () => {
     const colors = pc.createColors(true);
-    const rendered = renderHelpText(colors, BYOK_API_KEY_ENV_VARS, "linux");
+    const rendered = renderHelpText(colors, BYOK_API_KEY_ENV_VARS);
 
     expect(rendered).toContain(colors.bold(colors.greenBright("Usage:")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("llm-now")));
-    expect(rendered).toContain(colors.bold(colors.cyanBright("--voice")));
+    expect(rendered).toContain(colors.bold(colors.cyanBright("--voice-route")));
+    expect(rendered).toContain(colors.bold(colors.cyanBright("--speak")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--input")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--instruction")));
     expect(rendered).toContain(colors.cyan("<text>"));
     expect(rendered).toContain(colors.cyan("ANTHROPIC_API_KEY"));
-    expect(rendered).toContain(
-      colors.bold(colors.greenBright("Secure API-key storage:")),
-    );
-    expect(rendered).toContain("Prompt text");
+    expect(rendered).toContain(colors.bold(colors.greenBright("Notes:")));
+    expect(rendered).toContain("Prompt or dictated input");
+    expect(rendered).toContain("stored securely through the interactive launcher");
     expect(stripTerminalSequences(rendered)).toBe(APPROVED_HELP_TEXT);
   });
 

@@ -514,14 +514,14 @@ async function smoke(archivePath: string): Promise<void> {
       ...aliasEnvironment,
     };
     const cases = [
-      { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --config-path\n  llm-now --migrate-config\n  llm-now --voice [--input <text>]\n  llm-now --input <text>", stderrIncludes: "" },
+      { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--speak]\n  llm-now --provider <id> --model <id|default> [--input <text>]", stderrIncludes: "" },
       { name: "version", args: ["--version"], code: 0, stdout: `${packageMetadata.version}\n`, stderrIncludes: "" },
       ...(process.platform === "darwin" ? [] : [{
-        name: "non-macOS voice guard before scorer initialization",
-        args: ["--voice", "--input", "smoke"],
+        name: "non-macOS speech guard before scorer initialization",
+        args: ["--speak", "--provider", "codex-cli", "--model", "default", "--input", "smoke"],
         code: 1,
         stdout: "",
-        stderr: "voice: llm-now --voice currently supports macOS only.\n",
+        stderr: "voice: llm-now --speak currently supports macOS only.\n",
       }]),
       { name: "deterministic usage failure", args: ["--input", "smoke"], code: 2, stdout: "", stderrIncludes: "usage: non-interactive calls require" },
       {
@@ -533,6 +533,7 @@ async function smoke(archivePath: string): Promise<void> {
       },
       { name: "explicit generation", args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:instruction-absent", stderrIncludes: "" },
       { name: "saved alias instruction", args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:instruction-present", stderr: "" },
+      { name: "cross-platform fuzzy voice routing", args: ["--voice-route", "--input", "aliase, smoke"], code: 0, stdout: "fake:instruction-present", stderr: "" },
       {
         name: "alias instruction replacement",
         args: ["aliases", "--input", "smoke", "--instruction", overrideInstructions],

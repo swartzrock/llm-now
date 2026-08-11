@@ -69,11 +69,27 @@ export interface ConfirmPromptOptions {
 }
 
 export interface SearchablePrompter {
-  select(message: string, options: readonly PromptOption[]): Promise<PromptValue | null>;
-  input(message: string, options?: TextPromptOptions): Promise<string | null>;
-  instruction(message: string): Promise<string | null>;
-  password(message: string, options?: TextPromptOptions): Promise<string | null>;
-  confirm(message: string, options?: ConfirmPromptOptions): Promise<boolean | null>;
+  select(
+    message: string,
+    options: readonly PromptOption[],
+    signal?: AbortSignal,
+  ): Promise<PromptValue | null>;
+  input(
+    message: string,
+    options?: TextPromptOptions,
+    signal?: AbortSignal,
+  ): Promise<string | null>;
+  instruction(message: string, signal?: AbortSignal): Promise<string | null>;
+  password(
+    message: string,
+    options?: TextPromptOptions,
+    signal?: AbortSignal,
+  ): Promise<string | null>;
+  confirm(
+    message: string,
+    options?: ConfirmPromptOptions,
+    signal?: AbortSignal,
+  ): Promise<boolean | null>;
 }
 
 class OptionalInstructionPrompt extends MultiLinePrompt {
@@ -124,7 +140,7 @@ export type InteractiveSelectionResult =
   | { kind: "failed"; exitCode: 1; stage: "discovery" | "model-list" };
 
 export type InteractiveAliasResult =
-  | { kind: "selected"; selection: AliasRecord }
+  | { kind: "selected"; alias: string; selection: AliasRecord }
   | { kind: "fresh" }
   | { kind: "cancelled"; exitCode: 130 };
 
@@ -262,7 +278,8 @@ export async function selectAliasOrFresh(
   const value = await prompter.select("Choose an alias", options);
   if (value === null) return { kind: "cancelled", exitCode: 130 };
   if (value === false) return { kind: "fresh" };
-  return { kind: "selected", selection: resolveAliasChoice(value, aliases).selection };
+  const resolved = resolveAliasChoice(value, aliases);
+  return { kind: "selected", alias: resolved.alias, selection: resolved.selection };
 }
 
 function selectedString(
@@ -371,31 +388,34 @@ export function createSearchablePrompter(
   output: Writable,
 ): SearchablePrompter {
   return {
-    async select(message, options) {
+    async select(message, options, signal) {
       const result = await autocomplete<PromptValue>({
         message,
         options: [...options],
         placeholder: "Type to search…",
         input,
         output,
+        signal,
       });
       return isCancel(result) ? null : result;
     },
-    async input(message, options = {}) {
+    async input(message, options = {}, signal) {
       const result = await clackText({
         message,
         placeholder: options.placeholder,
         validate: options.validate,
         input,
         output,
+        signal,
       });
       return isCancel(result) ? null : result;
     },
-    async instruction(message) {
+    async instruction(message, signal) {
       let resolved = "";
       const prompt = new OptionalInstructionPrompt({
         input,
         output,
+        signal,
         showSubmit: true,
         render() {
           switch (this.state) {
@@ -422,21 +442,23 @@ export function createSearchablePrompter(
       const result = await prompt.prompt();
       return isCoreCancel(result) ? null : resolved;
     },
-    async password(message, options = {}) {
+    async password(message, options = {}, signal) {
       const result = await clackPassword({
         message,
         validate: options.validate,
         input,
         output,
+        signal,
       });
       return isCancel(result) ? null : result;
     },
-    async confirm(message, options = {}) {
+    async confirm(message, options = {}, signal) {
       const result = await clackConfirm({
         message,
         initialValue: options.initialValue ?? false,
         input,
         output,
+        signal,
       });
       return isCancel(result) ? null : result;
     },

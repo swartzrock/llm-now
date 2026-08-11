@@ -129,6 +129,18 @@ describe("terminal alias selection", () => {
       label: "Select a new provider and model…",
     });
   });
+
+  test("returns the canonical alias with a mixed-picker selection", async () => {
+    const aliases = {
+      Daily: { provider: "anthropic", model: "claude-sonnet" },
+    } as const;
+
+    expect(await selectAliasOrFresh(aliases, choices("Daily"))).toEqual({
+      kind: "selected",
+      alias: "Daily",
+      selection: aliases.Daily,
+    });
+  });
 });
 
 describe("terminal provider and model selection", () => {
@@ -441,6 +453,20 @@ describe("terminal provider and model selection", () => {
       { value: "alpha", label: "Alpha" },
     ]);
     setTimeout(() => input.write("\u0003"), 1);
+    expect(await selected).toBeNull();
+  });
+
+  test("real Clack adapter normalizes programmatic aborts", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const root = new AbortController();
+    const selected = createSearchablePrompter(input, output).select(
+      "Pick",
+      [{ value: "alpha", label: "Alpha" }],
+      root.signal,
+    );
+    setTimeout(() => root.abort(), 1);
+
     expect(await selected).toBeNull();
   });
 

@@ -2,10 +2,14 @@
 "llm-now": minor
 ---
 
-Add native macOS voice routing that lets a two-action global Shortcut pass
-Dictated Text through stdin to the installed `llm-now --voice` command. It maps
-saved-alias phrases and speaks one concise answer with optional
-per-alias voice, rate, and validated baseline-pitch settings without requiring
-Python, uv, or a repository checkout for normal use. Retain the locked
-uv-managed Python example as an independent routing and score parity oracle for
+Add composable native voice routing and speech. `--voice-route` maps one
+dictated transcript to a saved alias and question on every supported platform,
+while macOS-only `--speak` adds concise speech guidance and speaks the validated
+answer instead of writing it to stdout. They combine for a two-action global
+Shortcut and `--speak` also works with ordinary alias or provider/model
+selection. Optional per-alias voice, rate, and validated baseline-pitch
+settings remain available without Python, uv, a repository checkout, or
+clipboard mutation. Native input reads the file-backed stdin supplied by macOS
+Shortcuts directly, without a `/bin/cat` adapter. Retain the locked uv-managed
+Python example as an independent combined routing and speech oracle for
 contributors.

@@ -23,8 +23,8 @@ $ llm-now --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5
 
 ![Animated terminal demo of llm-now discovering available providers and using model aliases](docs/demos/demo.gif)
 
-On macOS, the installed `llm-now --voice` command can power a two-action global
-Shortcut without Python, uv, or a repository checkout. See
+On macOS, the installed `llm-now --voice-route --speak` command can power a
+two-action global Shortcut without Python, uv, or a repository checkout. See
 [Talk to a saved alias from a macOS keyboard shortcut](examples/macos-voice-shortcut.md).
 
 ## Install
@@ -52,8 +52,6 @@ Run the bare command in an interactive terminal to open the adaptive launcher:
 ```bash
 llm-now
 ```
-
-![Rendered llm-now help screen showing usage, options, API-key environment variables, and secure storage guidance](docs/demos/help-screen.jpg)
 
 The launcher separates reusable setup, one-off work, and connection management. With saved shortcuts it offers “Run with a saved shortcut…”, “Create a new shortcut…”, “Run once with another provider and model…”, and “Manage connections…” in that order. Without saved shortcuts it omits the unusable saved-shortcut action and offers “Create a new shortcut…”, “Run once with a provider and model…”, and “Manage connections…”. Merely opening either root performs no provider discovery or credential access.
 
@@ -140,6 +138,39 @@ credentials, or data you are not permitted to disclose.
 
 Arguments, `--input`, piped input, and noninteractive execution bypass the launcher. For scripts and non-interactive calls, exactly one prompt source is required: `--input` or stdin. Non-interactive calls require a positional alias, `--alias`, or both `--provider` and `--model`. A second positional argument is never treated as prompt text. Successful generation writes the model response, byte-for-byte, to stdout. Interactive UI and diagnostics use stderr, so the response remains safe to redirect or pipe. After an interactive response, stderr resets terminal styling and adds a clean visual boundary without changing stdout.
 
+## Voice routing and speech
+
+Voice routing and audible output are independent modifiers:
+
+```bash
+# Route a dictated transcript and write the answer to stdout on any supported OS.
+llm-now --voice-route --input "hey daily, summarize this"
+
+# Select the shortcut normally, but speak its answer on macOS.
+llm-now --alias daily --speak --input "Summarize this"
+
+# Route the transcript and speak the answer on macOS (the Shortcut form).
+printf 'hey daily, summarize this' | llm-now --voice-route --speak
+```
+
+`--voice-route` treats its single input as an alias handle followed by a
+question. It selects from saved shortcuts, then follows the ordinary generation
+and stdout contract unless `--speak` is also present. It cannot be combined
+with another alias, provider, or model selection. `--instruction` remains
+available and replaces the routed shortcut's saved instructions for that one
+request.
+
+A route-only mismatch exits `1`, leaves stdout empty, reports a value-free
+reason on stderr, and makes no provider or speech call.
+
+`--speak` keeps the normal positional-alias, `--alias`, explicit
+provider/model, and interactive selection flows. It adds concise plain-text
+speech guidance to the prompt and sends one validated answer to macOS
+`/usr/bin/say` instead of stdout. A saved alias uses its optional speech
+profile; an explicit provider/model selection uses the current macOS speech
+defaults. Speech is macOS-only, while routing without speech works on every
+supported platform. Neither modifier reads or changes the clipboard.
+
 ## Aliases and configuration
 
 The launcher’s creation route saves a required shortcut before its first run. Existing direct interactive provider/model selection retains its established optional alias follow-up: after a successful unnamed call, `llm-now` shows a green contextual field such as `Enter an alias name for OpenAI · gpt-3.5 (Enter to exit)`. Type a name, then optionally enter visible multiline instructions and use its `[ save ]` action, to save that provider/model pair; press Enter at the name field to exit. If the selected provider/model is already saved, it reports the existing alias and suggests an executable command such as `llm-now daily --input "<prompt>"` for next time instead of asking for a duplicate. A launcher run-once call and a call that selected an existing alias never offer this follow-up. Aliases contain no credentials and are available from every working directory.
@@ -224,7 +255,8 @@ Every other field is optional:
 Omitting `voice`, `rate`, or `pitch` lets `/usr/bin/say` inherit the current
 system voice, speech rate, or that voice's normal baseline pitch independently.
 Voice fields are portable: macOS executes them, while Linux and Windows retain
-them across alias saves but continue to reject `--voice` execution.
+them across alias saves. Route-only execution remains available there, while
+`--speak` rejects before reading input or configuration.
 
 The router always tries canonical aliases, then configured spoken names, then
 fuzzy matching. Configurable thresholds do not remove its safety gates: fuzzy
@@ -280,9 +312,9 @@ reports that configuration is already unified.
 Once `config.toml` exists, it is the sole automatic authority. If it is
 malformed or unsupported, configuration-backed commands fail closed rather
 than falling back to legacy files or backups. `--config-path` and the early
-non-macOS `--voice` rejection do not read application configuration. On macOS,
-running `--voice` may read the selected authority but never creates
-`config.toml`, migrates legacy files, writes a backup, or changes configuration.
+non-macOS `--speak` rejection do not read application configuration. Routing
+and speech may read the selected authority but never create `config.toml`,
+migrate legacy files, write a backup, or change configuration.
 Installed and packaged execution is native and requires no
 Python, uv, or repository checkout; the Python example remains a
 contributor-only independent parity oracle.

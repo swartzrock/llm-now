@@ -602,7 +602,8 @@ Then edit an isolated alias to reference a nonexistent model and run it. A missi
 
 Keep valid legacy `aliases.json` and `voice-router.toml` files in the isolated
 directory, then create malformed `config.toml`. Run inventory, an explicit
-provider/model generation, and, on macOS, a voice invocation. Repeat with
+provider/model generation, a routed generation, and, on macOS, a speech-enabled
+invocation. Repeat with
 version `2`, an unknown root field, an alias `api_key` field, an invalid model
 `"default"` for a non-CLI provider, and out-of-range routing or speech values.
 
@@ -673,20 +674,22 @@ and configured spoken names before fuzzy matching. Threshold changes must not by
 candidate-length compatibility, exact digit-sequence equality, the minimum
 score, or the runner-up margin; weak and ambiguous requests remain rejected.
 
-### MT-22C: Keep voice execution read-only and native
+### MT-22C: Keep voice routing and speech read-only and native
 
 In a fresh isolated directory with only valid legacy alias and voice files,
 record directory contents and checksums, then run one successful exact-alias
-voice request and one rejected or failed request. Neither invocation may create
-`config.toml`, a migration backup, lock, temporary file, or changed legacy file.
-Repeat with valid unified configuration and confirm it too remains byte-for-byte
-unchanged. On Linux and Windows, `--voice` must still reject at the established
-platform boundary while retaining configured voice fields through a normal
-alias save.
+`--voice-route` request and one rejected route. On macOS, also run one direct
+alias `--speak` request and one combined `--voice-route --speak` request. None
+may create `config.toml`, a migration backup, lock, temporary file, or changed
+legacy file. Repeat with valid unified configuration and confirm it too remains
+byte-for-byte unchanged. On Linux and Windows, route-only execution must retain
+the ordinary stdout contract, while `--speak` must reject before reading input
+or configuration. A normal alias save must continue to retain configured voice
+fields on those platforms.
 
 Run the packaged executable with Python and uv absent from `PATH` and outside a
-repository checkout. Config discovery, migration, alias save, and supported
-native voice execution must remain available without launching Python. The
+repository checkout. Config discovery, migration, alias save, native routing,
+and macOS speech must remain available without launching Python. The
 source-only Python example remains an independent contributor parity oracle,
 not an installed runtime dependency.
 
@@ -1072,8 +1075,9 @@ repository checkout.
 
 The finished Shortcut must contain only `Dictate Text` followed by
 `Run Shell Script`. It must pass `Dictated Text` to stdin, and the shell action
-must invoke the absolute installed path to `llm-now --voice`. No `--input`,
-marker parser, separate `Speak Text` action, or Python/uv launcher may remain.
+must invoke the absolute installed path to `llm-now --voice-route --speak`. No
+`--input`, marker parser, separate `Speak Text` action, or Python/uv launcher
+may remain.
 
 Complete the guide's exact, configured-phrase, unique-fuzzy, poor, and ambiguous
 routes; optional/omitted/configured wake words; per-alias voice/rate/pitch;
@@ -1082,6 +1086,27 @@ failures; permissions; and recovery.
 A successful process exit alone is not evidence that an installed voice honored
 the pitch setting. Confirm failed or ambiguous routing does not invoke a model,
 and a speech failure does not trigger a replacement notice.
+
+From Terminal, also complete each independent composition boundary:
+
+```bash
+"$BIN" --voice-route --input "haiku, explain a perfect chord" >stdout.txt 2>stderr.txt
+"$BIN" --alias haiku --speak --input "Explain a perfect chord" >stdout.txt 2>stderr.txt
+"$BIN" --provider ollama --model llama3 --speak --input "Explain a perfect chord" >stdout.txt 2>stderr.txt
+```
+
+Route-only execution must generate once, write the answer only to stdout, and
+start no speech process. Direct alias speech must use that alias's optional
+voice profile; explicit provider/model speech must use system speech defaults.
+Both speech calls must generate once, speak once, and leave answer stdout empty.
+On Linux and Windows, repeat route-only successfully and confirm either speech
+call returns the fixed macOS-only failure before reading stdin, configuration,
+credentials, or routing state.
+
+For the clipboard-negative check, copy a distinctive sentinel in another
+application before the combined Shortcut run. After it finishes, paste into a
+blank document. The sentinel must remain unchanged: neither routing nor speech
+uses the clipboard.
 
 For cancellation, start a slow request and use the Shortcut's stop control. The
 command must handle its root interrupt, reap the active operation, exit `130`,

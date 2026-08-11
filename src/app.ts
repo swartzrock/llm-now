@@ -36,8 +36,10 @@ import {
   type ConfigSnapshot,
 } from "./config.ts";
 import {
+  InvalidUtf8Error,
   isInteractive,
   promptValidationMessage,
+  resolveInputSource,
   resolvePrompt,
   type PromptInput,
   type TextOutput,
@@ -74,13 +76,26 @@ import {
 } from "./prompts.ts";
 import { RuntimeStageError, type RuntimeGateway } from "./runtime.ts";
 import {
+  CONFIG_FAILED_NOTICE,
+  CREATE_ALIAS_NOTICE,
+  REQUEST_FAILED_NOTICE,
+  RETRY_NOTICE,
+  VOICE_PROMPT,
   createBunVoiceProcessRunner,
-  runVoice as runNativeVoice,
+  prepareVoiceSpeech,
+  redactVoiceRequestValues,
+  routeVoiceTranscript,
+  speakVoiceAnswer,
+  speakVoiceNotice,
+  type PreparedVoiceSpeech,
   type VoiceCancellation,
+  type VoiceNotice,
   type VoiceProcessRunner,
+  type VoiceSpeechPreflightOutcome,
 } from "./voice.ts";
 
 const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
+const DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS = 500;
 const DEFAULT_MODEL_LIST_TIMEOUT_MS = 10_000;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
 const MANAGE_API_KEYS_VALUE = "setup:manage-api-keys";
@@ -118,12 +133,12 @@ export interface ApplicationDependencies {
   saveAlias?: typeof saveStoredAlias;
   migrateConfig?: typeof migrateStoredConfig;
   generationTimeoutMs?: number;
+  generationCleanupTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault: CredentialVault;
   credentialResolver: CredentialResolver;
   sensitive: SensitiveValueRegistry;
   nativeVaultEnabled: boolean;
-  runVoice?: typeof runNativeVoice;
   installVoiceCancellation: () => VoiceCancellation;
   voiceRunner?: VoiceProcessRunner;
   readVoiceConfig?: (path: string) => Promise<Uint8Array | null>;
@@ -135,6 +150,7 @@ type ShortcutFollowUp = "none" | "existing-only" | "legacy";
 interface ResolvedSelection {
   selection: AliasRecord;
   shortcutFollowUp: ShortcutFollowUp;
+  alias?: string;
   existingAlias?: string;
 }
 
@@ -167,10 +183,30 @@ function sanitizeDiagnostic(
     : `${sanitized.slice(0, MAX_DIAGNOSTIC_LENGTH - 1)}…`;
 }
 
-function diagnosticWriter(deps: ApplicationDependencies): (text: string) => void {
+function diagnosticWriter(
+  deps: ApplicationDependencies,
+  requestValues: readonly string[] = [],
+): (text: string) => void {
   return (text) => {
-    const sanitized = sanitizeDiagnostic(text, deps.env, deps.sensitive);
+    const sanitized = sanitizeDiagnostic(
+      redactVoiceRequestValues(text, requestValues),
+      deps.env,
+      deps.sensitive,
+    );
     deps.stderr.write(`${sanitized}${sanitized.endsWith("\n") ? "" : "\n"}`);
+  };
+}
+
+function withPromptSignal(
+  prompter: SearchablePrompter,
+  signal: AbortSignal,
+): SearchablePrompter {
+  return {
+    select: (message, options) => prompter.select(message, options, signal),
+    input: (message, options) => prompter.input(message, options, signal),
+    instruction: (message) => prompter.instruction(message, signal),
+    password: (message, options) => prompter.password(message, options, signal),
+    confirm: (message, options) => prompter.confirm(message, options, signal),
   };
 }
 
@@ -707,36 +743,75 @@ function runWithCredentialMutationLock<T>(
   );
 }
 
+type GenerationOutcome =
+  | Readonly<{ kind: "completed"; response: string }>
+  | Readonly<{ kind: "failed"; error: unknown }>
+  | Readonly<{ kind: "timed_out" }>
+  | Readonly<{ kind: "cancelled" }>;
+
+async function waitForSettlement(
+  operation: Promise<unknown>,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    operation.then(() => undefined, () => undefined),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+  if (timer !== undefined) clearTimeout(timer);
+}
+
 async function generateWithTimeout(
   deps: ApplicationDependencies,
   provider: ByokProviderId,
   model: string | null,
   prompt: string,
   instructions?: string,
-): Promise<string> {
+  rootSignal?: AbortSignal,
+): Promise<GenerationOutcome> {
   const timeoutMs = deps.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS;
   const controller = new AbortController();
-  let timedOut = false;
+  let interrupt: (outcome: GenerationOutcome) => void = () => undefined;
+  const interrupted = new Promise<GenerationOutcome>((resolve) => {
+    interrupt = resolve;
+  });
+  const cancel = () => {
+    controller.abort(rootSignal?.reason);
+    interrupt({ kind: "cancelled" });
+  };
+  rootSignal?.addEventListener("abort", cancel, { once: true });
   const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
+    controller.abort(new Error("generation timed out"));
+    interrupt({ kind: "timed_out" });
   }, timeoutMs);
-  try {
-    return await deps.runtime.generate(
+  const generation = Promise.resolve().then(() => deps.runtime.generate(
       provider,
       model,
       prompt,
       controller.signal,
       instructions,
+    )).then<GenerationOutcome, GenerationOutcome>(
+      (response) => ({ kind: "completed", response }),
+      (error) => ({ kind: "failed", error }),
     );
-  } catch (error) {
-    if (timedOut) {
-      throw new RuntimeStageError("generation", provider, `timed out after ${timeoutMs}ms`);
+  if (rootSignal?.aborted) cancel();
+  const outcome = await Promise.race([generation, interrupted]);
+  clearTimeout(timer);
+  rootSignal?.removeEventListener("abort", cancel);
+
+  if (outcome.kind === "cancelled" || outcome.kind === "timed_out") {
+    if (provider === "codex-cli" || provider === "claude-cli") {
+      await generation;
+    } else {
+      await waitForSettlement(
+        generation,
+        deps.generationCleanupTimeoutMs ?? DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS,
+      );
     }
-    throw error;
-  } finally {
-    clearTimeout(timer);
   }
+  return rootSignal?.aborted ? { kind: "cancelled" } : outcome;
 }
 
 async function withStageTimeout<T>(
@@ -777,6 +852,7 @@ async function resolveSelection(
       return {
         selection: await deps.resolveAlias(applicationAliasPath(deps), deterministic.alias),
         shortcutFollowUp: "none",
+        alias: normalizeAliasName(deterministic.alias),
       };
     }
     const canonicalName = normalizeAliasName(deterministic.alias);
@@ -785,6 +861,7 @@ async function resolveSelection(
     return {
       selection: resolved,
       shortcutFollowUp: "none",
+      alias: canonicalName,
     };
   }
   if (deterministic.kind === "explicit") {
@@ -803,6 +880,7 @@ async function resolveSelection(
       return {
         selection: aliasResult.selection,
         shortcutFollowUp: "none",
+        alias: aliasResult.alias,
       };
     }
   }
@@ -1221,6 +1299,7 @@ async function finishCreatedShortcut(
     selection: {
       selection: shortcut.selection,
       shortcutFollowUp: "none",
+      alias: shortcut.name,
     },
   };
 }
@@ -1430,6 +1509,7 @@ async function runLauncher(
       selection: {
         selection: aliasResult.selection,
         shortcutFollowUp: "none",
+        alias: aliasResult.alias,
       },
     };
   }
@@ -1462,8 +1542,29 @@ function writeResponse(stdout: TextOutput, response: string): Promise<void> {
   });
 }
 
+async function voiceNoticeExit(
+  speech: PreparedVoiceSpeech,
+  notice: VoiceNotice,
+  successfulExit: 0 | 1,
+  cancelled: () => 130,
+): Promise<number> {
+  const outcome = await speakVoiceNotice(speech, notice);
+  if (outcome.kind === "cancelled") return cancelled();
+  return outcome.kind === "completed" ? successfulExit : 1;
+}
+
+async function voicePreflightFailureExit(
+  outcome: Exclude<VoiceSpeechPreflightOutcome, { kind: "ready" }>,
+  cancelled: () => 130,
+): Promise<number> {
+  if (outcome.kind === "cancelled") return cancelled();
+  if (outcome.noticeSpeech === undefined) return 1;
+  return voiceNoticeExit(outcome.noticeSpeech, CONFIG_FAILED_NOTICE, 1, cancelled);
+}
+
 export async function runApplication(deps: ApplicationDependencies): Promise<number> {
-  const diagnostic = diagnosticWriter(deps);
+  const requestValues: string[] = [];
+  const diagnostic = diagnosticWriter(deps, requestValues);
   try {
     const parsed = parseArguments(deps.args);
     if (parsed.kind === "help") {
@@ -1472,7 +1573,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         && !deps.env.NO_COLOR
         && deps.env.TERM !== "dumb",
       );
-      deps.stdout.write(`${renderHelpText(colors, BYOK_API_KEY_ENV_VARS, deps.platform)}\n`);
+      deps.stdout.write(`${renderHelpText(colors, BYOK_API_KEY_ENV_VARS)}\n`);
       return 0;
     }
     if (parsed.kind === "version") {
@@ -1496,129 +1597,259 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       );
       return 0;
     }
-    if (parsed.kind === "voice") {
-      if (deps.platform !== "darwin") {
-        diagnostic("voice: llm-now --voice currently supports macOS only.");
-        return 1;
-      }
-      const snapshot = await loadApplicationConfigSnapshot(deps, true);
-      const cancellation = deps.installVoiceCancellation();
-      try {
-        return await (deps.runVoice ?? runNativeVoice)({
-          inputFlag: parsed.input,
-          stdin: deps.stdin,
-          runtime: deps.runtime,
-          sensitive: deps.sensitive,
-          env: deps.env,
-          snapshot,
-          runner: deps.voiceRunner ?? createBunVoiceProcessRunner(),
-          signal: cancellation.signal,
-          diagnostic,
-          generationTimeoutMs: deps.generationTimeoutMs,
-        });
-      } finally {
-        cancellation.dispose();
-      }
-    }
     if (parsed.kind === "aliases") {
       const snapshot = await loadApplicationConfigSnapshot(deps);
       const roster = formatAliasInventory(snapshot.aliases);
       if (roster.length > 0) deps.stdout.write(`${roster}\n`);
       return 0;
     }
-
-    const interactive = isInteractive(deps.stdin, deps.stderr);
-    let prompt: string;
-    let selection: ResolvedSelection;
-    if (deps.args.length === 0 && interactive) {
-      const snapshot = await loadApplicationConfigSnapshot(deps);
-      const outcome = await runLauncher(deps, snapshot.aliases, diagnostic);
-      if (typeof outcome === "number") return outcome;
-      prompt = outcome.prompt;
-      selection = outcome.selection;
-    } else if (
-      parsed.selection.kind === "alias"
-      && parsed.input === undefined
-      && interactive
-    ) {
-      const snapshot = deps.resolveAlias === undefined
-        ? await loadApplicationConfigSnapshot(deps)
-        : await preflightUnifiedConfig(deps);
-      const resolved = await resolveSelection(
-        deps,
-        parsed.selection,
-        snapshot,
-        interactive,
-        diagnostic,
-      );
-      if (typeof resolved === "number") return resolved;
-      selection = resolved;
-      const entered = await collectOneShotPrompt(
-        deps,
-        aliasPromptMessage(deps, parsed.selection.alias, resolved.selection),
-      );
-      if (entered === null) return 130;
-      prompt = entered;
-    } else {
-      if (!interactive && parsed.selection.kind === "interactive") {
-        requireDeterministicSelection(parsed.selection, false);
-      }
-      prompt = await resolvePrompt(parsed.input, deps.stdin);
-      const snapshot = parsed.selection.kind === "explicit"
-        ? await preflightUnifiedConfig(deps)
-        : parsed.selection.kind === "alias" && deps.resolveAlias !== undefined
-        ? await preflightUnifiedConfig(deps)
-        : await loadApplicationConfigSnapshot(deps);
-      const resolved = await resolveSelection(
-        deps,
-        parsed.selection,
-        snapshot,
-        interactive,
-        diagnostic,
-      );
-      if (typeof resolved === "number") return resolved;
-      selection = resolved;
-    }
-
-    const effectiveInstructions = parsed.instruction ?? selection.selection.instructions;
-    const response = await generateWithTimeout(
-      deps,
-      selection.selection.provider,
-      selection.selection.model,
-      prompt,
-      effectiveInstructions,
-    );
-    const terminalResponse = stripTerminalSequences(response);
-    if (
-      deps.sensitive.redact(response) !== response
-      || deps.sensitive.redact(terminalResponse) !== terminalResponse
-    ) {
-      diagnostic("generation: response withheld because it contained a registered credential.");
+    if (parsed.speak && deps.platform !== "darwin") {
+      diagnostic("voice: llm-now --speak currently supports macOS only.");
       return 1;
     }
-    await writeResponse(deps.stdout, response);
 
-    if (interactive) writeInteractiveBoundary(deps.stderr, response);
-    if (
-      interactive
-      && selection.shortcutFollowUp !== "none"
-      && selection.existingAlias !== undefined
-      && parsed.instruction === undefined
-    ) {
-      const colors = createTerminalColors(deps.stderr, deps.env);
-      const target = safeFormatSelection(deps, selection.selection);
-      deps.stderr.write(
-        colors.green(
-          `◆ ${target} is already saved as alias ${selection.existingAlias}\n`
-          + "  Next time, use ",
-        )
-        + colors.white(`llm-now ${selection.existingAlias} --input "<prompt>"`)
-        + "\n",
+    const cancellation = parsed.speak ? deps.installVoiceCancellation() : undefined;
+    let cancellationReported = false;
+    const cancelled = (): 130 => {
+      if (!cancellationReported) {
+        cancellationReported = true;
+        diagnostic("voice request cancelled");
+      }
+      return 130;
+    };
+    try {
+      const signal = cancellation?.signal;
+      if (signal?.aborted) return cancelled();
+      const interactive = isInteractive(deps.stdin, deps.stderr);
+      const requestDeps = signal === undefined
+        ? deps
+        : { ...deps, prompter: withPromptSignal(deps.prompter, signal) };
+      const runner = parsed.speak
+        ? deps.voiceRunner ?? createBunVoiceProcessRunner()
+        : undefined;
+      const preflightSpeech = (
+        profile: ConfigSnapshot["voice"]["profiles"][string] | undefined,
+      ) => prepareVoiceSpeech({
+        sensitive: deps.sensitive,
+        env: deps.env,
+        runner: runner!,
+        signal: signal!,
+        diagnostic,
+        requestValues,
+      }, profile);
+      const rejectedRoute = async (
+        message: string,
+        notice: VoiceNotice,
+        successfulExit: 0 | 1,
+      ): Promise<number> => {
+        diagnostic(message);
+        if (!parsed.speak) return 1;
+        const preflight = await preflightSpeech(undefined);
+        if (preflight.kind !== "ready") {
+          return voicePreflightFailureExit(preflight, cancelled);
+        }
+        return voiceNoticeExit(preflight.speech, notice, successfulExit, cancelled);
+      };
+
+      let prompt: string;
+      let selection: ResolvedSelection;
+      let snapshot: ConfigSnapshot | null = null;
+      if (parsed.voiceRoute) {
+        snapshot = await loadApplicationConfigSnapshot(deps, true);
+        if (signal?.aborted) return cancelled();
+        let transcript: string;
+        try {
+          transcript = await resolveInputSource(parsed.input, deps.stdin, signal);
+        } catch (error) {
+          if (signal?.aborted) return cancelled();
+          if (error instanceof InvalidUtf8Error) {
+            return rejectedRoute("voice input rejected: invalid UTF-8", RETRY_NOTICE, 0);
+          }
+          throw error;
+        }
+        requestValues.push(transcript);
+        if (transcript.trim().length === 0) {
+          return rejectedRoute("voice input rejected: dictated transcript is blank", RETRY_NOTICE, 0);
+        }
+        const route = routeVoiceTranscript(transcript, snapshot);
+        if (route.kind === "rejected") {
+          if (route.reason === "empty_aliases") {
+            return rejectedRoute("voice alias store is empty", CREATE_ALIAS_NOTICE, 1);
+          }
+          if (route.reason === "invalid_snapshot") {
+            return rejectedRoute("voice configuration failed: invalid routing snapshot", CONFIG_FAILED_NOTICE, 1);
+          }
+          return rejectedRoute(`voice request rejected: ${route.reason}`, RETRY_NOTICE, 0);
+        }
+        prompt = route.question;
+        selection = {
+          selection: route.aliasRecord,
+          shortcutFollowUp: "none",
+          alias: route.alias,
+        };
+      } else if (
+        interactive
+        && (deps.args.length === 0 || (parsed.speak && deps.args.length === 1))
+      ) {
+        snapshot = await loadApplicationConfigSnapshot(deps, parsed.speak);
+        if (signal?.aborted) return cancelled();
+        const outcome = await runLauncher(requestDeps, snapshot.aliases, diagnostic);
+        if (typeof outcome === "number") {
+          return signal?.aborted ? cancelled() : outcome;
+        }
+        prompt = outcome.prompt;
+        selection = outcome.selection;
+      } else if (
+        parsed.selection.kind === "alias"
+        && parsed.input === undefined
+        && interactive
+      ) {
+        snapshot = parsed.speak || deps.resolveAlias === undefined
+          ? await loadApplicationConfigSnapshot(deps, parsed.speak)
+          : await preflightUnifiedConfig(deps);
+        if (signal?.aborted) return cancelled();
+        const resolved = await resolveSelection(
+          requestDeps,
+          parsed.selection,
+          snapshot,
+          interactive,
+          diagnostic,
+        );
+        if (typeof resolved === "number") {
+          return signal?.aborted ? cancelled() : resolved;
+        }
+        selection = resolved;
+        const entered = await collectOneShotPrompt(
+          requestDeps,
+          aliasPromptMessage(deps, parsed.selection.alias, resolved.selection),
+        );
+        if (entered === null) return signal?.aborted ? cancelled() : 130;
+        prompt = entered;
+      } else {
+        if (!interactive && parsed.selection.kind === "interactive") {
+          requireDeterministicSelection(parsed.selection, false);
+        }
+        if (signal === undefined) {
+          prompt = await resolvePrompt(parsed.input, deps.stdin);
+        } else {
+          try {
+            prompt = await resolveInputSource(parsed.input, deps.stdin, signal);
+          } catch (error) {
+            if (signal.aborted) return cancelled();
+            if (error instanceof InvalidUtf8Error) throw new UsageError(error.message);
+            throw error;
+          }
+          const validationMessage = promptValidationMessage(prompt);
+          if (validationMessage !== undefined) throw new UsageError(validationMessage);
+        }
+        if (signal?.aborted) return cancelled();
+        snapshot = parsed.selection.kind === "explicit"
+          ? await preflightUnifiedConfig(deps)
+          : parsed.selection.kind === "alias"
+            && deps.resolveAlias !== undefined
+            && !parsed.speak
+          ? await preflightUnifiedConfig(deps)
+          : await loadApplicationConfigSnapshot(deps, parsed.speak);
+        if (signal?.aborted) return cancelled();
+        const resolved = await resolveSelection(
+          requestDeps,
+          parsed.selection,
+          snapshot,
+          interactive,
+          diagnostic,
+        );
+        if (typeof resolved === "number") {
+          return signal?.aborted ? cancelled() : resolved;
+        }
+        selection = resolved;
+      }
+
+      const effectiveInstructions = parsed.instruction ?? selection.selection.instructions;
+      requestValues.push(prompt);
+      if (effectiveInstructions !== undefined) requestValues.push(effectiveInstructions);
+      let speech: PreparedVoiceSpeech | undefined;
+      if (parsed.speak) {
+        const profile = selection.alias === undefined
+          ? undefined
+          : snapshot?.voice.profiles[selection.alias];
+        const preflight = await preflightSpeech(profile);
+        if (preflight.kind !== "ready") {
+          return voicePreflightFailureExit(preflight, cancelled);
+        }
+        speech = preflight.speech;
+        prompt = `${VOICE_PROMPT}\n\n${prompt}`;
+      }
+
+      const generated = await generateWithTimeout(
+        deps,
+        selection.selection.provider,
+        selection.selection.model,
+        prompt,
+        effectiveInstructions,
+        signal,
       );
-    } else if (interactive && selection.shortcutFollowUp === "legacy") {
-      if (!(await offerAliasSave(deps, selection.selection, diagnostic))) return 1;
+      if (generated.kind === "cancelled") return cancelled();
+      if (generated.kind === "timed_out") {
+        if (speech === undefined) {
+          throw new RuntimeStageError(
+            "generation",
+            selection.selection.provider,
+            `timed out after ${deps.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS}ms`,
+          );
+        }
+        diagnostic("voice generation timed out");
+        return voiceNoticeExit(speech, REQUEST_FAILED_NOTICE, 0, cancelled);
+      }
+      if (generated.kind === "failed") {
+        if (speech === undefined) throw generated.error;
+        diagnostic("voice generation failed");
+        return voiceNoticeExit(speech, REQUEST_FAILED_NOTICE, 0, cancelled);
+      }
+      const response = generated.response;
+      if (speech !== undefined) {
+        const spoken = await speakVoiceAnswer(speech, response);
+        if (spoken.kind === "cancelled") return cancelled();
+        if (spoken.kind === "rejected") {
+          return voiceNoticeExit(speech, REQUEST_FAILED_NOTICE, 0, cancelled);
+        }
+        if (spoken.kind === "failed") return 1;
+      } else {
+        const terminalResponse = stripTerminalSequences(response);
+        if (
+          deps.sensitive.redact(response) !== response
+          || deps.sensitive.redact(terminalResponse) !== terminalResponse
+        ) {
+          diagnostic("generation: response withheld because it contained a registered credential.");
+          return 1;
+        }
+        await writeResponse(deps.stdout, response);
+        if (interactive) writeInteractiveBoundary(deps.stderr, response);
+      }
+
+      if (signal?.aborted) return cancelled();
+      if (
+        interactive
+        && selection.shortcutFollowUp !== "none"
+        && selection.existingAlias !== undefined
+        && parsed.instruction === undefined
+      ) {
+        const colors = createTerminalColors(deps.stderr, deps.env);
+        const target = safeFormatSelection(deps, selection.selection);
+        deps.stderr.write(
+          colors.green(
+            `◆ ${target} is already saved as alias ${selection.existingAlias}\n`
+            + "  Next time, use ",
+          )
+          + colors.white(`llm-now ${selection.existingAlias} --input "<prompt>"`)
+          + "\n",
+        );
+      } else if (interactive && selection.shortcutFollowUp === "legacy") {
+        if (!(await offerAliasSave(deps, selection.selection, diagnostic))) return 1;
+      }
+      return 0;
+    } finally {
+      cancellation?.dispose();
     }
-    return 0;
   } catch (error) {
     if (error instanceof UsageError) {
       diagnostic(`usage: ${error.message}`);

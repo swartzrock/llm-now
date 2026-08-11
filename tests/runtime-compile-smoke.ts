@@ -24,6 +24,7 @@ const voiceRoutingSmoke = join(
   directory,
   process.platform === "win32" ? "voice-routing-smoke.exe" : "voice-routing-smoke",
 );
+const shortcutInput = join(directory, "shortcut-input.txt");
 const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
 const overrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
 
@@ -42,6 +43,7 @@ try {
     model: null,
     instructions: smokeInstructions,
   });
+  await Bun.write(shortcutInput, "daily, smoke");
 
   const builds: Array<[string, string]> = [
     [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
@@ -95,19 +97,14 @@ try {
       executable: spike,
       args: ["--help"],
       exitCode: 0,
-      stdoutIncludes: "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --config-path\n  llm-now --migrate-config\n  llm-now --voice [--input <text>]\n  llm-now --input <text>\n  llm-now <alias>",
+      stdoutIncludes: "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--speak]",
       stdoutLandmarks: [
-        "Usage:\n  llm-now\n  llm-now --aliases\n  llm-now --config-path\n  llm-now --migrate-config\n  llm-now --voice [--input <text>]\n  llm-now --input <text>\n  llm-now <alias>",
-        "Rules:\n  Run llm-now with no arguments in a terminal to open the adaptive launcher.",
-        "With shortcuts: “Run with a saved shortcut…”, “Create a new shortcut…”,\n  “Run once with another provider and model…”, then “Manage connections…”.\n  Without shortcuts: “Create a new shortcut…”, “Run once with a provider and model…”,\n  then “Manage connections…”.",
-        "Creation uses “Use an available provider…” or “Add a provider with an API key…”.\n  Creation saves the provider/model target and optional instructions before its first prompt.\n  Saved instructions are sent separately on every shortcut run.\n  Run once generates without saving or offering a shortcut.",
-        "Manage connections owns discovery and API-key addition, replacement, and deletion.\n  Opening a launcher menu performs no provider discovery or credential access.",
-        "Arguments, --input, piped input, and noninteractive calls bypass the launcher.\n  Deterministic calls use an alias or both --provider and --model.",
-        "Options:\n  --aliases            List saved aliases\n  --config-path        Print the unified configuration path\n  --migrate-config     Migrate legacy configuration without changing aliases\n  --voice              Route one dictated transcript on macOS\n  --input <text>       Prompt text\n  --instruction <text> Request-scoped behavioral instruction",
-        "API key environment variables:\n  ANTHROPIC_API_KEY",
-        "  DEEPINFRA_TOKEN",
-        "  XAI_API_KEY",
-        "Secure API-key storage:\n  llm-now can save provider API keys securely for reuse.",
+        "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--speak]\n  llm-now --provider <id> --model <id|default> [--input <text>]",
+        "Notes:\n  Run without arguments to open the interactive launcher.\n  Read input from --input, stdin, or a terminal prompt; choose one.",
+        "Options:\n  --aliases            List saved shortcuts\n  --config-path        Print the config.toml path\n  --migrate-config     Migrate legacy configuration to config.toml\n  --voice-route        Parse “[wake word] <shortcut> <question>” from input",
+        "API key environment variables:\n  ANTHROPIC_API_KEY     DEEPINFRA_TOKEN",
+        "  OPENROUTER_API_KEY    XAI_API_KEY",
+        "API keys can also be stored securely through the interactive launcher.",
       ],
       stdoutExcludes: "\u001b",
       stdoutHasOneFinalNewline: true,
@@ -163,6 +160,31 @@ try {
       stderr: "",
     },
     {
+      name: "cross-platform fuzzy voice routing",
+      executable: spike,
+      args: ["--voice-route", "--input", "dail, smoke"],
+      exitCode: 0,
+      stdout: "fake:instruction-present",
+      stderr: "",
+    },
+    {
+      name: "file-backed stdin voice routing",
+      executable: spike,
+      args: ["--voice-route"],
+      stdin: Bun.file(shortcutInput),
+      exitCode: 0,
+      stdout: "fake:instruction-present",
+      stderr: "",
+    },
+    ...(process.platform === "darwin" ? [] : [{
+      name: "non-macOS speech guard before scorer initialization",
+      executable: spike,
+      args: ["--speak", "--provider", "codex-cli", "--model", "default", "--input", "smoke"],
+      exitCode: 1,
+      stdout: "",
+      stderr: "voice: llm-now --speak currently supports macOS only.\n",
+    }]),
+    {
       name: "fake CLI generation with alias instruction replacement",
       executable: spike,
       args: ["dAiLy", "--input", "smoke", "--instruction", overrideInstructions],
@@ -176,7 +198,7 @@ try {
     const result = Bun.spawnSync([smoke.executable, ...smoke.args], {
       cwd: directory,
       env,
-      stdin: new Uint8Array(),
+      stdin: "stdin" in smoke ? smoke.stdin : new Uint8Array(),
     });
     const stdout = result.stdout.toString();
     const stderr = result.stderr.toString();
