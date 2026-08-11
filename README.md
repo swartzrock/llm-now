@@ -110,17 +110,16 @@ input, instruction, output, diagnostic, and exit-code behavior.
 
 ## Voice
 
-`--voice-route` selects a saved shortcut from a dictated name and question on
-every supported platform. On macOS, `--speak` sends a validated response to
-`/usr/bin/say` instead of stdout; the two flags can be used independently or
-together. Neither reads or changes the clipboard.
+### Speaking
+
+On macOS, `--speak` sends the output to `/usr/bin/say`, with an optional voice configured for your alias (see the 
+[configuration guide](docs/configuration.md))
+
+If you have access to dictation software, use `--voice-route` with a configured "wake word" () to have llm-now select a matching shortcut. For example, if you configured a wake word of "hey" and an alias named "haiku", use `llm-now --voice-route --input 'hey haiku, write a one-line love poem'` to route the prompt to the "haiku" alias.
 
 For a two-action global Apple Shortcut, optional spoken names, routing and
 speech settings, privacy guidance, and troubleshooting, see
 [Talk to an llm-now alias from a macOS shortcut](examples/macos-voice-shortcut.md).
-Installed releases do not need Python, uv, or a repository checkout. The
-[`macos-voice-router` Python example](examples/macos-voice-router/) remains a
-contributor-only independent parity oracle.
 
 ## Configuration
 
