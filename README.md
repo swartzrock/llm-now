@@ -91,7 +91,6 @@ llm-now local --input "Summarize the three most important points"
 | Choose a provider and model explicitly | `llm-now --provider ollama --model llama3 --input "Hello"` |
 | List the alias inventory | `llm-now --aliases` |
 | Print the configuration path | `llm-now --config-path` |
-| Migrate legacy configuration | `llm-now --migrate-config` |
 | Route a dictated prompt | `llm-now --voice-route --input "hey local, summarize this"` |
 | Speak a response on macOS | `llm-now --alias local --speak --input "Summarize this"` |
 
@@ -100,7 +99,7 @@ piped input, and noninteractive execution bypass the launcher. Noninteractive
 generation needs exactly one prompt source (`--input` or stdin) plus a saved
 shortcut or an explicit provider and model. Successful generation writes only
 the model response to stdout; interactive UI and diagnostics use stderr.
-`--aliases`, `--config-path`, and `--migrate-config` are standalone commands.
+`--aliases` and `--config-path` are standalone commands.
 
 `llm-now --help` shows command syntax, option summaries, recognized API-key
 environment variables, and a generic secure-storage note. Platform-specific
@@ -123,12 +122,11 @@ speech settings, privacy guidance, and troubleshooting, see
 
 ## Configuration
 
-Saved shortcuts and voice settings share one versioned `config.toml`. Shortcut
-saves may rewrite it canonically, and legacy `aliases.json` and
-`voice-router.toml` data can be migrated with `llm-now --migrate-config`.
-Instructions are plaintext and credentials never belong in this file. See the
-[configuration guide](docs/configuration.md) for paths, schema, field behavior,
-migration, backups, authority rules, and deliberate downgrade recovery.
+Saved shortcuts and voice settings share one `config.toml`. Shortcut saves may
+rewrite it in a consistent order. Instructions are plaintext and credentials
+never belong in this file. See the
+[configuration guide](docs/configuration.md) to find and edit the file,
+configure aliases, and customize voice routing and speech.
 
 ## Credentials
 
