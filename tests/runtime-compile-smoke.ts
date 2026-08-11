@@ -43,7 +43,7 @@ try {
     model: null,
     instructions: smokeInstructions,
   });
-  await Bun.write(shortcutInput, "daily, smoke\n");
+  await Bun.write(shortcutInput, "daily, smoke");
 
   const builds: Array<[string, string]> = [
     [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
