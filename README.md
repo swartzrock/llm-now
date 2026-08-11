@@ -12,7 +12,7 @@
 `llm-now` sends one text-generation prompt through a provider you already use: an already-running local server, an authenticated CLI, or a cloud API. It uses [`@swartzrock/byok-runtime`](https://github.com/swartzrock/byok-runtime) for discovery, model listing, and generation; it does not install or start providers.
 
 ```console
-$ llm-now daily --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5432"
+$ llm-now local --input "Explain this error in plain English: ECONNREFUSED 127.0.0.1:5432"
 ```
 
 | Native releases | Passive discovery | Secure credentials | Scriptable output |
@@ -64,17 +64,17 @@ Then follow this path without choosing another launcher branch:
 1. Select `Create a new shortcut…`.
 2. Select `Use an available provider…`.
 3. Choose a provider, then choose its model.
-4. At `Name this shortcut`, enter a name such as `daily`.
+4. At `Name this shortcut`, enter a name such as `local`.
 5. At `Optional instructions for this shortcut (press Enter to skip)`, enter
    reusable guidance or press Enter to skip it. If you entered guidance, press
    Tab to select `[ save ]`, then press Enter to save.
 6. After the shortcut is saved, enter your first prompt at
-   `Prompt for daily · <provider> · <model>` and receive the response.
+   `Prompt for local · <provider> · <model>` and receive the response.
 
 Reuse the saved shortcut from any directory:
 
 ```bash
-llm-now daily --input "Summarize the three most important points"
+llm-now local --input "Summarize the three most important points"
 ```
 
 ## See llm-now in action
@@ -86,14 +86,14 @@ llm-now daily --input "Summarize the three most important points"
 | Task | Command |
 | --- | --- |
 | Open the interactive launcher | `llm-now` |
-| Run a saved shortcut | `llm-now daily --input "Summarize this idea"` |
-| Pipe a prompt to a saved shortcut | <code>printf 'Explain this diff' &#124; llm-now daily</code> |
+| Run a saved shortcut | `llm-now local --input "Summarize this idea"` |
+| Pipe a prompt to a saved shortcut | <code>printf 'Explain this diff' &#124; llm-now local</code> |
 | Choose a provider and model explicitly | `llm-now --provider ollama --model llama3 --input "Hello"` |
 | List the alias inventory | `llm-now --aliases` |
 | Print the configuration path | `llm-now --config-path` |
 | Migrate legacy configuration | `llm-now --migrate-config` |
-| Route a dictated prompt | `llm-now --voice-route --input "hey daily, summarize this"` |
-| Speak a response on macOS | `llm-now --alias daily --speak --input "Summarize this"` |
+| Route a dictated prompt | `llm-now --voice-route --input "hey local, summarize this"` |
+| Speak a response on macOS | `llm-now --alias local --speak --input "Summarize this"` |
 
 Except for a sole `--speak` in an interactive terminal, arguments, `--input`,
 piped input, and noninteractive execution bypass the launcher. Noninteractive

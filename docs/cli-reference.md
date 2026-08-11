@@ -50,15 +50,15 @@ never prompt text. A positional alias cannot be combined with `--alias`,
 `--provider`, or `--model`; `--alias` cannot be combined with `--provider` or
 `--model`.
 
-Alias lookup is ASCII case-insensitive but spelling-exact: `daily`, `Daily`,
-and `DAILY` select the same entry, while `dailly` does not. The explicit
-`--alias daily` form is available for scripts and future command-name
+Alias lookup is ASCII case-insensitive but spelling-exact: `local`, `Local`,
+and `LOCAL` select the same entry, while `locall` does not. The explicit
+`--alias local` form is available for scripts and future command-name
 ambiguities.
 
 ```bash
-llm-now daily
-llm-now daily --input "Summarize this idea"
-printf 'Explain this diff' | llm-now daily
+llm-now local
+llm-now local --input "Summarize this idea"
+printf 'Explain this diff' | llm-now local
 ```
 
 ### Interactive launcher
@@ -122,7 +122,7 @@ source is a usage error. On calls without `--voice-route`, a blank prompt or
 invalid-UTF-8 stdin is also a usage error. Accepted prompt text is not trimmed
 or otherwise transformed.
 
-In an interactive terminal, `llm-now daily` resolves the saved shortcut, shows
+In an interactive terminal, `llm-now local` resolves the saved shortcut, shows
 its alias, provider, and model in
 `Prompt for <alias> · <provider> · <model>`, collects one prompt, generates
 once, and exits. A delegated model is labeled `default model`; a pinned model
@@ -134,10 +134,10 @@ shows its model ID. Blank input stays at the prompt. Escape or Ctrl-C cancels.
 prompt and does not count as a prompt source:
 
 ```bash
-llm-now daily --instruction "Answer as a concise editor" --input "Revise this"
-llm-now --alias daily --instruction "Answer as a skeptical reviewer" --input "Review this"
+llm-now local --instruction "Answer as a concise editor" --input "Revise this"
+llm-now --alias local --instruction "Answer as a skeptical reviewer" --input "Review this"
 llm-now --provider ollama --model llama3 --instruction "Use plain language" --input "Explain closures"
-llm-now daily --instruction=-brief --input "Summarize this"
+llm-now local --instruction=-brief --input "Summarize this"
 ```
 
 For a saved shortcut with stored instructions, the command-line value replaces
@@ -167,7 +167,7 @@ provider:
 ```console
 $ llm-now --aliases
 aliases → Codex CLI · provider default
-daily → OpenAI · gpt-5
+local → OpenAI · gpt-5
 ```
 
 Output has one uncolored, unpadded
@@ -193,13 +193,13 @@ Voice routing and audible output are independent modifiers:
 
 ```bash
 # Route a dictated transcript and write the answer to stdout on any supported OS.
-llm-now --voice-route --input "hey daily, summarize this"
+llm-now --voice-route --input "hey local, summarize this"
 
 # Select the shortcut normally, but speak its answer on macOS.
-llm-now --alias daily --speak --input "Summarize this"
+llm-now --alias local --speak --input "Summarize this"
 
 # Route the transcript and speak the answer on macOS.
-printf 'hey daily, summarize this' | llm-now --voice-route --speak
+printf 'hey local, summarize this' | llm-now --voice-route --speak
 ```
 
 `--voice-route` treats its single prompt input as an alias handle followed by a

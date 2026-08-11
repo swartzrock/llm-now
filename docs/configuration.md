@@ -21,7 +21,7 @@ exit.
 
 If the selected provider/model is already saved, `llm-now` reports the existing
 alias and suggests an executable command such as
-`llm-now daily --input "<prompt>"` instead of asking for a duplicate. A launcher
+`llm-now local --input "<prompt>"` instead of asking for a duplicate. A launcher
 `Run once…` call and a call that selected an existing saved shortcut never
 offer this follow-up.
 
@@ -68,16 +68,16 @@ min_fuzzy_phrase_length = 4
 min_similarity = 65
 min_margin = 15
 
-[aliases.daily]
+[aliases.local]
 provider = "openai"
 model = "gpt-5"
 instructions = "Answer concisely."
-spoken_names = ["day lee"]
+spoken_names = ["local model"]
 voice = "Samantha"
 rate = 205
 pitch = 50.5
 
-[aliases.local]
+[aliases.cli]
 provider = "codex-cli"
 model = "default"
 ```
