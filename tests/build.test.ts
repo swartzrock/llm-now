@@ -156,6 +156,15 @@ describe("native release build", () => {
     expect(fakeCli).not.toContain("args.join");
   });
 
+  test("keeps the macOS native voice-process regression in the compiled smoke", async () => {
+    const runtimeSmoke = await Bun.file(
+      new URL("./runtime-compile-smoke.ts", import.meta.url),
+    ).text();
+
+    expect(runtimeSmoke).toContain("voice process stream boundary");
+    expect(runtimeSmoke).toContain("fixtures/voice-process-compile-entry.ts");
+  });
+
   test("audits the exact embedded voice-routing dependency boundary", async () => {
     const audit = await validateVoiceDependencies();
 
