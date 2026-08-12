@@ -205,7 +205,7 @@ try {
       executable: spike,
       args: ["--voice-route", "--input", "dail, smoke"],
       exitCode: 0,
-      stdout: "fake:instruction-present",
+      stdout: "fake:instruction-present:workspace-3",
       stderr: "",
     },
     {
@@ -214,7 +214,7 @@ try {
       args: ["--voice-route"],
       stdin: Bun.file(shortcutInput),
       exitCode: 0,
-      stdout: "fake:instruction-present",
+      stdout: "fake:instruction-present:workspace-3",
       stderr: "",
     },
     ...(process.platform === "darwin" ? [voiceProcessCase] : [{
