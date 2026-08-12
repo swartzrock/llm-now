@@ -127,7 +127,7 @@ try {
     {
       name: "runtime boundary",
       executable: runtimeSmoke,
-      args: [fakeCodex],
+      args: [fakeCodex, directory],
       exitCode: 0,
       stdout: "http-ok\nfake:instruction-absent\nconfig-defaults-ok\nmigration-routing-ok\n",
       stderr: "",
