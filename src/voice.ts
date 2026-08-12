@@ -105,9 +105,9 @@ interface BunVoiceProcessDependencies {
   forceKillDelayMs?: number;
 }
 
-function bytes(stream: ReadableStream<Uint8Array> | null): Promise<Uint8Array> {
-  if (stream === null) return Promise.resolve(new Uint8Array());
-  return new Response(stream).arrayBuffer().then((buffer) => new Uint8Array(buffer));
+async function bytes(stream: ReadableStream<Uint8Array> | null): Promise<Uint8Array> {
+  if (stream === null) return new Uint8Array();
+  return stream.bytes();
 }
 
 function detail(error: unknown): string {

@@ -24,6 +24,7 @@ const voiceRoutingSmoke = join(
   directory,
   process.platform === "win32" ? "voice-routing-smoke.exe" : "voice-routing-smoke",
 );
+const voiceProcessSmoke = join(directory, "voice-process-smoke");
 const shortcutInput = join(directory, "shortcut-input.txt");
 const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
 const overrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
@@ -49,6 +50,9 @@ try {
     [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
     [join(import.meta.dir, "fixtures/runtime-smoke-entry.ts"), runtimeSmoke],
     [join(import.meta.dir, "fixtures/voice-routing-compile-entry.ts"), voiceRoutingSmoke],
+    ...(process.platform === "darwin"
+      ? [[join(import.meta.dir, "fixtures/voice-process-compile-entry.ts"), voiceProcessSmoke] as [string, string]]
+      : []),
     [join(import.meta.dir, "../index.ts"), spike],
   ];
   for (const [entrypoint, outfile] of builds) {
@@ -75,6 +79,14 @@ try {
       : { SHELL: join(directory, "missing-login-shell") }),
     ...aliasEnvironment,
   };
+  const voiceProcessCase = {
+    name: "voice process stream boundary",
+    executable: voiceProcessSmoke,
+    args: [],
+    exitCode: 0,
+    stdout: "voice-process-ok\n",
+    stderr: "",
+  } as const;
   const cases = [
     {
       name: "voice routing scorer boundary",
@@ -176,7 +188,7 @@ try {
       stdout: "fake:instruction-present",
       stderr: "",
     },
-    ...(process.platform === "darwin" ? [] : [{
+    ...(process.platform === "darwin" ? [voiceProcessCase] : [{
       name: "non-macOS speech guard before scorer initialization",
       executable: spike,
       args: ["--speak", "--provider", "codex-cli", "--model", "default", "--input", "smoke"],

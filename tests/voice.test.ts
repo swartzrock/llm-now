@@ -298,6 +298,43 @@ describe("voice process and signal adapters", () => {
     expect(spawned).toBeFalse();
   });
 
+  test("Bun adapter captures completed child streams without SharedArrayBuffer", async () => {
+    const sharedArrayBuffer = Object.getOwnPropertyDescriptor(globalThis, "SharedArrayBuffer");
+    const stream = (value: string) => new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(value));
+        controller.close();
+      },
+    });
+    const runner = createBunVoiceProcessRunner({
+      access: async () => undefined,
+      spawn: () => ({
+        stdin: { write: () => undefined, end: () => undefined },
+        stdout: stream("installed voices"),
+        stderr: stream("diagnostic"),
+        exited: Promise.resolve(0),
+        exitCode: 0,
+        kill: () => undefined,
+      }),
+    });
+
+    try {
+      expect(Reflect.deleteProperty(globalThis, "SharedArrayBuffer")).toBeTrue();
+      expect(await runner.run({
+        executable: "/usr/bin/say",
+        args: ["-v", "?"],
+        stdin: new Uint8Array(),
+        env: {},
+        signal: new AbortController().signal,
+        timeoutMs: 1_000,
+      })).toEqual(completed("installed voices", "diagnostic"));
+    } finally {
+      if (sharedArrayBuffer !== undefined) {
+        Object.defineProperty(globalThis, "SharedArrayBuffer", sharedArrayBuffer);
+      }
+    }
+  });
+
   test("Bun adapter terminates, force-kills, and reaps a timed-out child", async () => {
     let resolveExit: (code: number) => void = () => undefined;
     const state: { exitCode: number | null } = { exitCode: null };
