@@ -68,7 +68,10 @@ Then follow this path without choosing another launcher branch:
 5. At `Optional instructions for this shortcut (press Enter to skip)`, enter
    reusable guidance or press Enter to skip it. If you entered guidance, press
    Tab to select `[ save ]`, then press Enter to save.
-6. After the shortcut is saved, enter your first prompt at
+6. For Codex CLI or Claude CLI, optionally enter one primary workspace
+   directory and any additional directories. Press Enter at the primary prompt
+   to skip the workspace or at an additional prompt to finish the list.
+7. After the shortcut is saved, enter your first prompt at
    `Prompt for local · <provider> · <model>` and receive the response.
 
 Reuse the saved shortcut from any directory:
@@ -127,6 +130,32 @@ rewrite it in a consistent order. Instructions are plaintext and credentials
 never belong in this file. See the
 [configuration guide](docs/configuration.md) to find and edit the file,
 configure aliases, and customize voice routing and speech.
+
+### Workspace shortcuts
+
+A Codex CLI or Claude CLI shortcut can store one primary directory plus ordered
+additional directories. The primary directory becomes the CLI working
+directory, and each additional directory is forwarded separately. The shortcut
+remains globally callable: its workspace is execution context, not an availability rule.
+
+| Provider class | Workspace support |
+| --- | --- |
+| Codex CLI | Primary plus additional directories |
+| Claude CLI | Primary plus additional directories |
+| Ollama and LM Studio | Rejected |
+| Cloud API providers | Rejected |
+
+Workspace access remains read-only. Codex keeps its read-only sandbox, while
+Claude receives only the `Read`, `Glob`, and `Grep` file tools. Workspace paths
+are machine-local plaintext in `config.toml` and may appear in child-process
+arguments or local audit tools. A CLI may send file content it reads to the
+selected Codex or Claude service under that service's policies. Store only
+directories whose contents may be disclosed to that service.
+
+Moving, removing, denying access to, or canonically duplicating a configured
+directory makes the shortcut fail before prompting or launching the CLI. It
+never falls back to the caller's directory. Inventory shows only `workspace` or
+`workspace +N`; it does not print full paths.
 
 ## Credentials
 

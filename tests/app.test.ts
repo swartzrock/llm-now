@@ -4556,6 +4556,70 @@ describe("one-shot application", () => {
     expect(saved).toEqual({ provider: "openai", model: "gpt-5" });
     expect(inputMessages.every((message) => !message.toLowerCase().includes("workspace"))).toBe(true);
   });
+
+  test("uses path-free workspace transitions for default-No overwrites", async () => {
+    const directory = await temporaryDirectory();
+    const oldPrimary = join(directory, "old primary");
+    const newPrimary = join(directory, "new primary");
+    await Promise.all([oldPrimary, newPrimary].map((path) => mkdir(path)));
+
+    const cases: Array<{
+      transition: string;
+      current: AliasRecord;
+      primaryInput: string;
+    }> = [
+      {
+        transition: "none → set",
+        current: { provider: "codex-cli", model: null },
+        primaryInput: newPrimary,
+      },
+      {
+        transition: "set → changed",
+        current: {
+          provider: "codex-cli",
+          model: null,
+          workspace: { primaryDirectory: oldPrimary, additionalDirectories: [] },
+        },
+        primaryInput: newPrimary,
+      },
+      {
+        transition: "set → none",
+        current: {
+          provider: "codex-cli",
+          model: null,
+          workspace: { primaryDirectory: oldPrimary, additionalDirectories: [] },
+        },
+        primaryInput: "",
+      },
+    ];
+
+    for (const scenario of cases) {
+      const confirmMessages: string[] = [];
+      const confirmInitialValues: Array<boolean | undefined> = [];
+      const app = dependencies({
+        args: ["--input", "hello", "--provider", "codex-cli", "--model", "default"],
+        stdin: input("", true),
+        stderrTty: true,
+        prompter: prompts({
+          names: ["daily", scenario.primaryInput, ...(scenario.primaryInput === "" ? [] : [""])],
+          instructions: [""],
+          confirms: [false],
+          confirmMessages,
+          confirmInitialValues,
+        }),
+        saveAlias: async (_path, _name, _selection, options) => {
+          expect(await options?.confirmOverwrite?.("daily", scenario.current)).toBe(false);
+          return "declined";
+        },
+      });
+
+      expect(await runApplication(app.value)).toBe(0);
+      expect(confirmInitialValues).toEqual([false]);
+      expect(confirmMessages).toHaveLength(1);
+      expect(confirmMessages[0]).toContain(`Workspace: ${scenario.transition}`);
+      expect(confirmMessages[0]).not.toContain(directory);
+    }
+  });
 });
 
 describe("API-key management", () => {

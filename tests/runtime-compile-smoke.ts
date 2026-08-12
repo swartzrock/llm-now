@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
 import { resolveAliasPath, saveAlias } from "../src/aliases";
@@ -30,6 +30,17 @@ const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each a
 const overrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
 
 try {
+  const invocationDirectory = join(directory, "caller");
+  const workspacePrimary = join(directory, "workspace", "primary");
+  const workspaceAdditions = [
+    join(directory, "workspace", "additional"),
+    join(directory, "workspace", "additional with spaces"),
+  ];
+  await Promise.all([
+    mkdir(invocationDirectory, { recursive: true }),
+    mkdir(workspacePrimary, { recursive: true }),
+    ...workspaceAdditions.map((path) => mkdir(path, { recursive: true })),
+  ]);
   const configHome = join(directory, "config");
   const aliasEnvironment = process.platform === "win32"
     ? { APPDATA: configHome }
@@ -43,6 +54,10 @@ try {
     provider: "codex-cli",
     model: null,
     instructions: smokeInstructions,
+    workspace: {
+      primaryDirectory: workspacePrimary,
+      additionalDirectories: workspaceAdditions,
+    },
   });
   await Bun.write(shortcutInput, "daily, smoke");
 
@@ -78,6 +93,8 @@ try {
       ? {}
       : { SHELL: join(directory, "missing-login-shell") }),
     ...aliasEnvironment,
+    LLM_NOW_FAKE_WORKSPACE_PRIMARY: workspacePrimary,
+    LLM_NOW_FAKE_WORKSPACE_ADDITIONS: JSON.stringify(workspaceAdditions),
   };
   const voiceProcessCase = {
     name: "voice process stream boundary",
@@ -113,6 +130,7 @@ try {
       stdoutLandmarks: [
         "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--speak]\n  llm-now --provider <id> --model <id|default> [--input <text>]",
         "Notes:\n  Run without arguments to open the interactive launcher.\n  Read input from --input, stdin, or a terminal prompt; choose one.",
+        "A workspace fixes execution to one primary directory plus ordered additional directories.\n  Saved shortcuts remain global; a stored workspace does not restrict where you can call one.\n  Codex CLI and Claude CLI support workspaces; local HTTP servers and cloud APIs reject them.",
         "Options:\n  --aliases            List saved shortcuts\n  --config-path        Print the config.toml path\n  --migrate-config     Migrate legacy configuration to config.toml\n  --voice-route        Parse “[wake word] <shortcut> <question>” from input",
         "API key environment variables:\n  ANTHROPIC_API_KEY     DEEPINFRA_TOKEN",
         "  OPENROUTER_API_KEY    XAI_API_KEY",
@@ -168,7 +186,7 @@ try {
       executable: spike,
       args: ["dAiLy", "--input", "smoke"],
       exitCode: 0,
-      stdout: "fake:instruction-present",
+      stdout: "fake:instruction-present:workspace-3",
       stderr: "",
     },
     {
@@ -201,14 +219,14 @@ try {
       executable: spike,
       args: ["dAiLy", "--input", "smoke", "--instruction", overrideInstructions],
       exitCode: 0,
-      stdout: "fake:instruction-override",
+      stdout: "fake:instruction-override:workspace-3",
       stderr: "",
     },
   ] as const;
 
-  for (const smoke of cases) {
-    const result = Bun.spawnSync([smoke.executable, ...smoke.args], {
-      cwd: directory,
+    for (const smoke of cases) {
+      const result = Bun.spawnSync([smoke.executable, ...smoke.args], {
+      cwd: invocationDirectory,
       env,
       stdin: "stdin" in smoke ? smoke.stdin : new Uint8Array(),
     });

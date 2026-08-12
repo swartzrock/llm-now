@@ -118,7 +118,7 @@ describe("native release build", () => {
     expect(readme).not.toContain("$Version =");
   });
 
-  test("keeps packaged shortcut-instruction coverage hermetic and observable", async () => {
+  test("keeps packaged shortcut workspace and instruction coverage hermetic and observable", async () => {
     const releaseValidation = await Bun.file(
       new URL("../scripts/release-validate.ts", import.meta.url),
     ).text();
@@ -130,7 +130,9 @@ describe("native release build", () => {
     const expectedOverrideInstructions =
       "  Replace saved smoke instructions.\\nUse the one-run override.  ";
 
-    expect(releaseValidation).toContain("version: 2");
+    expect(releaseValidation).toContain("version: 3");
+    expect(releaseValidation).toContain("additional with spaces");
+    expect(releaseValidation).toContain("fake:instruction-present:workspace-3");
     expect(releaseValidation).toContain(expectedInstructions);
     expect(fakeCli).toContain(expectedInstructions);
     expect(releaseValidation).toContain(expectedOverrideInstructions);
@@ -139,6 +141,8 @@ describe("native release build", () => {
     expect(releaseValidation).toContain("fake:instruction-absent");
     expect(releaseValidation).toContain("fake:instruction-override");
     expect(fakeCli).toContain("fake:instruction-override");
+    expect(fakeCli).toContain("unexpected fake CLI workspace configuration");
+    expect(fakeCli).toContain("LLM_NOW_FAKE_WORKSPACE_PRIMARY");
     expect(releaseValidation).toContain("PATH: temporary");
     expect(releaseValidation).toContain('name.toUpperCase() !== "PATH"');
     expect(releaseValidation).toContain("missing-login-shell");
@@ -216,6 +220,32 @@ describe("native release build", () => {
       "package.json",
       "types.d.ts",
     ]);
+  });
+
+  test("keeps workspace documentation and release intent aligned", async () => {
+    const readme = await Bun.file(new URL("../README.md", import.meta.url)).text();
+    const manualTesting = await Bun.file(
+      new URL("../docs/manual-testing.md", import.meta.url),
+    ).text();
+    const demo = await Bun.file(
+      new URL("../docs/demos/llm-now-demo.tape", import.meta.url),
+    ).text();
+    const changeset = await Bun.file(
+      new URL("../.changeset/calm-workspaces-wander.md", import.meta.url),
+    ).text();
+
+    for (const document of [readme, manualTesting]) {
+      expect(document).toContain("Codex CLI");
+      expect(document).toContain("Claude CLI");
+      expect(document).toContain("additional directories");
+      expect(document).toContain("read-only");
+      expect(document).toContain("plaintext");
+    }
+    expect(readme).toContain("workspace is execution context, not an availability rule");
+    expect(manualTesting).toContain("fake:instruction-present:workspace-3");
+    expect(demo).toContain("Primary workspace directory \\(press Enter to skip\\)");
+    expect(changeset).toContain('"llm-now": minor');
+    expect(changeset).toContain("globally callable");
   });
 
   test("creates a deterministic archive containing one executable", () => {
