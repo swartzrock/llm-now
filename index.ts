@@ -39,6 +39,7 @@ process.exitCode = await runApplication({
   env: process.env,
   platform: process.platform,
   home: homedir(),
+  cwd: process.cwd(),
   version: packageMetadata.version,
   credentialVault,
   credentialResolver,
