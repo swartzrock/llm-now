@@ -177,7 +177,7 @@ try {
       args: ["--voice-route", "--input", "dail, smoke"],
       exitCode: 0,
       stdout: "fake:instruction-present",
-      stderr: "",
+      stderr: "Selecting alias 'daily'\n",
     },
     {
       name: "file-backed stdin voice routing",
@@ -186,7 +186,7 @@ try {
       stdin: Bun.file(shortcutInput),
       exitCode: 0,
       stdout: "fake:instruction-present",
-      stderr: "",
+      stderr: "Selecting alias 'daily'\n",
     },
     ...(process.platform === "darwin" ? [voiceProcessCase] : [{
       name: "non-macOS speech guard before scorer initialization",

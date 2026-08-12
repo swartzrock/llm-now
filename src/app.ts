@@ -1542,6 +1542,15 @@ function writeResponse(stdout: TextOutput, response: string): Promise<void> {
   });
 }
 
+function writeVoiceRouteSelection(stderr: TextOutput, alias: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    stderr.write(
+      `Selecting alias '${alias}'\n`,
+      (error) => error ? reject(error) : resolve(),
+    );
+  });
+}
+
 async function voiceNoticeExit(
   speech: PreparedVoiceSpeech,
   notice: VoiceNotice,
@@ -1687,6 +1696,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           shortcutFollowUp: "none",
           alias: route.alias,
         };
+        await writeVoiceRouteSelection(deps.stderr, route.alias);
       } else if (
         interactive
         && (deps.args.length === 0 || (parsed.speak && deps.args.length === 1))

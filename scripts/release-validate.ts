@@ -533,7 +533,7 @@ async function smoke(archivePath: string): Promise<void> {
       },
       { name: "explicit generation", args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:instruction-absent", stderrIncludes: "" },
       { name: "saved alias instruction", args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:instruction-present", stderr: "" },
-      { name: "cross-platform fuzzy voice routing", args: ["--voice-route", "--input", "aliase, smoke"], code: 0, stdout: "fake:instruction-present", stderr: "" },
+      { name: "cross-platform fuzzy voice routing", args: ["--voice-route", "--input", "aliase, smoke"], code: 0, stdout: "fake:instruction-present", stderr: "Selecting alias 'aliases'\n" },
       {
         name: "alias instruction replacement",
         args: ["aliases", "--input", "smoke", "--instruction", overrideInstructions],
