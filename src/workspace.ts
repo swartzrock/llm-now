@@ -125,7 +125,7 @@ export async function preflightWorkspace(
   assertWorkspaceSupported(provider);
   if (!isWorkspaceConfig(workspace)) throw new WorkspaceError("invalid alias workspace");
 
-  const verified: string[] = [];
+  const verified = new Set<string>();
   const configured = [workspace.primaryDirectory, ...workspace.additionalDirectories];
   for (const [index, directory] of configured.entries()) {
     const role = index === 0 ? "primary directory" : `additional directory ${index}`;
@@ -139,19 +139,19 @@ export async function preflightWorkspace(
       if (error instanceof WorkspaceError) throw error;
       throw new WorkspaceError(`workspace ${role} is unavailable`, { cause: error });
     }
-    if (verified.includes(canonical)) {
+    if (verified.has(canonical)) {
       throw new WorkspaceError(`workspace ${role} duplicates another configured directory`);
     }
-    verified.push(canonical);
+    verified.add(canonical);
   }
 
-  const [primaryDirectory, ...additionalDirectories] = verified;
+  const [primaryDirectory, ...additionalDirectories] = [...verified];
   if (primaryDirectory === undefined) throw new WorkspaceError("invalid alias workspace");
   return { primaryDirectory, additionalDirectories };
 }
 
 export function workspacePathVariants(workspace: WorkspaceConfig): string[] {
-  return [workspace.primaryDirectory, ...workspace.additionalDirectories]
+  return [...new Set([workspace.primaryDirectory, ...workspace.additionalDirectories]
     .flatMap((directory) => [directory, JSON.stringify(directory)])
-    .filter((value, index, values) => value.length > 0 && values.indexOf(value) === index);
+    .filter((value) => value.length > 0))];
 }

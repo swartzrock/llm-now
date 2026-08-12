@@ -98,7 +98,6 @@ import {
   preflightWorkspace,
   sameWorkspace,
   workspaceCapabilities,
-  workspaceStateLabel,
   WorkspaceError,
   type WorkspaceConfig,
 } from "./workspace.ts";
@@ -171,10 +170,10 @@ interface LauncherWork {
 
 async function preflightAliasWorkspace(selection: AliasRecord): Promise<AliasRecord> {
   if (selection.workspace === undefined) return selection;
-  return {
-    ...selection,
-    workspace: await preflightWorkspace(selection.provider, selection.workspace),
-  };
+  return withWorkspace(
+    selection,
+    await preflightWorkspace(selection.provider, selection.workspace),
+  );
 }
 
 function recognizedCredentialValues(env: ByokEnvironment): string[] {
@@ -292,14 +291,8 @@ function aliasPromptMessage(
   alias: string,
   selection: AliasRecord,
 ): string {
-  const model = selection.model === null
-    ? "default model"
-    : sanitizePromptText(selection.model);
-  const workspace = selection.workspace === undefined
-    ? ""
-    : ` · ${workspaceStateLabel(selection.workspace)}`;
   return sanitizeDiagnostic(
-    `Prompt for ${sanitizePromptText(alias)} · ${providerLabel(selection.provider)} · ${model}${workspace}`,
+    `Prompt for ${sanitizePromptText(alias)} · ${formatSelection(selection)}`,
     deps.env,
     deps.sensitive,
   );
