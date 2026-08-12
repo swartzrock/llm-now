@@ -7,8 +7,8 @@ import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute, normalize, resolve } from "node:path";
 
 export interface WorkspaceConfig {
-  primaryDirectory: string;
-  additionalDirectories: string[];
+  readonly primaryDirectory: string;
+  readonly additionalDirectories: readonly string[];
 }
 
 export interface WorkspaceCapabilities {

@@ -6,6 +6,7 @@ import {
   NATIVE_VAULT_COMPATIBILITY,
   type NativeVaultTarget,
 } from "../src/credentials.ts";
+import { serializeConfigDocument } from "../src/config-schema.ts";
 import {
   RELEASE_TARGETS,
   archiveName,
@@ -502,30 +503,33 @@ async function smoke(archivePath: string): Promise<void> {
       ...workspaceAdditions.map((path) => mkdir(path, { recursive: true })),
     ]);
     const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
-    await Bun.write(join(configHome, "llm-now", "aliases.json"), `${JSON.stringify({
-      version: 3,
-      aliases: {
-        zeta: { provider: "openai", model: "gpt-5" },
+    await Bun.write(
+      join(configHome, "llm-now", "config.toml"),
+      serializeConfigDocument({
+        version: 1,
         aliases: {
-          provider: "codex-cli",
-          model: null,
-          instructions: smokeInstructions,
-          workspace: {
-            primaryDirectory: workspacePrimary,
-            additionalDirectories: workspaceAdditions,
+          zeta: { provider: "openai", model: "gpt-5" },
+          aliases: {
+            provider: "codex-cli",
+            model: "default",
+            instructions: smokeInstructions,
+            workspace: {
+              primaryDirectory: workspacePrimary,
+              additionalDirectories: workspaceAdditions,
+            },
+          },
+          review: {
+            provider: "claude-cli",
+            model: "default",
+            instructions: smokeInstructions,
+            workspace: {
+              primaryDirectory: workspacePrimary,
+              additionalDirectories: workspaceAdditions,
+            },
           },
         },
-        review: {
-          provider: "claude-cli",
-          model: null,
-          instructions: smokeInstructions,
-          workspace: {
-            primaryDirectory: workspacePrimary,
-            additionalDirectories: workspaceAdditions,
-          },
-        },
-      },
-    }, null, 2)}\n`);
+      }),
+    );
     const aliasEnvironment = process.platform === "win32"
       ? { APPDATA: configHome }
       : { XDG_CONFIG_HOME: configHome };

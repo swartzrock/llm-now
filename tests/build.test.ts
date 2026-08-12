@@ -130,7 +130,8 @@ describe("native release build", () => {
     const expectedOverrideInstructions =
       "  Replace saved smoke instructions.\\nUse the one-run override.  ";
 
-    expect(releaseValidation).toContain("version: 3");
+    expect(releaseValidation).toContain('"config.toml"');
+    expect(releaseValidation).toContain("serializeConfigDocument");
     expect(releaseValidation).toContain("additional with spaces");
     expect(releaseValidation).toContain("fake:instruction-present:workspace-3");
     expect(releaseValidation).toContain("fake:claude-instruction-present:workspace-3");
@@ -227,6 +228,9 @@ describe("native release build", () => {
 
   test("keeps workspace documentation and release intent aligned", async () => {
     const readme = await Bun.file(new URL("../README.md", import.meta.url)).text();
+    const configuration = await Bun.file(
+      new URL("../docs/configuration.md", import.meta.url),
+    ).text();
     const manualTesting = await Bun.file(
       new URL("../docs/manual-testing.md", import.meta.url),
     ).text();
@@ -237,7 +241,7 @@ describe("native release build", () => {
       new URL("../.changeset/calm-workspaces-wander.md", import.meta.url),
     ).text();
 
-    for (const document of [readme, manualTesting]) {
+    for (const document of [readme, configuration, manualTesting]) {
       expect(document).toContain("Codex CLI");
       expect(document).toContain("Claude CLI");
       expect(document).toContain("additional directories");
@@ -245,6 +249,9 @@ describe("native release build", () => {
       expect(document).toContain("plaintext");
     }
     expect(readme).toContain("workspace is execution context, not an availability rule");
+    expect(configuration).toContain("[aliases.codex.workspace]");
+    expect(configuration).toContain("primary_directory");
+    expect(configuration).toContain("additional_directories");
     expect(manualTesting).toContain("fake:instruction-present:workspace-3");
     expect(demo).toContain("Primary workspace directory \\(press Enter to skip\\)");
     expect(changeset).toContain('"llm-now": minor');

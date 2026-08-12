@@ -17,6 +17,7 @@ execution: code
 - **Authority:** The Product Contract owns alias identity, global callability, workspace behavior, failure semantics, privacy, and compatibility. The Planning Contract owns schema v3, path handling, provider capabilities, the runtime adapter bridge, tests, documentation, and release mechanics. Repository instructions and tests remain binding where this plan is silent.
 - **Execution profile:** One implementation phase and one pull request based on current `origin/main`. The pull request includes the originating ideation artifact, this plan, implementation, focused and packaged tests, active documentation, and a minor changeset.
 - **Stop conditions:** Stop if the exported `@swartzrock/byok-runtime` CLI providers cannot be composed without copying provider output/auth logic, if a supported CLI lacks a current multi-directory launch contract, if workspace validation would require credential or provider access, or if implementation would need alias availability or invocation-cwd matching.
+- **Implementation reconciliation:** `main` adopted unified `config.toml` while this feature branch was in progress. Unified configuration remains version 1 and stores workspace in a nested alias table. The strict sticky v3 rules in this plan apply to the legacy `aliases.json` format, which remains readable and migrates workspaces into unified TOML without loss.
 - **Tail ownership:** LFG implements and verifies the plan, simplifies and reviews the diff, applies review fixes, opens the pull request, and watches CI to a decided state.
 
 ---

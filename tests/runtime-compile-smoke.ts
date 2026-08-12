@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
-import { resolveAliasPath, saveAlias } from "../src/aliases";
+import { resolveConfigPaths, saveConfigAlias } from "../src/config";
 
 if (
   packageMetadata.dependencies["@3leaps/string-metrics-wasm"] !== "0.3.11"
@@ -46,12 +46,12 @@ try {
   const aliasEnvironment = process.platform === "win32"
     ? { APPDATA: configHome }
     : { XDG_CONFIG_HOME: configHome };
-  const aliasPath = resolveAliasPath({
+  const configPaths = resolveConfigPaths({
     platform: process.platform,
     home: directory,
     env: aliasEnvironment,
   });
-  await saveAlias(aliasPath, "Daily", {
+  await saveConfigAlias(configPaths, "Daily", {
     provider: "codex-cli",
     model: null,
     instructions: smokeInstructions,
@@ -60,7 +60,7 @@ try {
       additionalDirectories: workspaceAdditions,
     },
   });
-  await saveAlias(aliasPath, "Review", {
+  await saveConfigAlias(configPaths, "Review", {
     provider: "claude-cli",
     model: null,
     instructions: smokeInstructions,

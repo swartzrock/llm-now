@@ -181,7 +181,15 @@ async function readLegacyVoiceConfig(path: string): Promise<Uint8Array | null> {
 function freezeLegacyAliases(document: AliasDocument): Readonly<Record<string, AliasRecord>> {
   const aliases: Record<string, AliasRecord> = {};
   for (const [name, record] of Object.entries(document.aliases)) {
-    aliases[name] = Object.freeze({ ...record });
+    aliases[name] = Object.freeze({
+      ...record,
+      ...(record.workspace === undefined ? {} : {
+        workspace: Object.freeze({
+          primaryDirectory: record.workspace.primaryDirectory,
+          additionalDirectories: Object.freeze([...record.workspace.additionalDirectories]),
+        }),
+      }),
+    });
   }
   return Object.freeze(aliases);
 }
@@ -548,11 +556,18 @@ function storedAlias(record: AliasRecord, current?: StoredAliasConfig): StoredAl
     voice?: string;
     rate?: number;
     pitch?: number;
+    workspace?: AliasRecord["workspace"];
   } = {
     provider: record.provider,
     model: record.model ?? "default",
   };
   if (record.instructions !== undefined) stored.instructions = record.instructions;
+  if (record.workspace !== undefined) {
+    stored.workspace = Object.freeze({
+      primaryDirectory: record.workspace.primaryDirectory,
+      additionalDirectories: Object.freeze([...record.workspace.additionalDirectories]),
+    });
+  }
   if (current?.spokenNames !== undefined) stored.spokenNames = current.spokenNames;
   if (current?.voice !== undefined) stored.voice = current.voice;
   if (current?.rate !== undefined) stored.rate = current.rate;

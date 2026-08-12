@@ -13,7 +13,7 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   ConfigSchemaError,
   parseConfigDocument,
@@ -313,6 +313,72 @@ describe("configuration transactions", () => {
       },
     });
     expect(await readFile(paths.configPath, "utf8")).not.toContain("normalize me");
+  });
+
+  test("persists workspace changes in unified configuration", async () => {
+    const directory = await temporaryDirectory();
+    const paths = {
+      configPath: join(directory, "config.toml"),
+      legacyAliasPath: join(directory, "aliases.json"),
+      legacyVoicePath: join(directory, "voice-router.toml"),
+    };
+    const workspace = {
+      primaryDirectory: resolve(directory, "primary"),
+      additionalDirectories: [
+        resolve(directory, "additional"),
+        resolve(directory, "additional with spaces"),
+      ],
+    };
+
+    expect(await saveConfigAlias(paths, "daily", {
+      provider: "codex-cli",
+      model: null,
+      workspace,
+    })).toBe("saved");
+    expect((await loadConfig(paths.configPath))?.aliases.daily).toEqual({
+      provider: "codex-cli",
+      model: "default",
+      workspace,
+    });
+    expect(projectAliases((await loadConfig(paths.configPath))!)).toEqual({
+      daily: { provider: "codex-cli", model: null, workspace },
+    });
+    expect(await readFile(paths.configPath, "utf8")).toContain("[aliases.daily.workspace]");
+
+    expect(await saveConfigAlias(paths, "daily", {
+      provider: "codex-cli",
+      model: null,
+    }, { confirmOverwrite: async () => true })).toBe("saved");
+    expect((await loadConfig(paths.configPath))?.aliases.daily?.workspace).toBeUndefined();
+  });
+
+  test("migrates a legacy v3 workspace into unified version 1", async () => {
+    const directory = await temporaryDirectory();
+    const paths = {
+      configPath: join(directory, "config.toml"),
+      legacyAliasPath: join(directory, "aliases.json"),
+      legacyVoicePath: join(directory, "voice-router.toml"),
+    };
+    const workspace = {
+      primaryDirectory: resolve(directory, "primary"),
+      additionalDirectories: [resolve(directory, "additional")],
+    };
+    const legacy = `${JSON.stringify({
+      version: 3,
+      aliases: {
+        review: { provider: "claude-cli", model: null, workspace },
+      },
+    })}\n`;
+    await writeFile(paths.legacyAliasPath, legacy);
+
+    expect(await migrateConfig(paths)).toEqual({ kind: "migrated", staleProfiles: [] });
+    expect(await loadConfig(paths.configPath)).toEqual({
+      version: 1,
+      aliases: {
+        review: { provider: "claude-cli", model: "default", workspace },
+      },
+    });
+    expect(await readFile(`${paths.legacyAliasPath}.pre-unified-v1.bak`, "utf8")).toBe(legacy);
   });
 
   test("decline performs no migration, backup, lock, or unified write", async () => {
@@ -678,6 +744,35 @@ describe("configuration transactions", () => {
 });
 
 describe("unified configuration schema", () => {
+  test("round-trips a capability-checked multi-directory workspace", () => {
+    const primaryDirectory = resolve("workspace", "primary");
+    const additionalDirectories = [
+      resolve("workspace", "additional"),
+      resolve("workspace", "additional with spaces"),
+    ];
+    const document = parseConfigDocument(`
+      version = 1
+      [aliases.review]
+      provider = "claude-cli"
+      model = "default"
+      [aliases.review.workspace]
+      primary_directory = ${JSON.stringify(primaryDirectory)}
+      additional_directories = ${JSON.stringify(additionalDirectories)}
+    `);
+
+    expect(document.aliases.review?.workspace).toEqual({
+      primaryDirectory,
+      additionalDirectories,
+    });
+    expect(projectAliases(document).review?.workspace).toEqual({
+      primaryDirectory,
+      additionalDirectories,
+    });
+    const serialized = serializeConfigDocument(document);
+    expect(serialized).toContain("[aliases.review.workspace]");
+    expect(serializeConfigDocument(parseConfigDocument(serialized))).toBe(serialized);
+  });
+
   test("round-trips aliases canonically while retaining omission state", () => {
     const document = parseConfigDocument(`
       # removed by canonical rewrite
@@ -791,6 +886,22 @@ Keep this on two lines."""
     ];
 
     for (const text of invalidDocuments) {
+      expect(() => parseConfigDocument(text), text).toThrow(ConfigSchemaError);
+    }
+  });
+
+  test("rejects invalid and unsupported workspace tables", () => {
+    const primaryDirectory = resolve("workspace", "primary");
+    const additionalDirectory = resolve("workspace", "additional");
+    const documents = [
+      `version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[]`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory='relative'\nadditional_directories=[]`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[]\nextra=true`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[${JSON.stringify(additionalDirectory)}, ${JSON.stringify(additionalDirectory)}]`,
+    ];
+
+    for (const text of documents) {
       expect(() => parseConfigDocument(text), text).toThrow(ConfigSchemaError);
     }
   });

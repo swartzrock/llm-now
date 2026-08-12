@@ -458,7 +458,7 @@ rm -f stdout.txt stderr.txt
 
 The terminal must show `Prompt for daily · PROVIDER · MODEL`, using `default model` only when the alias has no pinned model. It must not display the saved instruction text. Submit whitespace first and confirm validation keeps the field open, then enter `Summarize the idea of gravity.`. The command must transmit the saved instruction separately from that prompt, generate exactly once, exit `0`, and leave `stdout.txt` containing only the response even though stdout was redirected. Repeat the alias-only command with Escape and Ctrl-C; each cancellation must exit `130`, generate nothing, and leave stdout empty.
 
-For the workspace alias from MT-11A, invoke the positional form, `--alias`, piped-input form, launcher picker, and alias-only terminal prompt from this unrelated directory. Every surface must remain able to see the alias and must run the CLI with the stored primary as cwd plus one ordered `--add-dir` pair per additional root. The caller cwd must never filter the alias or replace its workspace. Codex must retain `--sandbox read-only`; Claude must expose only `Read`, `Glob`, and `Grep`. A request-scoped `--instruction` replacement must leave the workspace and v3 alias file unchanged. Move one root and repeat: the command must fail before reading an interactive or piped prompt and must not launch the CLI or fall back to any other directory.
+For the workspace alias from MT-11A, invoke the positional form, `--alias`, piped-input form, launcher picker, and alias-only terminal prompt from this unrelated directory. Every surface must remain able to see the alias and must run the CLI with the stored primary as cwd plus one ordered `--add-dir` pair per additional root. The caller cwd must never filter the alias or replace its workspace. Codex must retain `--sandbox read-only`; Claude must expose only `Read`, `Glob`, and `Grep`. A request-scoped `--instruction` replacement must leave the workspace in `config.toml` unchanged. Move one root and repeat: the command must fail before reading an interactive or piped prompt and must not launch the CLI or fall back to any other directory.
 
 Then verify deterministic reuse:
 
@@ -676,6 +676,11 @@ explicit migration with no legacy files creates only a minimal version 1
 document with an empty `[aliases]` table, while a missing single legacy source
 creates no backup for that source.
 
+Repeat once with a legacy version 3 `aliases.json` containing a Codex or Claude
+workspace. Migration must preserve its primary and ordered additional roots in
+the nested unified TOML workspace table while `config.toml` remains version 1.
+The exact legacy JSON must remain available in its migration backup.
+
 ### MT-22B: Canonically rewrite without pinning defaults
 
 Manually edit valid `config.toml` to add comments, irregular spacing, two
@@ -777,7 +782,7 @@ Use a temporary `HOME` or `USERPROFILE` for fallback tests.
 ### MT-23A: Verify safe instruction transport boundaries
 
 Use only the maintained fake Codex fixture, its two non-secret multiline
-sentinels, and temporary workspace roots. The packaged smoke must invoke a v3
+sentinels, and temporary workspace roots. The packaged smoke must invoke a
 workspace alias from outside its primary root, pass two additional roots in
 order (including a path with spaces), and receive
 `fake:instruction-present:workspace-3`; the otherwise identical explicit call must
