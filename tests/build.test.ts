@@ -250,8 +250,9 @@ describe("native release build", () => {
     }
     expect(readme).toContain("workspace is execution context, not an availability rule");
     expect(configuration).toContain("[aliases.codex.workspace]");
-    expect(configuration).toContain("primary_directory");
-    expect(configuration).toContain("additional_directories");
+    expect(configuration).toContain("directories = [");
+    expect(configuration).not.toContain("primary_directory");
+    expect(configuration).not.toContain("additional_directories");
     expect(manualTesting).toContain("fake:instruction-present:workspace-3");
     expect(demo).toContain("Primary workspace directory \\(press Enter to skip\\)");
     expect(changeset).toContain('"llm-now": minor');

@@ -744,7 +744,7 @@ describe("configuration transactions", () => {
 });
 
 describe("unified configuration schema", () => {
-  test("round-trips a capability-checked multi-directory workspace", () => {
+  test("round-trips capability-checked one-or-more directory workspaces", () => {
     const primaryDirectory = resolve("workspace", "primary");
     const additionalDirectories = [
       resolve("workspace", "additional"),
@@ -756,8 +756,7 @@ describe("unified configuration schema", () => {
       provider = "claude-cli"
       model = "default"
       [aliases.review.workspace]
-      primary_directory = ${JSON.stringify(primaryDirectory)}
-      additional_directories = ${JSON.stringify(additionalDirectories)}
+      directories = ${JSON.stringify([primaryDirectory, ...additionalDirectories])}
     `);
 
     expect(document.aliases.review?.workspace).toEqual({
@@ -770,7 +769,26 @@ describe("unified configuration schema", () => {
     });
     const serialized = serializeConfigDocument(document);
     expect(serialized).toContain("[aliases.review.workspace]");
+    expect(serialized).toContain("directories = [");
+    expect(serialized).not.toContain("primary_directory");
+    expect(serialized).not.toContain("additional_directories");
     expect(serializeConfigDocument(parseConfigDocument(serialized))).toBe(serialized);
+
+    const primaryOnly = parseConfigDocument(`
+      version = 1
+      [aliases.review]
+      provider = "claude-cli"
+      model = "default"
+      [aliases.review.workspace]
+      directories = [${JSON.stringify(primaryDirectory)}]
+    `);
+    expect(primaryOnly.aliases.review?.workspace).toEqual({
+      primaryDirectory,
+      additionalDirectories: [],
+    });
+    expect(serializeConfigDocument(primaryOnly)).toContain(
+      `directories = [ ${JSON.stringify(primaryDirectory)} ]`,
+    );
   });
 
   test("round-trips aliases canonically while retaining omission state", () => {
@@ -894,11 +912,13 @@ Keep this on two lines."""
     const primaryDirectory = resolve("workspace", "primary");
     const additionalDirectory = resolve("workspace", "additional");
     const documents = [
-      `version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[]`,
-      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory='relative'\nadditional_directories=[]`,
-      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}`,
-      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[]\nextra=true`,
-      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[${JSON.stringify(additionalDirectory)}, ${JSON.stringify(additionalDirectory)}]`,
+      `version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\n[aliases.slug.workspace]\ndirectories=[${JSON.stringify(primaryDirectory)}]`,
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=['relative']",
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[]",
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[1]",
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[${JSON.stringify(primaryDirectory)}]\nextra=true`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[${JSON.stringify(primaryDirectory)}, ${JSON.stringify(additionalDirectory)}, ${JSON.stringify(additionalDirectory)}]`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[]`,
     ];
 
     for (const text of documents) {

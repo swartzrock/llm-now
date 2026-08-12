@@ -54,8 +54,8 @@ one request without changing the file. Never put credentials or secrets in
 
 ### Configure a shortcut workspace
 
-Codex CLI and Claude CLI shortcuts may store one primary directory and an
-ordered list of additional directories:
+Codex CLI and Claude CLI shortcuts may store an ordered, nonempty list of
+directories:
 
 ```toml
 [aliases.codex]
@@ -63,14 +63,16 @@ provider = "codex-cli"
 model = "default"
 
 [aliases.codex.workspace]
-primary_directory = "/absolute/project"
-additional_directories = ["/absolute/shared", "/absolute/reference material"]
+directories = ["/absolute/project", "/absolute/shared", "/absolute/reference material"]
 ```
 
-Both fields are required when the workspace table is present. Every directory
-must be an absolute, unique path. A workspace controls CLI execution context;
-it does not restrict where the shortcut is visible or callable. Ollama, LM
-Studio, and cloud API providers reject workspace configuration.
+`directories` is required and must contain at least one absolute, unique path.
+The first directory is the CLI working directory; remaining entries are
+additional directories exposed as read-only roots in their listed order. Omit
+the entire `workspace` table when the shortcut has no workspace. A workspace
+controls CLI execution context; it does not restrict where the shortcut is
+visible or callable. Ollama, LM Studio, and cloud API providers reject
+workspace configuration.
 
 Workspace paths are machine-local plaintext. Codex keeps its read-only sandbox,
 and Claude receives only the `Read`, `Glob`, and `Grep` file tools for a

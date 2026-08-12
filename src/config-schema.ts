@@ -30,7 +30,7 @@ const ALIAS_FIELDS = new Set([
   "pitch",
   "workspace",
 ]);
-const WORKSPACE_FIELDS = new Set(["primary_directory", "additional_directories"]);
+const WORKSPACE_FIELDS = new Set(["directories"]);
 
 export interface StoredVoiceConfig {
   readonly wakeWords?: readonly string[];
@@ -197,21 +197,19 @@ function parseWorkspace(
     throw new ConfigSchemaError(`aliases.${name}.workspace must be a TOML table`);
   }
   rejectUnknownFields(value, WORKSPACE_FIELDS, `aliases.${name}.workspace`);
-  const primaryDirectory = requiredString(
-    value.primary_directory,
-    `aliases.${name}.workspace.primary_directory`,
-  );
   if (
-    !Array.isArray(value.additional_directories)
-    || value.additional_directories.some((directory) => typeof directory !== "string")
+    !Array.isArray(value.directories)
+    || value.directories.length === 0
+    || value.directories.some((directory) => typeof directory !== "string")
   ) {
     throw new ConfigSchemaError(
-      `aliases.${name}.workspace.additional_directories must be a list of strings`,
+      `aliases.${name}.workspace.directories must be a nonempty list of strings`,
     );
   }
+  const [primaryDirectory, ...additionalDirectories] = value.directories as string[];
   const workspace = {
     primaryDirectory,
-    additionalDirectories: [...value.additional_directories] as string[],
+    additionalDirectories,
   };
   const capabilities = workspaceCapabilities(provider);
   if (!capabilities.primaryDirectory || !capabilities.additionalDirectories) {
@@ -400,8 +398,10 @@ export function serializeConfigDocument(document: ConfigDocumentV1): string {
       ...(stored.pitch === undefined ? {} : { pitch: stored.pitch }),
       ...(stored.workspace === undefined ? {} : {
         workspace: {
-          primary_directory: stored.workspace.primaryDirectory,
-          additional_directories: [...stored.workspace.additionalDirectories],
+          directories: [
+            stored.workspace.primaryDirectory,
+            ...stored.workspace.additionalDirectories,
+          ],
         },
       }),
     };
