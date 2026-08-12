@@ -863,12 +863,10 @@ describe("voice boundary", () => {
         aliases: { haiku: { provider: "ollama", model: "qwen" } },
       }),
     });
-    let writeCount = 0;
     const stderr = {
       write(chunk: string, callback?: (error?: Error | null) => void) {
         writes.push(chunk);
-        writeCount += 1;
-        callback?.(writeCount === 1 ? new Error("selection stream closed") : undefined);
+        callback?.(writes.length === 1 ? new Error("selection stream closed") : undefined);
       },
     };
 
@@ -972,7 +970,6 @@ describe("voice boundary", () => {
     expect(speechChecks).toBe(0);
     expect(app.stdout.text()).toBe("");
     expect(app.stderr.text()).toBe("voice request rejected: no_match\n");
-    expect(app.stderr.text()).not.toContain("Selecting alias");
   });
 
   test("loads malformed configuration before blank or invalid-UTF-8 voice input can reach speech", async () => {

@@ -1536,19 +1536,14 @@ function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
   stderr.write(`\u001b[0m${response.endsWith("\n") ? "\n" : "\n\n"}`);
 }
 
-function writeResponse(stdout: TextOutput, response: string): Promise<void> {
+function writeOutput(output: TextOutput, text: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    stdout.write(response, (error) => error ? reject(error) : resolve());
+    output.write(text, (error) => error ? reject(error) : resolve());
   });
 }
 
 function writeVoiceRouteSelection(stderr: TextOutput, alias: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stderr.write(
-      `Selecting alias '${alias}'\n`,
-      (error) => error ? reject(error) : resolve(),
-    );
-  });
+  return writeOutput(stderr, `Selecting alias '${alias}'\n`);
 }
 
 async function voiceNoticeExit(
@@ -1832,7 +1827,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           diagnostic("generation: response withheld because it contained a registered credential.");
           return 1;
         }
-        await writeResponse(deps.stdout, response);
+        await writeOutput(deps.stdout, response);
         if (interactive) writeInteractiveBoundary(deps.stderr, response);
       }
 
