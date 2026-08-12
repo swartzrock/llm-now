@@ -17,6 +17,7 @@ import type { Key } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { AliasRecord } from "./aliases.ts";
 import type { RuntimeGateway } from "./runtime.ts";
+import { workspaceStateLabel } from "./workspace.ts";
 
 export const NO_PROVIDER_DIAGNOSTIC = `llm-now: discovery: no available provider found.
 Local servers: checked Ollama on 127.0.0.1:11434 and LM Studio on 127.0.0.1:1234. Start an already-installed server with a model, then retry.
@@ -199,7 +200,10 @@ export function formatSelection(selection: AliasRecord): string {
   const model = selection.model === null
     ? "default model"
     : sanitizePromptText(selection.model);
-  return `${provider} · ${model}`;
+  const workspace = selection.workspace === undefined
+    ? ""
+    : ` · ${workspaceStateLabel(selection.workspace)}`;
+  return `${provider} · ${model}${workspace}`;
 }
 
 export function formatAliasInventory(
@@ -212,7 +216,10 @@ export function formatAliasInventory(
       const model = selection.model === null
         ? "provider default"
         : sanitizePromptText(selection.model);
-      return `${sanitizePromptText(alias)} → ${provider} · ${model}`;
+      const workspace = selection.workspace === undefined
+        ? ""
+        : ` · ${workspaceStateLabel(selection.workspace)}`;
+      return `${sanitizePromptText(alias)} → ${provider} · ${model}${workspace}`;
     })
     .join("\n");
 }

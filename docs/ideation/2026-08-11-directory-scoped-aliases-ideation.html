@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: Directory-scoped aliases</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f1ea;
+      --surface: #fffdf8;
+      --surface-2: #ebe7dc;
+      --text: #202521;
+      --muted: #59635c;
+      --line: #cec9bd;
+      --accent: #146c5a;
+      --accent-soft: #dceee7;
+      --accent-text: #0d5143;
+      --blue-soft: #dfeaf4;
+      --blue-text: #244e6b;
+      --warn-soft: #f5e8cb;
+      --warn-text: #6e4a0a;
+      --danger-soft: #f4dddd;
+      --danger-text: #762f2f;
+      --shadow: 0 12px 34px rgba(37, 41, 36, .08);
+      --radius: 18px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #141815;
+        --surface: #1c211d;
+        --surface-2: #262d27;
+        --text: #edf2ed;
+        --muted: #aeb9b0;
+        --line: #3c473f;
+        --accent: #6bc6ad;
+        --accent-soft: #183d34;
+        --accent-text: #9ce3cf;
+        --blue-soft: #1e3445;
+        --blue-text: #a8d1ef;
+        --warn-soft: #40351f;
+        --warn-text: #f4cd7b;
+        --danger-soft: #452727;
+        --danger-text: #f2aaaa;
+        --shadow: 0 14px 42px rgba(0, 0, 0, .3);
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.62 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .91em;
+      background: var(--surface-2);
+      border-radius: 5px;
+      padding: .1em .35em;
+    }
+    strong { color: inherit; }
+    .page { width: min(940px, calc(100% - 32px)); margin: 32px auto 72px; }
+    .hero {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: clamp(28px, 5vw, 54px);
+    }
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { line-height: 1.18; letter-spacing: -.025em; }
+    h1 { max-width: 17ch; margin: 0 0 18px; font-size: clamp(38px, 7vw, 66px); }
+    h2 { margin: 0 0 18px; font-size: clamp(25px, 4vw, 34px); }
+    h3 { margin: 0; font-size: 22px; }
+    .lede { max-width: 70ch; margin: 0; color: var(--muted); font-size: 18px; }
+    .meta, .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--text);
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pill.accent { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
+    .pill.blue { background: var(--blue-soft); color: var(--blue-text); border-color: transparent; }
+    .pill.warn { background: var(--warn-soft); color: var(--warn-text); border-color: transparent; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 28px; }
+    .stat { padding: 14px; border-radius: 14px; background: var(--surface-2); }
+    .stat b { display: block; font-size: 24px; line-height: 1; }
+    .stat span { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; }
+    nav {
+      position: sticky;
+      top: 10px;
+      z-index: 5;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 14px 0 34px;
+      padding: 9px;
+      background: color-mix(in srgb, var(--bg) 85%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      backdrop-filter: blur(12px);
+    }
+    nav a { padding: 6px 9px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 12px; font-weight: 700; }
+    nav a:hover { background: var(--surface); color: var(--text); }
+    section { scroll-margin-top: 84px; margin: 52px 0; }
+    .section-intro { max-width: 72ch; color: var(--muted); }
+    .callout, .ground-card, .idea, .axis-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .callout { padding: 20px 22px; background: var(--accent-soft); color: var(--accent-text); }
+    .callout p { max-width: 72ch; margin: 0; }
+    .ground-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+    .ground-card { padding: 20px; }
+    .ground-card h3 { margin-bottom: 10px; font-size: 17px; }
+    .ground-card p, .ground-card li { color: var(--muted); }
+    .ground-card ul { margin: 0; padding-left: 19px; }
+    .ground-card li + li { margin-top: 7px; }
+    .compat { width: 100%; border-collapse: collapse; margin-top: 20px; overflow: hidden; border-radius: 14px; }
+    .compat th, .compat td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .compat th { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .compat tr:last-child td { border-bottom: 0; }
+    .yes { color: var(--accent); font-weight: 800; }
+    .no { color: var(--danger-text); font-weight: 800; }
+    .axes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .axis-card { min-height: 132px; padding: 16px; }
+    .axis-no { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); font-weight: 800; }
+    .axis-card h3 { margin-top: 12px; font-size: 15px; }
+    .jump-list { columns: 2; margin: 0 0 22px; padding: 18px 20px 18px 38px; border-radius: var(--radius); background: var(--surface-2); }
+    .jump-list li { break-inside: avoid; margin: 5px 0; }
+    .idea { scroll-margin-top: 84px; margin: 18px 0; padding: clamp(22px, 4vw, 34px); box-shadow: var(--shadow); }
+    .idea-head { display: flex; align-items: flex-start; gap: 14px; }
+    .rank { flex: 0 0 auto; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-text); font-weight: 900; }
+    .idea h3 { padding-top: 5px; }
+    .idea .description { max-width: 73ch; margin: 18px 0; font-size: 16px; }
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0 0; }
+    .field { margin: 0; padding: 15px; border-radius: 13px; background: var(--surface-2); }
+    .field dt { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+    .field dd { margin: 6px 0 0; }
+    .field.wide { grid-column: 1 / -1; }
+    .concept { margin: 24px 0 4px; border-radius: 15px; background: var(--surface-2); padding: 14px; overflow-x: auto; }
+    .concept svg { display: block; width: 100%; min-width: 620px; height: auto; }
+    .caption { margin: 8px 4px 0; color: var(--muted); font-size: 12px; }
+    .rejections-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .rejections { width: 100%; border-collapse: collapse; min-width: 700px; }
+    .rejections th, .rejections td { padding: 11px 13px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .rejections th { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .rejections tr:last-child td { border-bottom: 0; }
+    .rejections td:first-child { width: 52px; color: var(--muted); font-family: ui-monospace, monospace; }
+    .references { padding-left: 20px; }
+    .references li + li { margin-top: 7px; }
+    .composition-signal { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    @media (max-width: 760px) {
+      .page { width: min(100% - 20px, 940px); margin-top: 10px; }
+      .hero { border-radius: 18px; }
+      .stats { grid-template-columns: 1fr 1fr; }
+      .ground-grid, .fields { grid-template-columns: 1fr; }
+      .field.wide { grid-column: auto; }
+      .axes { grid-template-columns: 1fr 1fr; }
+      .jump-list { columns: 1; }
+      nav { position: static; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Ideation · LLM-Now</p>
+      <h1>Directory-scoped aliases</h1>
+      <p class="lede">A directory can decide whether an alias is available everywhere. It can only become model execution context for process-backed agents—today, Codex and Claude—not for Ollama, LM Studio, or cloud HTTP APIs.</p>
+      <div class="meta" aria-label="Document metadata">
+        <span class="pill"><b>Date</b> <time datetime="2026-08-11">2026-08-11</time></span>
+        <span class="pill"><b>Topic</b> directory-scoped-aliases</span>
+        <span class="pill"><b>Mode</b> repo-grounded</span>
+        <span class="pill accent"><b>Focus</b> one or multiple directories</span>
+      </div>
+      <div class="stats" aria-label="Ideation summary">
+        <div class="stat"><b>42</b><span>raw proposals</span></div>
+        <div class="stat"><b>35</b><span>after dedupe + synthesis</span></div>
+        <div class="stat"><b>6</b><span>ranked survivors</span></div>
+        <div class="stat"><b>5</b><span>topic axes covered</span></div>
+      </div>
+    </header>
+
+    <nav aria-label="Document sections">
+      <a href="#grounding-context">Grounding Context</a>
+      <a href="#topic-axes">Topic Axes</a>
+      <a href="#ranked-ideas">Ranked Ideas</a>
+      <a href="#rejection-summary">Rejection Summary</a>
+      <a href="#evidence-base">Evidence Base</a>
+    </nav>
+
+    <section id="grounding-context">
+      <p class="eyebrow">What the evidence changed</p>
+      <h2>Grounding Context</h2>
+      <div class="callout">
+        <p><strong>Core correction:</strong> Ollama and LM Studio behave like cloud providers with respect to cwd. They are local HTTP servers, but locality does not give an HTTP generation request a working directory. Directory scoping is still useful for their alias visibility; it just does not add repository context to inference.</p>
+      </div>
+      <div class="ground-grid">
+        <article class="ground-card">
+          <h3>Current alias contract</h3>
+          <ul>
+            <li>Aliases are stored globally under XDG/home/APPDATA and are explicitly available from every working directory.</li>
+            <li>A strict alias record carries only provider, model, and optional instructions.</li>
+            <li>Resolution and generation currently forward no cwd or directory list.</li>
+          </ul>
+        </article>
+        <article class="ground-card">
+          <h3>Runtime leverage point</h3>
+          <ul>
+            <li>The installed runtime’s Codex and Claude classes internally accept cwd.</li>
+            <li>The public factory drops cwd, so both currently fall back to an OS temporary directory.</li>
+            <li>The runtime boundary—not provider discovery—is the place to add process execution context.</li>
+          </ul>
+        </article>
+        <article class="ground-card">
+          <h3>Persistence constraints</h3>
+          <ul>
+            <li>Exact-key versioned validation means directory fields require explicit schema and migration work.</li>
+            <li>Absolute paths are machine-specific and do not belong casually in a portable global target record.</li>
+            <li>Current locking, atomic writes, permissions, and fail-closed conflicts are worth preserving.</li>
+          </ul>
+        </article>
+        <article class="ground-card">
+          <h3>External precedent</h3>
+          <ul>
+            <li>Codex uses cwd to anchor project instructions and command execution.</li>
+            <li>Claude uses cwd as a project boundary and supports explicit additional directories.</li>
+            <li>One primary directory plus explicit extras is stronger precedent than an undifferentiated directory list.</li>
+          </ul>
+        </article>
+      </div>
+
+      <table class="compat" aria-label="Provider directory compatibility">
+        <thead><tr><th>Provider</th><th>Directory-scoped visibility</th><th>Execution cwd affects model behavior</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Codex CLI</td><td class="yes">Yes</td><td class="yes">Yes</td><td>Process cwd anchors project instruction discovery and execution.</td></tr>
+          <tr><td>Claude CLI</td><td class="yes">Yes</td><td class="yes">Yes</td><td>Process cwd is the primary project boundary; extra roots are explicitly supported.</td></tr>
+          <tr><td>Ollama</td><td class="yes">Yes</td><td class="no">No</td><td>The server receives an HTTP generation request, not the client’s filesystem cwd.</td></tr>
+          <tr><td>LM Studio server</td><td class="yes">Yes</td><td class="no">No</td><td>The local REST/OpenAI-compatible endpoint is directory-agnostic. Its separate Bionic project UI is different.</td></tr>
+          <tr><td>Cloud APIs</td><td class="yes">Yes</td><td class="no">No</td><td>The remote endpoint sees request content and credentials, not the launcher’s cwd.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="topic-axes">
+      <p class="eyebrow">Surface map</p>
+      <h2>Topic Axes</h2>
+      <div class="axes">
+        <article class="axis-card"><span class="axis-no">1</span><h3>Path matching and multi-directory scope</h3></article>
+        <article class="axis-card"><span class="axis-no">2</span><h3>Alias visibility and precedence</h3></article>
+        <article class="axis-card"><span class="axis-no">3</span><h3>Provider execution context</h3></article>
+        <article class="axis-card"><span class="axis-no">4</span><h3>Persistence and portability</h3></article>
+        <article class="axis-card"><span class="axis-no">5</span><h3>Safety and diagnostics</h3></article>
+      </div>
+    </section>
+
+    <section id="ranked-ideas">
+      <p class="eyebrow">The surviving directions</p>
+      <h2>Ranked Ideas</h2>
+      <p class="section-intro">The first idea is the durable product model. The sixth is a deliberately smaller way to validate the CLI behavior before committing to persistent multi-root configuration.</p>
+      <ol class="jump-list">
+        <li><a href="#idea-1">Capability-checked multi-directory workspace</a></li>
+        <li><a href="#idea-2">One active scope root plus explicit extras</a></li>
+        <li><a href="#idea-3">Identity-preserving visibility policy</a></li>
+        <li><a href="#idea-4">Project enrollment with user-owned targets</a></li>
+        <li><a href="#idea-5">Explainable launch plan and preflight</a></li>
+        <li><a href="#idea-6">Invocation-bound CLI workspace as v1</a></li>
+      </ol>
+
+      <article class="idea" id="idea-1">
+        <div class="idea-head"><span class="rank">1.</span><div><h3>Capability-checked multi-directory workspace</h3><div class="chips"><span class="pill accent">Top pick</span><span class="pill">Provider execution context</span><span class="pill blue">Confidence 94%</span><span class="pill warn">Complexity Medium</span></div></div></div>
+        <p class="description">Keep every alias permanently tied to one provider, model, and optional instruction set. Add one optional <code>workspace</code> containing a primary directory plus zero or more additional directories. Runtime adapters declare whether they can honor a primary cwd and additional roots; unsupported workspace configuration fails clearly instead of being ignored. The alias remains globally callable—this direction introduces no availability or visibility policy.</p>
+        <figure class="concept">
+          <svg viewBox="0 0 820 205" role="img" aria-labelledby="idea1-svg-title idea1-svg-desc">
+            <title id="idea1-svg-title">An alias target with an optional multi-directory workspace</title>
+            <desc id="idea1-svg-desc">One alias retains one provider and model target. Its optional workspace contains a primary directory and additional roots, which pass through an adapter capability check before CLI execution. HTTP providers reject workspace configuration.</desc>
+            <defs><marker id="arrow1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/></marker></defs>
+            <rect x="20" y="58" width="190" height="86" rx="12" fill="var(--surface)" stroke="var(--line)"/>
+            <text x="115" y="87" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Alias target</text>
+            <text x="115" y="109" text-anchor="middle" fill="var(--muted)" font-size="12">one provider + model</text>
+            <text x="115" y="129" text-anchor="middle" fill="var(--muted)" font-size="12">+ optional instructions</text>
+            <path d="M210 101 H270" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow1)"/>
+            <rect x="275" y="47" width="220" height="108" rx="12" fill="var(--accent-soft)" stroke="var(--accent)"/>
+            <text x="385" y="77" text-anchor="middle" fill="var(--accent-text)" font-size="14" font-weight="700">Optional workspace</text>
+            <text x="385" y="101" text-anchor="middle" fill="var(--accent-text)" font-size="12">primary directory</text>
+            <text x="385" y="123" text-anchor="middle" fill="var(--accent-text)" font-size="12">+ additional directories[]</text>
+            <text x="385" y="143" text-anchor="middle" fill="var(--accent-text)" font-size="11">alias remains globally callable</text>
+            <path d="M495 101 H555" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow1)"/>
+            <rect x="560" y="47" width="235" height="108" rx="12" fill="var(--blue-soft)" stroke="var(--blue-text)"/>
+            <text x="677" y="77" text-anchor="middle" fill="var(--blue-text)" font-size="14" font-weight="700">Adapter capability check</text>
+            <text x="677" y="101" text-anchor="middle" fill="var(--blue-text)" font-size="12">CLI: pass supported context</text>
+            <text x="677" y="123" text-anchor="middle" fill="var(--blue-text)" font-size="12">HTTP: reject workspace</text>
+            <text x="677" y="143" text-anchor="middle" fill="var(--blue-text)" font-size="11">never silently discard directories</text>
+          </svg>
+          <figcaption class="caption">Illustrative shape: one immutable alias target gains an optional multi-directory workspace, subject to adapter capabilities.</figcaption>
+        </figure>
+        <div class="fields">
+          <dl class="field wide"><dt>Basis</dt><dd><strong>direct:</strong> The runtime creates URL/model configs for Ollama and LM Studio, while only the internal CLI classes possess cwd. <strong>external:</strong> Codex and Claude document cwd-based project behavior.</dd></dl>
+          <dl class="field"><dt>Rationale</dt><dd>This adds the requested project context without changing alias identity or introducing path-dependent visibility. Capability ownership remains explicit and extensible at the runtime boundary.</dd></dl>
+          <dl class="field"><dt>Downsides</dt><dd>One primary directory is still required because a process has one cwd. Additional-root semantics differ by CLI, so configuration may be valid for Claude before the Codex adapter can honor the same full workspace.</dd></dl>
+        </div>
+      </article>
+
+      <article class="idea" id="idea-2">
+        <div class="idea-head"><span class="rank">2.</span><div><h3>One active scope root plus explicit additional roots</h3><div class="chips"><span class="pill">Path matching and multi-directory scope</span><span class="pill blue">Confidence 90%</span><span class="pill warn">Complexity Medium</span></div></div></div>
+        <p class="description">Treat a configured root set as OR membership: the alias works from any listed root and its descendants. At invocation time, exactly one match is active; the actual invocation directory remains the primary CLI cwd so nested-package context is not discarded. If the desired meaning is “use several roots simultaneously,” model that separately as explicit additional roots, access-only by default and capability-gated per adapter.</p>
+        <figure class="concept">
+          <svg viewBox="0 0 820 250" role="img" aria-labelledby="idea2-svg-title idea2-svg-desc">
+            <title id="idea2-svg-title">One-of scope matching versus simultaneous extra roots</title>
+            <desc id="idea2-svg-desc">Two allowed roots make an alias eligible from either project. The invocation within project A becomes the primary cwd; project B becomes simultaneous context only if explicitly configured as an extra root.</desc>
+            <defs><marker id="arrow2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/></marker></defs>
+            <rect x="30" y="30" width="205" height="75" rx="12" fill="var(--accent-soft)" stroke="var(--accent)"/>
+            <text x="132" y="58" text-anchor="middle" fill="var(--accent-text)" font-size="14" font-weight="700">Allowed root A</text>
+            <text x="132" y="80" text-anchor="middle" fill="var(--accent-text)" font-size="12">/work/product</text>
+            <rect x="30" y="145" width="205" height="75" rx="12" fill="var(--surface)" stroke="var(--line)"/>
+            <text x="132" y="173" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Allowed root B</text>
+            <text x="132" y="195" text-anchor="middle" fill="var(--muted)" font-size="12">/work/docs</text>
+            <path d="M235 67 H340" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow2)"/>
+            <rect x="345" y="30" width="230" height="75" rx="12" fill="var(--blue-soft)" stroke="var(--blue-text)"/>
+            <text x="460" y="58" text-anchor="middle" fill="var(--blue-text)" font-size="14" font-weight="700">Invocation inside A</text>
+            <text x="460" y="80" text-anchor="middle" fill="var(--blue-text)" font-size="12">/work/product/packages/api</text>
+            <path d="M575 67 H680" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow2)"/>
+            <rect x="685" y="30" width="110" height="75" rx="12" fill="var(--surface)" stroke="var(--line)"/>
+            <text x="740" y="59" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="700">Primary cwd</text>
+            <text x="740" y="80" text-anchor="middle" fill="var(--muted)" font-size="11">caller path</text>
+            <path d="M460 105 V155 H575" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#arrow2)"/>
+            <rect x="580" y="140" width="215" height="80" rx="12" fill="var(--warn-soft)" stroke="var(--warn-text)"/>
+            <text x="687" y="169" text-anchor="middle" fill="var(--warn-text)" font-size="14" font-weight="700">Optional simultaneous roots</text>
+            <text x="687" y="191" text-anchor="middle" fill="var(--warn-text)" font-size="12">explicit · access-only by default</text>
+          </svg>
+          <figcaption class="caption">Illustrative distinction: “available in A or B” is not the same as “load A and B together.”</figcaption>
+        </figure>
+        <div class="fields">
+          <dl class="field wide"><dt>Basis</dt><dd><strong>external:</strong> Claude exposes one cwd plus explicit added directories; Codex anchors its project instruction walk at the selected cwd. <strong>reasoned:</strong> OR membership and simultaneous context answer different user intents and should not share one array.</dd></dl>
+          <dl class="field"><dt>Rationale</dt><dd>This gives “one or multiple directories” a predictable answer across monorepos and adjacent repositories while preserving the caller’s precise subdirectory.</dd></dl>
+          <dl class="field"><dt>Downsides</dt><dd>Canonicalization and symlink behavior need a crisp rule. Claude has documented extra-root support; Codex should not be presented as equivalent until the adapter has a supported mechanism.</dd></dl>
+        </div>
+      </article>
+
+      <article class="idea" id="idea-3">
+        <div class="idea-head"><span class="rank">3.</span><div><h3>Identity-preserving visibility policy</h3><div class="chips"><span class="pill">Alias visibility and precedence</span><span class="pill blue">Confidence 88%</span><span class="pill warn">Complexity Medium</span></div></div></div>
+        <p class="description">Keep one canonical global alias target and attach an optional allowed-root set. The current cwd filters eligibility; it does not create a second same-named target in every project. An absent policy preserves today’s everywhere-available contract. This supports Ollama, LM Studio, and cloud aliases honestly because visibility is launcher behavior rather than provider behavior.</p>
+        <div class="fields">
+          <dl class="field wide"><dt>Basis</dt><dd><strong>direct:</strong> Alias names already canonicalize case-insensitively and conflicting targets fail closed. The launcher and deterministic path both load one global document.</dd></dl>
+          <dl class="field"><dt>Rationale</dt><dd>Filtering one identity avoids the trust cost of path-dependent shadowing: <code>review</code> never quietly becomes a different provider/model merely because the shell moved.</dd></dl>
+          <dl class="field"><dt>Downsides</dt><dd>Teams that explicitly want project-local definitions cannot reuse the same bare name for distinct targets; that can remain a later, qualified-scope feature if demand emerges.</dd></dl>
+        </div>
+      </article>
+
+      <article class="idea" id="idea-4">
+        <div class="idea-head"><span class="rank">4.</span><div><h3>Project enrollment with user-owned targets</h3><div class="chips"><span class="pill">Persistence and portability</span><span class="pill blue">Confidence 80%</span><span class="pill warn">Complexity Medium</span></div></div></div>
+        <p class="description">For a team-shareable variant, let a project-local overlay enroll logical alias names and relative workspace metadata while provider/model/instructions remain in each user’s global store. The project says “these workflows apply here”; the user still decides which private target fulfills each workflow. Machine-specific absolute bindings, when unavoidable, live in a user-local overlay rather than committed project data.</p>
+        <figure class="concept">
+          <svg viewBox="0 0 820 205" role="img" aria-labelledby="idea4-svg-title idea4-svg-desc">
+            <title id="idea4-svg-title">Project enrollment and user-owned alias target</title>
+            <desc id="idea4-svg-desc">A project manifest names a logical alias. A private user store supplies provider, model, and instructions. The resolver combines them into an eligible launch without sharing credentials or personal paths.</desc>
+            <defs><marker id="arrow4" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--accent)"/></marker></defs>
+            <rect x="25" y="35" width="205" height="72" rx="12" fill="var(--accent-soft)" stroke="var(--accent)"/>
+            <text x="127" y="63" text-anchor="middle" fill="var(--accent-text)" font-size="14" font-weight="700">Project overlay</text>
+            <text x="127" y="85" text-anchor="middle" fill="var(--accent-text)" font-size="12">enrolls logical “review”</text>
+            <rect x="25" y="125" width="205" height="58" rx="12" fill="var(--blue-soft)" stroke="var(--blue-text)"/>
+            <text x="127" y="149" text-anchor="middle" fill="var(--blue-text)" font-size="14" font-weight="700">User-global store</text>
+            <text x="127" y="169" text-anchor="middle" fill="var(--blue-text)" font-size="12">provider · model · instructions</text>
+            <path d="M230 70 H365" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow4)"/>
+            <path d="M230 154 H305 V110 H365" stroke="var(--accent)" stroke-width="2" fill="none" marker-end="url(#arrow4)"/>
+            <rect x="370" y="72" width="180" height="76" rx="12" fill="var(--surface)" stroke="var(--line)"/>
+            <text x="460" y="103" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Scoped resolver</text>
+            <text x="460" y="125" text-anchor="middle" fill="var(--muted)" font-size="12">combines policy + target</text>
+            <path d="M550 110 H660" stroke="var(--accent)" stroke-width="2" marker-end="url(#arrow4)"/>
+            <rect x="665" y="72" width="130" height="76" rx="12" fill="var(--surface)" stroke="var(--line)"/>
+            <text x="730" y="103" text-anchor="middle" fill="var(--text)" font-size="14" font-weight="700">Launch plan</text>
+            <text x="730" y="125" text-anchor="middle" fill="var(--muted)" font-size="12">private + portable</text>
+          </svg>
+          <figcaption class="caption">Illustrative ownership split: the project enrolls a workflow; the user owns its executable target.</figcaption>
+        </figure>
+        <div class="fields">
+          <dl class="field wide"><dt>Basis</dt><dd><strong>direct:</strong> The current record is credential-free but user-global and exact-key validated. <strong>reasoned:</strong> Separating portable project membership from private target configuration prevents coworkers’ home paths and provider choices from leaking into shared config.</dd></dl>
+          <dl class="field"><dt>Rationale</dt><dd>This is the most promising collaborative extension if the feature should work across clones, worktrees, or team machines.</dd></dl>
+          <dl class="field"><dt>Downsides</dt><dd>It introduces a second configuration surface and missing-reference states. It should follow—not precede—proof that personal directory scopes are valuable.</dd></dl>
+        </div>
+      </article>
+
+      <article class="idea" id="idea-5">
+        <div class="idea-head"><span class="rank">5.</span><div><h3>Explainable launch plan with fail-closed preflight</h3><div class="chips"><span class="pill">Safety and diagnostics</span><span class="pill blue">Confidence 91%</span><span class="pill warn">Complexity Medium</span></div></div></div>
+        <p class="description">Resolve a scoped alias into one inspectable launch plan: matched scope, winning policy, provider capability, actual CLI cwd, additional roots, and every ignored or unsupported effect. Feed that same object into generation and an explain command. Before process launch, canonicalize and validate paths; a missing or moved root fails clearly and never degrades to the runtime’s temporary cwd.</p>
+        <div class="fields">
+          <dl class="field wide"><dt>Basis</dt><dd><strong>direct:</strong> Current alias handling already fails closed on invalid state, and diagnostics are sanitized, redacted, and bounded. The installed CLI runtime otherwise silently chooses a temporary cwd when none is provided.</dd></dl>
+          <dl class="field"><dt>Rationale</dt><dd>For coding agents, a successful run in the wrong directory is more dangerous than an obvious error. A single plan also prevents explanation and execution from drifting apart.</dd></dl>
+          <dl class="field"><dt>Downsides</dt><dd>Full local paths may reveal personal filesystem structure, so normal output should prefer logical labels and bounded/redacted paths, with explicit verbose detail.</dd></dl>
+        </div>
+      </article>
+
+      <article class="idea" id="idea-6">
+        <div class="idea-head"><span class="rank">6.</span><div><h3>Invocation-bound CLI workspace as a small v1</h3><div class="chips"><span class="pill">Provider execution context</span><span class="pill blue">Confidence 89%</span><span class="pill accent">Complexity Low</span></div></div></div>
+        <p class="description">Before designing persistent directory profiles, add an explicit workspace mode for Codex and Claude aliases that forwards the invocation cwd through the runtime boundary. Keep current global aliases unchanged. Label Ollama, LM Studio, and cloud aliases as directory-agnostic for execution; they receive no cwd. This is a low-schema-risk way to validate whether correct CLI project context creates enough value to justify the larger scope system.</p>
+        <div class="fields">
+          <dl class="field wide"><dt>Basis</dt><dd><strong>direct:</strong> The concrete defect is already visible: CLI classes accept cwd internally, but the public factory cannot receive it and defaults to a temporary directory. No alias schema change is required to test explicit invocation-bound behavior.</dd></dl>
+          <dl class="field"><dt>Rationale</dt><dd>It fixes real Codex/Claude context today and gathers product evidence before choosing overlay, workspace-profile, or schema-v3 persistence.</dd></dl>
+          <dl class="field"><dt>Downsides</dt><dd>It does not yet make an alias available only in selected roots or preserve a multi-directory profile. Invocation cwd also remains ambient unless the mode is explicit and visible in diagnostics.</dd></dl>
+        </div>
+      </article>
+    </section>
+
+    <section id="rejection-summary">
+      <p class="eyebrow">What did not survive</p>
+      <h2>Rejection Summary</h2>
+      <p class="section-intro">Sound sub-parts were frequently folded into stronger combined directions. Weak candidates mostly introduced Git-only assumptions, path-dependent target shadowing, or a second configuration system before demand was established.</p>
+      <div class="rejections-wrap">
+        <table class="rejections">
+          <thead><tr><th>Raw</th><th>Idea</th><th>Reason rejected</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>Declared project root membership</td><td>Folded into idea 2; the raw version did not distinguish allowed roots from simultaneous context roots.</td></tr>
+            <tr><td>2</td><td>Git-root anchor with deepest match</td><td>Weak: Git is not universal and deepest-root precedence is premature.</td></tr>
+            <tr><td>3</td><td>Repository identity scope</td><td>Weak: broader than directory scoping and unreliable for no-remote projects.</td></tr>
+            <tr><td>4</td><td>Allowed sites versus workspace roots</td><td>The workspace half was folded into idea 2; availability was removed from idea 1 after refinement.</td></tr>
+            <tr><td>5</td><td>Always-explicit named workspace</td><td>Sound later variant, but not the clearest core direction for the stated task.</td></tr>
+            <tr><td>6</td><td>Directory route table</td><td>Weak: disproportionate machinery without evidence that nested competing scopes are needed.</td></tr>
+            <tr><td>7</td><td>Marker-based enrollment</td><td>Weak: requires project writes and introduces another configuration convention.</td></tr>
+            <tr><td>9</td><td>Layered project alias definitions</td><td>Weak: shadowing erodes the current one-name/one-target trust model.</td></tr>
+            <tr><td>10</td><td>Qualified names on collisions</td><td>Duplicate safeguard; idea 3 avoids target collisions by preserving identity.</td></tr>
+            <tr><td>11</td><td>Visible but locked aliases</td><td>Weak: clutters inventory and exposes local scope details for unavailable actions.</td></tr>
+            <tr><td>12</td><td>Launcher groups by provider effect</td><td>Folded into idea 1’s capability labels.</td></tr>
+            <tr><td>13</td><td>Workspace-owned alias catalogs</td><td>Weak: duplicates the mature global inventory and adds merge semantics.</td></tr>
+            <tr><td>14</td><td>Provider capability matrix</td><td>Folded into idea 1.</td></tr>
+            <tr><td>15</td><td>Workspace capsule</td><td>Folded into idea 2; retained the caveat that Codex lacks documented Claude-style extra roots.</td></tr>
+            <tr><td>16</td><td>Always launch from registered root</td><td>Weak: discards meaningful caller subdirectory context.</td></tr>
+            <tr><td>18</td><td>HTTP visibility-only scope</td><td>Folded into idea 3 only; idea 1 now rejects workspace configuration for HTTP providers.</td></tr>
+            <tr><td>19</td><td>Context manifest for HTTP providers</td><td>Scope overrun: file ingestion and remote-data consent form a separate product.</td></tr>
+            <tr><td>20</td><td>Extra-root instruction policy</td><td>Folded into idea 2’s access-only default.</td></tr>
+            <tr><td>21</td><td>Project overlay references</td><td>Folded into idea 4.</td></tr>
+            <tr><td>22</td><td>Named scope profiles</td><td>Sound but too abstract before repeated cross-machine bindings are proven.</td></tr>
+            <tr><td>23</td><td>Machine-local directory overlay</td><td>Folded into idea 4 as its user-local side.</td></tr>
+            <tr><td>24</td><td>Git-relative multi-root set</td><td>Weak: does not cover independent or non-Git directories.</td></tr>
+            <tr><td>25</td><td>Project-local creation by default</td><td>Basis refuted: reverses the documented global contract without support from the request.</td></tr>
+            <tr><td>26</td><td>Schema-v3 absolute paths</td><td>Feasible but lower value: makes the portable global target record machine-specific.</td></tr>
+            <tr><td>28</td><td>Path preflight only</td><td>Merged into idea 5.</td></tr>
+            <tr><td>29</td><td>First-use root confirmation</td><td>Weak: adds friction without evidence that it improves the current read-only/tool-restricted boundary.</td></tr>
+            <tr><td>30</td><td>Path-redacted diagnostics only</td><td>Folded into idea 5.</td></tr>
+            <tr><td>33</td><td>Named workspace plus resolver</td><td>Weak: combines two abstractions before simple roots are proven inadequate.</td></tr>
+            <tr><td>35</td><td>Primary-root contract</td><td>Folded into idea 2.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="evidence-base">
+      <p class="eyebrow">Primary references</p>
+      <h2>Evidence Base</h2>
+      <ul class="references">
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/aliases.ts">LLM-Now alias schema and storage</a> — global path, strict records, canonicalization, atomic persistence.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/runtime.ts">LLM-Now runtime adapter</a> — provider configuration and the current cwd-free generation boundary.</li>
+        <li><a href="https://github.com/swartzrock/llm-now/blob/main/src/app.ts">LLM-Now application flow</a> — alias resolution, launcher inventory, and diagnostic sanitation.</li>
+        <li><a href="https://code.claude.com/docs/en/memory">Claude Code memory and directory loading</a> — cwd project boundary and configuration discovery.</li>
+        <li><a href="https://code.claude.com/docs/en/cli-usage">Claude Code CLI reference</a> — additional-directory support.</li>
+        <li><a href="https://github.com/openai/codex/blob/main/codex-rs/cli/src/lib.rs">Codex CLI source</a> — explicit working-directory support.</li>
+        <li><a href="https://github.com/openai/codex/blob/main/codex-rs/core/src/agents_md.rs">Codex project instruction discovery</a> — project-root-to-cwd behavior.</li>
+        <li><a href="https://docs.ollama.com/api/introduction">Ollama API</a> — HTTP inference interface.</li>
+        <li><a href="https://beta.lmstudio.ai/docs/developer/core/server">LM Studio local server</a> — local HTTP server behavior.</li>
+      </ul>
+    </section>
+
+    <footer class="composition-signal">Composed 2026-08-12T03:50:06Z by ce-ideate from the user’s directory-scoped alias question, subsequent workspace clarification, and the LLM-Now repository.</footer>
+  </main>
+</body>
+</html>

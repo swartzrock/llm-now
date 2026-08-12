@@ -8,9 +8,15 @@ import {
   loadAliases,
   resolveAlias,
   resolveAliasPath,
+  sameAliasRecord,
   saveAlias,
 } from "../src/aliases.ts";
 import { createPersistenceBlocker } from "../src/credentials.ts";
+import {
+  normalizeWorkspace,
+  workspaceCapabilities,
+  workspaceStateLabel,
+} from "../src/workspace.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -93,6 +99,44 @@ describe("global aliases", () => {
           provider: "codex-cli",
           model: null,
           instructions: "You are a realtime voice architect.\nFocus on interruption handling.",
+        },
+        plain: { provider: "ollama", model: "llama3" },
+      },
+    });
+    expect(await readFile(path, "utf8")).toBe(text);
+  });
+
+  test("loads version 3 workspaces exactly without rewriting the store", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    const text = `${JSON.stringify({
+      version: 3,
+      aliases: {
+        fred: {
+          provider: "codex-cli",
+          model: null,
+          instructions: "Review both projects.",
+          workspace: {
+            primaryDirectory: "/projects/api",
+            additionalDirectories: ["/projects/web", "/projects/shared lib"],
+          },
+        },
+        plain: { provider: "ollama", model: "llama3" },
+      },
+    }, null, 2)}\n`;
+    await writeFile(path, text);
+
+    expect(await loadAliases(path)).toEqual({
+      version: 3,
+      aliases: {
+        fred: {
+          provider: "codex-cli",
+          model: null,
+          instructions: "Review both projects.",
+          workspace: {
+            primaryDirectory: "/projects/api",
+            additionalDirectories: ["/projects/web", "/projects/shared lib"],
+          },
         },
         plain: { provider: "ollama", model: "llama3" },
       },
@@ -204,7 +248,27 @@ describe("global aliases", () => {
       { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: "   " } } },
       { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: "bad\u0000value" } } },
       { version: 2, aliases: { daily: { provider: "ollama", model: "x", instructions: 42 } } },
-      { version: 3, aliases: {} },
+      { version: 3, aliases: { daily: { provider: "ollama", model: "x", workspace: {
+        primaryDirectory: "/project",
+        additionalDirectories: [],
+      } } } },
+      { version: 3, aliases: { daily: { provider: "codex-cli", model: null, workspace: {
+        primaryDirectory: "relative",
+        additionalDirectories: [],
+      } } } },
+      { version: 3, aliases: { daily: { provider: "codex-cli", model: null, workspace: {
+        primaryDirectory: "/project",
+        additionalDirectories: ["/project"],
+      } } } },
+      { version: 3, aliases: { daily: { provider: "codex-cli", model: null, workspace: {
+        primaryDirectory: "/project",
+        additionalDirectories: ["/other", "/other"],
+      } } } },
+      { version: 3, aliases: { daily: { provider: "codex-cli", model: null, workspace: {
+        primaryDirectory: "/project",
+        additionalDirectories: [],
+        unknown: true,
+      } } } },
     ];
 
     for (const document of invalidDocuments) {
@@ -262,6 +326,36 @@ describe("global aliases", () => {
     });
   });
 
+  test("upgrades to version 3 for workspace and never downgrades it", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "aliases.json");
+    await writeFile(path, `${JSON.stringify({ version: 1, aliases: {} })}\n`);
+    const workspace = {
+      primaryDirectory: "/projects/api",
+      additionalDirectories: ["/projects/web"],
+    };
+
+    expect(await saveAlias(path, "fred", {
+      provider: "codex-cli",
+      model: null,
+      workspace,
+    })).toBe("saved");
+    expect(await loadAliases(path)).toEqual({
+      version: 3,
+      aliases: {
+        fred: { provider: "codex-cli", model: null, workspace },
+      },
+    });
+
+    expect(await saveAlias(path, "fred", { provider: "codex-cli", model: null }, {
+      confirmOverwrite: async () => true,
+    })).toBe("saved");
+    expect(await loadAliases(path)).toEqual({
+      version: 3,
+      aliases: { fred: { provider: "codex-cli", model: null } },
+    });
+  });
+
   test("uses complete records for equality and case-insensitive overwrite identity", async () => {
     const directory = await temporaryDirectory();
     const path = join(directory, "aliases.json");
@@ -285,6 +379,52 @@ describe("global aliases", () => {
       ...original,
       instructions: "Second role",
     });
+  });
+
+  test("treats ordered workspace roots as complete alias identity", () => {
+    const base: AliasRecord = {
+      provider: "claude-cli",
+      model: null,
+      workspace: {
+        primaryDirectory: "/projects/api",
+        additionalDirectories: ["/projects/web", "/projects/shared"],
+      },
+    };
+
+    expect(sameAliasRecord(base, structuredClone(base))).toBe(true);
+    expect(sameAliasRecord(base, {
+      ...base,
+      workspace: {
+        ...base.workspace!,
+        additionalDirectories: ["/projects/shared", "/projects/web"],
+      },
+    })).toBe(false);
+    expect(sameAliasRecord(base, { provider: "claude-cli", model: null })).toBe(false);
+  });
+
+  test("normalizes creation paths and exposes a complete capability matrix", () => {
+    expect(normalizeWorkspace("./api", ["../web", "../shared lib"], "/projects/root")).toEqual({
+      primaryDirectory: "/projects/root/api",
+      additionalDirectories: ["/projects/web", "/projects/shared lib"],
+    });
+    expect(() => normalizeWorkspace("./api", ["./api"], "/projects/root"))
+      .toThrow("workspace directories must be unique");
+    expect(workspaceCapabilities("codex-cli")).toEqual({
+      primaryDirectory: true,
+      additionalDirectories: true,
+    });
+    expect(workspaceCapabilities("claude-cli")).toEqual({
+      primaryDirectory: true,
+      additionalDirectories: true,
+    });
+    expect(workspaceCapabilities("ollama")).toEqual({
+      primaryDirectory: false,
+      additionalDirectories: false,
+    });
+    expect(workspaceStateLabel({
+      primaryDirectory: "/projects/api",
+      additionalDirectories: ["/projects/web", "/projects/shared"],
+    })).toBe("workspace +2");
   });
 
   test("rejects invalid instruction save input without creating storage artifacts", async () => {
