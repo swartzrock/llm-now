@@ -116,6 +116,12 @@ On macOS, `--speak` sends the output to `/usr/bin/say`, with an optional voice c
 
 If you have access to dictation software, use `--voice-route` with a configured "wake word" () to have llm-now select a matching shortcut. For example, if you configured a wake word of "hey" and an alias named "haiku", use `llm-now --voice-route --input 'hey haiku, write a one-line love poem'` to route the prompt to the "haiku" alias.
 
+When routing accepts the request, llm-now writes exactly
+`Selecting alias 'haiku'\n` to stderr using the canonical alias, then begins
+provider generation. The generated response remains the only stdout content;
+with `--speak`, answer stdout remains empty. A rejected route writes no
+selection line and makes no provider call.
+
 For a two-action global Apple Shortcut, optional spoken names, routing and
 speech settings, privacy guidance, and troubleshooting, see
 [Talk to an llm-now alias from a macOS shortcut](examples/macos-voice-shortcut.md).

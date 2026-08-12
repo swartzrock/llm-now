@@ -210,11 +210,30 @@ with a positional alias, `--alias`, `--provider`, or `--model`.
 instructions for that request.
 
 Routing checks canonical aliases, configured `spoken_names`, and fuzzy
-matching in that order. A route-only mismatch exits `1`, leaves stdout empty,
-reports a bounded value-free reason on stderr, and makes no provider or speech
-call. Blank or invalid-UTF-8 routed input is also a voice rejection: route-only
-calls exit `1`, while `--speak` calls exit `0` when the stable retry notice is
-spoken successfully. Routing without speech works on every supported platform.
+matching in that order. Every accepted route completes this one fixed,
+human-readable stderr write before provider generation begins:
+
+```text
+Selecting alias '<canonical-alias>'
+```
+
+| Route result | stderr | Provider and stdout |
+| --- | --- | --- |
+| Accepted | One selection line; existing sanitized diagnostics may follow if later work fails | Generation starts after the write; stdout remains response-only, or answer-empty with `--speak` |
+| Rejected | No selection line; existing bounded rejection diagnostic | No provider call; stdout remains empty |
+
+The line includes its terminating newline. The value is always the normalized
+canonical alias, including when a configured spoken name or fuzzy match was
+accepted. The alias is the line's only variable data: it never includes the
+transcript, extracted question, prompt, provider, credential, response, or any
+other request content.
+
+A route-only mismatch exits `1`, leaves stdout empty, reports a bounded
+value-free reason on stderr, writes no selection line, and makes no provider or
+speech call. Blank or invalid-UTF-8 routed input is also a voice rejection and
+writes no selection line: route-only calls exit `1`, while `--speak` calls exit
+`0` when the stable retry notice is spoken successfully. Routing without speech
+works on every supported platform.
 
 `--speak` composes with positional-alias, `--alias`, explicit provider/model,
 voice-routing, and interactive selection flows. It adds this plain-text speech
@@ -258,7 +277,12 @@ Successful generation writes the model response byte-for-byte to stdout.
 Interactive UI and diagnostics use stderr, so stdout remains safe to redirect
 or pipe. After an interactive response, stderr resets terminal styling and adds
 a clean visual boundary without changing stdout. With `--speak`, a successfully
-spoken answer leaves answer stdout empty.
+spoken answer leaves answer stdout empty. An accepted `--voice-route` request is
+the exception to otherwise-empty noninteractive generation stderr: its exact
+canonical-alias selection line appears before generation. If provider or
+generation work later fails, that completed selection remains the first stderr
+line and the existing sanitized diagnostic follows it. A later failure does not
+invalidate or repeat the earlier selection.
 
 If a generated response contains a registered credential, `llm-now` withholds
 it from stdout, emits a redacted diagnostic, and exits `1`. Diagnostics remove
