@@ -1,5 +1,11 @@
 # llm-now
 
+## 2.4.1
+
+### Patch Changes
+
+- 28aea5e: Fix macOS speech in native executables by reading child-process streams without relying on `SharedArrayBuffer`.
+
 ## 2.4.0
 
 ### Minor Changes
