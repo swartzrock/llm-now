@@ -249,7 +249,7 @@ describe("native release build", () => {
       expect(document).toContain("plaintext");
     }
     expect(readme).toContain("workspace is execution context, not an availability rule");
-    expect(configuration).toContain("[aliases.codex.workspace]");
+    expect(configuration).not.toContain("[aliases.codex.workspace]");
     expect(configuration).toContain("directories = [");
     expect(configuration).not.toContain("primary_directory");
     expect(configuration).not.toContain("additional_directories");

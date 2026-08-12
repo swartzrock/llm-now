@@ -430,15 +430,13 @@ version = 1
 [aliases.daily]
 provider = "codex-cli"
 model = "default"
-
-[aliases.daily.workspace]
 directories = ["/absolute/primary", "/absolute/additional", "/absolute/additional with spaces"]
 ```
 
 The list must contain at least one directory. Its first entry is the primary
 working directory and all later entries are ordered additional roots. A
 primary-only workspace therefore stores a one-item list; no workspace omits
-the entire nested table.
+the `directories` key.
 
 The save receipt and later picker/inventory rows must show `workspace +2` without any full path. Recreate the alias with the same roots, changed roots, and then a blank primary. Exact reuse must report already saved; changes must default to No and show only `Workspace: unchanged`, `set → changed`, or `set → none`. Verify a duplicate, nonexistent, inaccessible, or non-directory root reprompts or fails with only its root role. Repeat with an Ollama, LM Studio, and cloud alias and confirm workspace prompts are absent; a manually edited unsupported-provider workspace must fail before credential or provider activity.
 
@@ -682,7 +680,7 @@ creates no backup for that source.
 
 Repeat once with a legacy version 3 `aliases.json` containing a Codex or Claude
 workspace. Migration must preserve its primary and ordered additional roots in
-the nested unified TOML workspace table while `config.toml` remains version 1.
+the alias's unified TOML `directories` list while `config.toml` remains version 1.
 The exact legacy JSON must remain available in its migration backup.
 
 ### MT-22B: Canonically rewrite without pinning defaults

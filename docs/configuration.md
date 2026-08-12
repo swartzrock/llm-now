@@ -61,18 +61,16 @@ directories:
 [aliases.codex]
 provider = "codex-cli"
 model = "default"
-
-[aliases.codex.workspace]
 directories = ["/absolute/project", "/absolute/shared", "/absolute/reference material"]
 ```
 
-`directories` is required and must contain at least one absolute, unique path.
-The first directory is the CLI working directory; remaining entries are
-additional directories exposed as read-only roots in their listed order. Omit
-the entire `workspace` table when the shortcut has no workspace. A workspace
+`directories` is optional. When present, it must contain at least one absolute,
+unique path. The first directory is the CLI working directory; remaining
+entries are additional directories exposed as read-only roots in their listed
+order. Omit `directories` when the shortcut has no workspace. A workspace
 controls CLI execution context; it does not restrict where the shortcut is
-visible or callable. Ollama, LM Studio, and cloud API providers reject
-workspace configuration.
+visible or callable. Ollama, LM Studio, and cloud API providers reject the
+field.
 
 Workspace paths are machine-local plaintext. Codex keeps its read-only sandbox,
 and Claude receives only the `Read`, `Glob`, and `Grep` file tools for a

@@ -343,7 +343,9 @@ describe("configuration transactions", () => {
     expect(projectAliases((await loadConfig(paths.configPath))!)).toEqual({
       daily: { provider: "codex-cli", model: null, workspace },
     });
-    expect(await readFile(paths.configPath, "utf8")).toContain("[aliases.daily.workspace]");
+    const saved = await readFile(paths.configPath, "utf8");
+    expect(saved).toContain("directories = [");
+    expect(saved).not.toContain("[aliases.daily.workspace]");
 
     expect(await saveConfigAlias(paths, "daily", {
       provider: "codex-cli",
@@ -755,7 +757,6 @@ describe("unified configuration schema", () => {
       [aliases.review]
       provider = "claude-cli"
       model = "default"
-      [aliases.review.workspace]
       directories = ${JSON.stringify([primaryDirectory, ...additionalDirectories])}
     `);
 
@@ -768,7 +769,7 @@ describe("unified configuration schema", () => {
       additionalDirectories,
     });
     const serialized = serializeConfigDocument(document);
-    expect(serialized).toContain("[aliases.review.workspace]");
+    expect(serialized).not.toContain("[aliases.review.workspace]");
     expect(serialized).toContain("directories = [");
     expect(serialized).not.toContain("primary_directory");
     expect(serialized).not.toContain("additional_directories");
@@ -779,7 +780,6 @@ describe("unified configuration schema", () => {
       [aliases.review]
       provider = "claude-cli"
       model = "default"
-      [aliases.review.workspace]
       directories = [${JSON.stringify(primaryDirectory)}]
     `);
     expect(primaryOnly.aliases.review?.workspace).toEqual({
@@ -908,17 +908,18 @@ Keep this on two lines."""
     }
   });
 
-  test("rejects invalid and unsupported workspace tables", () => {
+  test("rejects invalid, unsupported, and nested directory fields", () => {
     const primaryDirectory = resolve("workspace", "primary");
     const additionalDirectory = resolve("workspace", "additional");
     const documents = [
-      `version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\n[aliases.slug.workspace]\ndirectories=[${JSON.stringify(primaryDirectory)}]`,
-      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=['relative']",
-      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[]",
-      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[1]",
-      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[${JSON.stringify(primaryDirectory)}]\nextra=true`,
-      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[${JSON.stringify(primaryDirectory)}, ${JSON.stringify(additionalDirectory)}, ${JSON.stringify(additionalDirectory)}]`,
+      `version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\ndirectories=[${JSON.stringify(primaryDirectory)}]`,
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=['relative']",
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[]",
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[1]",
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\nextra=true`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}, ${JSON.stringify(additionalDirectory)}, ${JSON.stringify(additionalDirectory)}]`,
       `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[]`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[${JSON.stringify(primaryDirectory)}]`,
     ];
 
     for (const text of documents) {

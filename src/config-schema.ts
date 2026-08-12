@@ -28,9 +28,8 @@ const ALIAS_FIELDS = new Set([
   "voice",
   "rate",
   "pitch",
-  "workspace",
+  "directories",
 ]);
-const WORKSPACE_FIELDS = new Set(["directories"]);
 
 export interface StoredVoiceConfig {
   readonly wakeWords?: readonly string[];
@@ -188,35 +187,31 @@ function parseVoice(value: unknown): StoredVoiceConfig {
   return Object.freeze(voice);
 }
 
-function parseWorkspace(
+function parseDirectories(
   name: string,
   provider: ByokProviderId,
   value: unknown,
 ): WorkspaceConfig {
-  if (!isRecord(value)) {
-    throw new ConfigSchemaError(`aliases.${name}.workspace must be a TOML table`);
-  }
-  rejectUnknownFields(value, WORKSPACE_FIELDS, `aliases.${name}.workspace`);
   if (
-    !Array.isArray(value.directories)
-    || value.directories.length === 0
-    || value.directories.some((directory) => typeof directory !== "string")
+    !Array.isArray(value)
+    || value.length === 0
+    || value.some((directory) => typeof directory !== "string")
   ) {
     throw new ConfigSchemaError(
-      `aliases.${name}.workspace.directories must be a nonempty list of strings`,
+      `aliases.${name}.directories must be a nonempty list of strings`,
     );
   }
-  const [primaryDirectory, ...additionalDirectories] = value.directories as string[];
+  const [primaryDirectory, ...additionalDirectories] = value as string[];
   const workspace = {
     primaryDirectory,
     additionalDirectories,
   };
   const capabilities = workspaceCapabilities(provider);
   if (!capabilities.primaryDirectory || !capabilities.additionalDirectories) {
-    throw new ConfigSchemaError(`aliases.${name}.workspace is unsupported for this provider`);
+    throw new ConfigSchemaError(`aliases.${name}.directories is unsupported for this provider`);
   }
   if (!isWorkspaceConfig(workspace)) {
-    throw new ConfigSchemaError(`aliases.${name}.workspace is invalid`);
+    throw new ConfigSchemaError(`aliases.${name}.directories is invalid`);
   }
   return Object.freeze({
     primaryDirectory: workspace.primaryDirectory,
@@ -258,8 +253,8 @@ function parseAlias(name: string, value: unknown): StoredAliasConfig {
   if (Object.hasOwn(value, "pitch")) {
     alias.pitch = optionalPitch(value.pitch, `aliases.${name}.pitch`);
   }
-  if (Object.hasOwn(value, "workspace")) {
-    alias.workspace = parseWorkspace(name, value.provider, value.workspace);
+  if (Object.hasOwn(value, "directories")) {
+    alias.workspace = parseDirectories(name, value.provider, value.directories);
   }
   return Object.freeze(alias);
 }
@@ -397,12 +392,10 @@ export function serializeConfigDocument(document: ConfigDocumentV1): string {
       ...(stored.rate === undefined ? {} : { rate: stored.rate }),
       ...(stored.pitch === undefined ? {} : { pitch: stored.pitch }),
       ...(stored.workspace === undefined ? {} : {
-        workspace: {
-          directories: [
-            stored.workspace.primaryDirectory,
-            ...stored.workspace.additionalDirectories,
-          ],
-        },
+        directories: [
+          stored.workspace.primaryDirectory,
+          ...stored.workspace.additionalDirectories,
+        ],
       }),
     };
   }
