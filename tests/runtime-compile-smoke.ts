@@ -11,7 +11,8 @@ if (
 }
 
 const directory = await mkdtemp(join(process.cwd(), ".tmp-runtime-"));
-const fakeCli = join(directory, process.platform === "win32" ? "codex.exe" : "codex");
+const fakeCodex = join(directory, process.platform === "win32" ? "codex.exe" : "codex");
+const fakeClaude = join(directory, process.platform === "win32" ? "claude.exe" : "claude");
 const spike = join(
   directory,
   process.platform === "win32" ? "llm-now-spike.exe" : "llm-now-spike",
@@ -59,10 +60,20 @@ try {
       additionalDirectories: workspaceAdditions,
     },
   });
+  await saveAlias(aliasPath, "Review", {
+    provider: "claude-cli",
+    model: null,
+    instructions: smokeInstructions,
+    workspace: {
+      primaryDirectory: workspacePrimary,
+      additionalDirectories: workspaceAdditions,
+    },
+  });
   await Bun.write(shortcutInput, "daily, smoke");
 
   const builds: Array<[string, string]> = [
-    [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
+    [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCodex],
+    [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeClaude],
     [join(import.meta.dir, "fixtures/runtime-smoke-entry.ts"), runtimeSmoke],
     [join(import.meta.dir, "fixtures/voice-routing-compile-entry.ts"), voiceRoutingSmoke],
     ...(process.platform === "darwin"
@@ -116,7 +127,7 @@ try {
     {
       name: "runtime boundary",
       executable: runtimeSmoke,
-      args: [fakeCli, directory],
+      args: [fakeCodex],
       exitCode: 0,
       stdout: "http-ok\nfake:instruction-absent\nconfig-defaults-ok\nmigration-routing-ok\n",
       stderr: "",
@@ -220,6 +231,14 @@ try {
       args: ["dAiLy", "--input", "smoke", "--instruction", overrideInstructions],
       exitCode: 0,
       stdout: "fake:instruction-override:workspace-3",
+      stderr: "",
+    },
+    {
+      name: "fake Claude generation through positional alias",
+      executable: spike,
+      args: ["review", "--input", "smoke"],
+      exitCode: 0,
+      stdout: "fake:claude-instruction-present:workspace-3",
       stderr: "",
     },
   ] as const;

@@ -17,6 +17,9 @@ import {
   type LocalCommandRequest,
   type LocalCommandResult,
 } from "@swartzrock/byok-runtime/node";
+import { constants } from "node:fs";
+import { access, realpath, stat } from "node:fs/promises";
+import { delimiter, isAbsolute, join } from "node:path";
 import {
   CredentialVaultError,
   createSensitiveValueRegistry,
@@ -47,6 +50,11 @@ export class RuntimeStageError extends Error {
 type FindProviders = typeof findAvailableProviders;
 type CreateProvider = typeof createByokNodeProvider;
 type CommandRunner = { run(request: LocalCommandRequest): Promise<LocalCommandResult> };
+type WorkspaceProvider = "codex-cli" | "claude-cli";
+type WorkspaceCommandResolver = (
+  command: "codex" | "claude",
+  env: ByokEnvironment,
+) => Promise<string>;
 const CLOUD_PROVIDERS = Object.keys(
   BYOK_PROVIDER_API_KEY_ENV_VARS,
 ) as ByokCloudProviderId[];
@@ -60,6 +68,7 @@ export interface RuntimeGatewayDependencies {
   findProviders?: FindProviders;
   createProvider?: CreateProvider;
   workspaceRunner?: CommandRunner;
+  workspaceCommandResolver?: WorkspaceCommandResolver;
   credentialResolver: CredentialResolver;
   sensitive: SensitiveValueRegistry;
 }
@@ -161,7 +170,7 @@ function runtimeStageError(
 
 class WorkspaceCommandRunner implements CommandRunner {
   constructor(
-    private readonly provider: "codex-cli" | "claude-cli",
+    private readonly provider: WorkspaceProvider,
     private readonly additionalDirectories: readonly string[],
     private readonly runner: CommandRunner,
   ) {}
@@ -202,19 +211,57 @@ class WorkspaceCommandRunner implements CommandRunner {
   }
 }
 
+function workspaceProvider(provider: ByokProviderId): WorkspaceProvider {
+  if (provider === "codex-cli" || provider === "claude-cli") return provider;
+  throw new Error(`provider ${provider} does not support alias workspaces`);
+}
+
+function commandCandidates(command: "codex" | "claude", env: ByokEnvironment): string[] {
+  if (process.platform !== "win32") return [command];
+  const extensions = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((extension) => extension.trim())
+    .filter(Boolean);
+  return extensions.map((extension) => `${command}${extension}`);
+}
+
+async function resolveWorkspaceCommand(
+  command: "codex" | "claude",
+  env: ByokEnvironment,
+): Promise<string> {
+  const pathValue = env.PATH ?? env.Path ?? env.path ?? "";
+  const directories = pathValue
+    .split(delimiter)
+    .map((directory) => directory.trim())
+    .filter(isAbsolute);
+  for (const directory of directories) {
+    for (const candidate of commandCandidates(command, env)) {
+      const executable = join(directory, candidate);
+      try {
+        await access(executable, process.platform === "win32" ? constants.F_OK : constants.X_OK);
+        if ((await stat(executable)).isFile()) return await realpath(executable);
+      } catch {
+        // Try the next trusted PATH entry.
+      }
+    }
+  }
+  throw new Error(`${command} was not found in an absolute PATH directory`);
+}
+
 function workspaceRuntime(
-  provider: ByokProviderId,
+  provider: WorkspaceProvider,
   model: string | null,
   workspace: WorkspaceConfig,
+  command: string,
   runner: CommandRunner,
 ): ByokProviderRuntime {
   const wrappedRunner = new WorkspaceCommandRunner(
-    provider as "codex-cli" | "claude-cli",
+    provider,
     workspace.additionalDirectories,
     runner,
   );
   const options = {
-    command: provider === "codex-cli" ? "codex" : "claude",
+    command,
     ...(model === null ? {} : { model }),
     cwd: workspace.primaryDirectory,
     runner: wrappedRunner,
@@ -300,9 +347,13 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
         const providerRuntime = verifiedWorkspace === undefined
           ? await runtime(provider, model)
           : workspaceRuntime(
-            provider,
+            workspaceProvider(provider),
             model,
             verifiedWorkspace,
+            await (deps.workspaceCommandResolver ?? resolveWorkspaceCommand)(
+              provider === "codex-cli" ? "codex" : "claude",
+              deps.env,
+            ),
             deps.workspaceRunner ?? new LocalCommandRunner(),
           );
         signal?.throwIfAborted();

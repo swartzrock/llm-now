@@ -133,6 +133,7 @@ describe("native release build", () => {
     expect(releaseValidation).toContain("version: 3");
     expect(releaseValidation).toContain("additional with spaces");
     expect(releaseValidation).toContain("fake:instruction-present:workspace-3");
+    expect(releaseValidation).toContain("fake:claude-instruction-present:workspace-3");
     expect(releaseValidation).toContain(expectedInstructions);
     expect(fakeCli).toContain(expectedInstructions);
     expect(releaseValidation).toContain(expectedOverrideInstructions);
@@ -142,6 +143,8 @@ describe("native release build", () => {
     expect(releaseValidation).toContain("fake:instruction-override");
     expect(fakeCli).toContain("fake:instruction-override");
     expect(fakeCli).toContain("unexpected fake CLI workspace configuration");
+    expect(fakeCli).toContain("unexpected fake Claude workspace configuration");
+    expect(fakeCli).toContain('args[toolsIndex + 1] !== "Read,Glob,Grep"');
     expect(fakeCli).toContain("LLM_NOW_FAKE_WORKSPACE_PRIMARY");
     expect(releaseValidation).toContain("PATH: temporary");
     expect(releaseValidation).toContain('name.toUpperCase() !== "PATH"');

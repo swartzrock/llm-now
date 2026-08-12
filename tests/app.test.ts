@@ -3899,8 +3899,8 @@ describe("one-shot application", () => {
 
   test("does not prompt alias-only calls outside the stdin-and-stderr TTY contract", async () => {
     for (const tty of [
-      { stdin: true, stderr: false },
-      { stdin: false, stderr: true },
+      { stdin: true, stderr: false, expectedResolves: 0 },
+      { stdin: false, stderr: true, expectedResolves: 1 },
     ]) {
       const inputMessages: string[] = [];
       let resolves = 0;
@@ -3917,7 +3917,7 @@ describe("one-shot application", () => {
 
       expect(await runApplication(app.value)).toBe(2);
       expect(inputMessages).toEqual([]);
-      expect(resolves).toBe(0);
+      expect(resolves).toBe(tty.expectedResolves);
       expect(app.runtime.calls.generate).toBe(0);
       expect(app.stderr.text()).toContain("usage:");
     }
@@ -3927,6 +3927,7 @@ describe("one-shot application", () => {
     const app = dependencies({
       args: ["Daily", "--instruction", "piped request role"],
       stdin: input("piped prompt"),
+      stderrTty: true,
       runtime: runtime({
         generate: async (_provider, _model, prompt, _signal, instructions) => {
           expect(prompt).toBe("piped prompt");

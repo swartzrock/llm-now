@@ -9,8 +9,8 @@ import {
   type ByokProviderRuntime,
 } from "@swartzrock/byok-runtime";
 import type { LocalCommandRequest } from "@swartzrock/byok-runtime/node";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { delimiter, join } from "node:path";
 import {
   LocalCommandRunner,
   type LocalProcess,
@@ -375,10 +375,11 @@ describe("runtime gateway", () => {
     const requests: LocalCommandRequest[] = [];
     const gateway = createTestGateway({
       env: {},
+      workspaceCommandResolver: async (command) => `/trusted/${command}`,
       workspaceRunner: {
         run: async (request) => {
           requests.push(request);
-          return request.command === "codex"
+          return request.command.endsWith("/codex")
             ? {
               stdout: `${JSON.stringify({
                 type: "item.completed",
@@ -421,6 +422,10 @@ describe("runtime gateway", () => {
     )).resolves.toBe("claude-result");
 
     expect(requests).toHaveLength(2);
+    expect(requests.map((request) => request.command)).toEqual([
+      "/trusted/codex",
+      "/trusted/claude",
+    ]);
     expect(requests[0]?.cwd).toBe(primary);
     expect(requests[0]?.args).toEqual([
       "exec",
@@ -464,6 +469,60 @@ describe("runtime gateway", () => {
     ]);
   });
 
+  test("ignores relative PATH entries before running a workspace CLI", async () => {
+    const directory = await temporaryDirectory();
+    const primary = join(directory, "workspace");
+    const trusted = join(directory, "trusted");
+    const executableName = process.platform === "win32" ? "codex.exe" : "codex";
+    const workspaceExecutable = join(primary, executableName);
+    const trustedExecutable = join(trusted, executableName);
+    await Promise.all([mkdir(primary), mkdir(trusted)]);
+    await Promise.all([
+      writeFile(workspaceExecutable, "workspace executable"),
+      writeFile(trustedExecutable, "trusted executable"),
+    ]);
+    if (process.platform !== "win32") {
+      await Promise.all([chmod(workspaceExecutable, 0o755), chmod(trustedExecutable, 0o755)]);
+    }
+    const requests: LocalCommandRequest[] = [];
+    const gateway = createTestGateway({
+      env: { PATH: `.${delimiter}${trusted}` },
+      workspaceRunner: {
+        run: async (request) => {
+          requests.push(request);
+          return {
+            stdout: `${JSON.stringify({
+              type: "item.completed",
+              item: { type: "agent_message", text: "trusted-result" },
+            })}\n`,
+            stderr: "",
+            exitCode: 0,
+          };
+        },
+      },
+    });
+
+    await expect(gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
+      primaryDirectory: primary,
+      additionalDirectories: [],
+    })).resolves.toBe("trusted-result");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.command).toBe(trustedExecutable);
+
+    const relativeOnly = createTestGateway({
+      env: { PATH: "." },
+      workspaceRunner: {
+        run: async () => {
+          throw new Error("relative workspace executable must not run");
+        },
+      },
+    });
+    await expect(relativeOnly.generate("codex-cli", null, "prompt", undefined, undefined, {
+      primaryDirectory: primary,
+      additionalDirectories: [],
+    })).rejects.toThrow("codex was not found in an absolute PATH directory");
+  });
+
   test("preflights live roots and redacts paths from CLI failures", async () => {
     const directory = await temporaryDirectory();
     const primary = join(directory, "secret primary");
@@ -472,6 +531,7 @@ describe("runtime gateway", () => {
     let runnerCalls = 0;
     const gateway = createTestGateway({
       env: {},
+      workspaceCommandResolver: async () => "/trusted/codex",
       workspaceRunner: {
         run: async () => {
           runnerCalls += 1;

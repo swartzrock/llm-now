@@ -466,19 +466,22 @@ async function smoke(archivePath: string): Promise<void> {
       }
     }
 
-    const fakeCli = join(temporary, process.platform === "win32" ? "codex.exe" : "codex");
-    const fakeBuild = await Bun.build({
-      entrypoints: [join(import.meta.dir, "../tests/fixtures/fake-cli.ts")],
-      compile: {
-        outfile: fakeCli,
-        autoloadDotenv: false,
-        autoloadBunfig: false,
-        autoloadTsconfig: false,
-        autoloadPackageJson: false,
-      },
-    });
-    if (!fakeBuild.success) throw new AggregateError(fakeBuild.logs, "failed to compile fake CLI");
-    if (process.platform !== "win32") await chmod(fakeCli, 0o755);
+    const fakeCodex = join(temporary, process.platform === "win32" ? "codex.exe" : "codex");
+    const fakeClaude = join(temporary, process.platform === "win32" ? "claude.exe" : "claude");
+    for (const fakeCli of [fakeCodex, fakeClaude]) {
+      const fakeBuild = await Bun.build({
+        entrypoints: [join(import.meta.dir, "../tests/fixtures/fake-cli.ts")],
+        compile: {
+          outfile: fakeCli,
+          autoloadDotenv: false,
+          autoloadBunfig: false,
+          autoloadTsconfig: false,
+          autoloadPackageJson: false,
+        },
+      });
+      if (!fakeBuild.success) throw new AggregateError(fakeBuild.logs, "failed to compile fake CLI");
+      if (process.platform !== "win32") await chmod(fakeCli, 0o755);
+    }
 
     await Bun.write(join(temporary, ".env"), "OPENAI_API_KEY=must-not-autoload\n");
     await Bun.write(join(temporary, "bunfig.toml"), "this is intentionally invalid");
@@ -505,6 +508,15 @@ async function smoke(archivePath: string): Promise<void> {
         zeta: { provider: "openai", model: "gpt-5" },
         aliases: {
           provider: "codex-cli",
+          model: null,
+          instructions: smokeInstructions,
+          workspace: {
+            primaryDirectory: workspacePrimary,
+            additionalDirectories: workspaceAdditions,
+          },
+        },
+        review: {
+          provider: "claude-cli",
           model: null,
           instructions: smokeInstructions,
           workspace: {
@@ -545,7 +557,7 @@ async function smoke(archivePath: string): Promise<void> {
         name: "alias inventory",
         args: ["--aliases"],
         code: 0,
-        stdout: "aliases → Codex CLI · provider default · workspace +2\nzeta → OpenAI · gpt-5\n",
+        stdout: "aliases → Codex CLI · provider default · workspace +2\nreview → Claude CLI · provider default · workspace +2\nzeta → OpenAI · gpt-5\n",
         stderr: "",
       },
       { name: "explicit generation", args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:instruction-absent", stderrIncludes: "" },
@@ -556,6 +568,13 @@ async function smoke(archivePath: string): Promise<void> {
         args: ["aliases", "--input", "smoke", "--instruction", overrideInstructions],
         code: 0,
         stdout: "fake:instruction-override:workspace-3",
+        stderr: "",
+      },
+      {
+        name: "saved Claude alias workspace",
+        args: ["review", "--input", "smoke"],
+        code: 0,
+        stdout: "fake:claude-instruction-present:workspace-3",
         stderr: "",
       },
     ] as const;

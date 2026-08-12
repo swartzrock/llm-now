@@ -64,5 +64,40 @@ if (args[0] === "exec") {
   process.exit(0);
 }
 
+if (args[0] === "-p") {
+  const instructionIndex = args.indexOf("--append-system-prompt");
+  const instruction = instructionIndex === -1 ? undefined : args[instructionIndex + 1];
+  const instructionMarker = instruction === expectedInstructions
+    ? "fake:claude-instruction-present"
+    : instruction === expectedOverrideInstructions
+      ? "fake:claude-instruction-override"
+      : undefined;
+  const toolsIndex = args.indexOf("--tools");
+  if (instructionMarker === undefined || args[toolsIndex + 1] !== "Read,Glob,Grep") {
+    console.error("unexpected fake Claude instruction or tool configuration");
+    process.exit(2);
+  }
+  const addDirectoryIndexes = args.flatMap((arg, index) => arg === "--add-dir" ? [index] : []);
+  const additions = addDirectoryIndexes.map((index) => args[index + 1]);
+  const isWorkspaceInvocation = expectedWorkspacePrimary !== undefined
+    && process.cwd() === expectedWorkspacePrimary;
+  if (
+    !isWorkspaceInvocation
+    || JSON.stringify(additions) !== JSON.stringify(expectedWorkspaceAdditions)
+  ) {
+    console.error("unexpected fake Claude workspace configuration");
+    process.exit(2);
+  }
+  const prompt = await Bun.stdin.text();
+  if (prompt !== "smoke") {
+    console.error("unexpected fake CLI prompt");
+    process.exit(2);
+  }
+  console.log(JSON.stringify({
+    result: `${instructionMarker}:workspace-${additions.length + 1}`,
+  }));
+  process.exit(0);
+}
+
 console.error("unexpected fake CLI invocation");
 process.exit(2);
