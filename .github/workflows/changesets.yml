@@ -11,6 +11,9 @@ concurrency:
   group: changesets-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN }}
+  
 jobs:
   version:
     runs-on: ubuntu-latest
