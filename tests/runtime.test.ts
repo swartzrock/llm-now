@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   BYOK_API_KEY_ENV_VARS,
   BYOK_PROVIDER_IDS,
@@ -8,6 +8,9 @@ import {
   type ByokProviderId,
   type ByokProviderRuntime,
 } from "@swartzrock/byok-runtime";
+import type { LocalCommandRequest } from "@swartzrock/byok-runtime/node";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   LocalCommandRunner,
   type LocalProcess,
@@ -26,6 +29,17 @@ import {
 } from "../src/runtime.ts";
 
 const providerIds: ByokProviderId[] = [...BYOK_PROVIDER_IDS];
+const temporaryDirectories: string[] = [];
+
+async function temporaryDirectory(): Promise<string> {
+  const directory = await mkdtemp(join(process.cwd(), ".tmp-runtime-workspace-"));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
+});
 
 test("local CLI cancellation force-kills and waits for close before rejecting", async () => {
   const root = new AbortController();
@@ -325,6 +339,172 @@ describe("runtime gateway", () => {
     ).rejects.toThrow("cancelled after setup");
     expect(providerCalls).toBe(1);
     expect(generationCalls).toBe(0);
+  });
+
+  test("rejects unsupported workspaces before credentials or provider construction", async () => {
+    let credentialReads = 0;
+    let providerCalls = 0;
+    const gateway = createTestGateway({
+      env: {},
+      credentialResolver: {
+        resolve: async () => {
+          credentialReads += 1;
+          return { source: "missing" as const };
+        },
+      },
+      createProvider: () => {
+        providerCalls += 1;
+        return runtime();
+      },
+    });
+
+    await expect(gateway.generate("openai", "gpt-test", "prompt", undefined, undefined, {
+      primaryDirectory: "/project",
+      additionalDirectories: [],
+    })).rejects.toThrow("provider openai does not support alias workspaces");
+    expect(credentialReads).toBe(0);
+    expect(providerCalls).toBe(0);
+  });
+
+  test("runs Codex and Claude in canonical multi-directory workspaces", async () => {
+    const directory = await temporaryDirectory();
+    const primary = join(directory, "primary project");
+    const first = join(directory, "additional one");
+    const second = join(directory, "additional two");
+    await Promise.all([primary, first, second].map((path) => mkdir(path)));
+    const requests: LocalCommandRequest[] = [];
+    const gateway = createTestGateway({
+      env: {},
+      workspaceRunner: {
+        run: async (request) => {
+          requests.push(request);
+          return request.command === "codex"
+            ? {
+              stdout: `${JSON.stringify({
+                type: "item.completed",
+                item: { type: "agent_message", text: "codex-result" },
+              })}\n`,
+              stderr: "",
+              exitCode: 0,
+            }
+            : {
+              stdout: JSON.stringify({ result: "claude-result" }),
+              stderr: "",
+              exitCode: 0,
+            };
+        },
+      },
+      createProvider: () => {
+        throw new Error("workspace generation must not use the provider factory");
+      },
+    });
+    const workspace = {
+      primaryDirectory: primary,
+      additionalDirectories: [first, second],
+    };
+
+    await expect(gateway.generate(
+      "codex-cli",
+      "gpt-test",
+      "prompt",
+      undefined,
+      "Be concise.",
+      workspace,
+    )).resolves.toBe("codex-result");
+    await expect(gateway.generate(
+      "claude-cli",
+      "claude-test",
+      "prompt",
+      undefined,
+      "Be concise.",
+      workspace,
+    )).resolves.toBe("claude-result");
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.cwd).toBe(primary);
+    expect(requests[0]?.args).toEqual([
+      "exec",
+      "--add-dir",
+      first,
+      "--add-dir",
+      second,
+      "--skip-git-repo-check",
+      "--sandbox",
+      "read-only",
+      "--json",
+      "-c",
+      'developer_instructions="Be concise."',
+      "--model",
+      "gpt-test",
+    ]);
+    expect(requests[1]?.cwd).toBe(primary);
+    expect(requests[1]?.args).toEqual([
+      "-p",
+      "--output-format",
+      "json",
+      "--input-format",
+      "text",
+      "--no-session-persistence",
+      "--no-chrome",
+      "--safe-mode",
+      "--setting-sources",
+      "user",
+      "--permission-mode",
+      "dontAsk",
+      "--tools",
+      "Read,Glob,Grep",
+      "--append-system-prompt",
+      "Be concise.",
+      "--model",
+      "claude-test",
+      "--add-dir",
+      first,
+      "--add-dir",
+      second,
+    ]);
+  });
+
+  test("preflights live roots and redacts paths from CLI failures", async () => {
+    const directory = await temporaryDirectory();
+    const primary = join(directory, "secret primary");
+    const additional = join(directory, "secret additional");
+    await Promise.all([primary, additional].map((path) => mkdir(path)));
+    let runnerCalls = 0;
+    const gateway = createTestGateway({
+      env: {},
+      workspaceRunner: {
+        run: async () => {
+          runnerCalls += 1;
+          throw new Error(`failed for ${primary} and ${JSON.stringify(additional)}`);
+        },
+      },
+    });
+
+    try {
+      await gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
+        primaryDirectory: primary,
+        additionalDirectories: [additional],
+      });
+      throw new Error("expected generation to fail");
+    } catch (error) {
+      expect(String(error)).not.toContain(primary);
+      expect(String(error)).not.toContain(additional);
+      expect(String(error)).toContain("[REDACTED]");
+    }
+    expect(runnerCalls).toBe(1);
+
+    await writeFile(join(directory, "not-a-directory"), "file");
+    await expect(gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
+      primaryDirectory: join(directory, "not-a-directory"),
+      additionalDirectories: [],
+    })).rejects.toThrow("workspace primary directory is not a directory");
+    expect(runnerCalls).toBe(1);
+
+    await expect(gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
+      primaryDirectory: join(directory, "missing"),
+      additionalDirectories: [],
+    })).rejects.toThrow("workspace primary directory is unavailable");
+    expect(runnerCalls).toBe(1);
   });
 
   test("redacts raw and JSON-escaped instructions only from generation failures", async () => {

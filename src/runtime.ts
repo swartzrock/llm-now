@@ -9,8 +9,13 @@ import {
   type ByokProviderRuntime,
 } from "@swartzrock/byok-runtime";
 import {
+  ClaudeCliProvider,
+  CodexCliProvider,
+  LocalCommandRunner,
   createByokNodeProvider,
   findAvailableProviders,
+  type LocalCommandRequest,
+  type LocalCommandResult,
 } from "@swartzrock/byok-runtime/node";
 import {
   CredentialVaultError,
@@ -19,6 +24,11 @@ import {
   type ResolvedCredential,
   type SensitiveValueRegistry,
 } from "./credentials.ts";
+import {
+  preflightWorkspace,
+  workspacePathVariants,
+  type WorkspaceConfig,
+} from "./workspace.ts";
 
 export type RuntimeStage = "discovery" | "model-list" | "generation";
 
@@ -36,6 +46,7 @@ export class RuntimeStageError extends Error {
 
 type FindProviders = typeof findAvailableProviders;
 type CreateProvider = typeof createByokNodeProvider;
+type CommandRunner = { run(request: LocalCommandRequest): Promise<LocalCommandResult> };
 const CLOUD_PROVIDERS = Object.keys(
   BYOK_PROVIDER_API_KEY_ENV_VARS,
 ) as ByokCloudProviderId[];
@@ -48,6 +59,7 @@ export interface RuntimeGatewayDependencies {
   env: ByokEnvironment;
   findProviders?: FindProviders;
   createProvider?: CreateProvider;
+  workspaceRunner?: CommandRunner;
   credentialResolver: CredentialResolver;
   sensitive: SensitiveValueRegistry;
 }
@@ -65,6 +77,7 @@ export interface RuntimeGateway {
     prompt: string,
     signal?: AbortSignal,
     instructions?: string,
+    workspace?: WorkspaceConfig,
   ): Promise<string>;
 }
 
@@ -123,19 +136,92 @@ function redactInstruction(text: string, instructions: string | undefined): stri
   ]).redact(text);
 }
 
+function redactWorkspace(text: string, workspaces: readonly (WorkspaceConfig | undefined)[]): string {
+  const values = workspaces.flatMap((workspace) =>
+    workspace === undefined ? [] : workspacePathVariants(workspace)
+  );
+  return values.length === 0 ? text : createSensitiveValueRegistry(values).redact(text);
+}
+
 function runtimeStageError(
   stage: RuntimeStage,
   provider: ByokProviderId | null,
   error: unknown,
   sensitive: SensitiveValueRegistry,
   instructions?: string,
+  workspaces: readonly (WorkspaceConfig | undefined)[] = [],
 ): RuntimeStageError {
   return new RuntimeStageError(
     stage,
     provider,
-    sensitive.redact(redactInstruction(errorMessage(error), instructions)),
+    sensitive.redact(redactWorkspace(redactInstruction(errorMessage(error), instructions), workspaces)),
     error instanceof CredentialVaultError ? error : undefined,
   );
+}
+
+class WorkspaceCommandRunner implements CommandRunner {
+  constructor(
+    private readonly provider: "codex-cli" | "claude-cli",
+    private readonly additionalDirectories: readonly string[],
+    private readonly runner: CommandRunner,
+  ) {}
+
+  run(request: LocalCommandRequest): Promise<LocalCommandResult> {
+    const args = request.args === undefined ? undefined : [...request.args];
+    if (args !== undefined && this.isGeneration(args)) {
+      request = {
+        ...request,
+        args: this.provider === "codex-cli"
+          ? this.codexArgs(args)
+          : this.claudeArgs(args),
+      };
+    }
+    return this.runner.run(request);
+  }
+
+  private isGeneration(args: readonly string[]): boolean {
+    return this.provider === "codex-cli" ? args[0] === "exec" : args[0] === "-p";
+  }
+
+  private codexArgs(args: string[]): string[] {
+    return [
+      args[0]!,
+      ...this.additionalDirectoryArgs(),
+      ...args.slice(1),
+    ];
+  }
+
+  private claudeArgs(args: string[]): string[] {
+    const tools = args.indexOf("--tools");
+    if (tools !== -1 && tools + 1 < args.length) args[tools + 1] = "Read,Glob,Grep";
+    return [...args, ...this.additionalDirectoryArgs()];
+  }
+
+  private additionalDirectoryArgs(): string[] {
+    return this.additionalDirectories.flatMap((directory) => ["--add-dir", directory]);
+  }
+}
+
+function workspaceRuntime(
+  provider: ByokProviderId,
+  model: string | null,
+  workspace: WorkspaceConfig,
+  runner: CommandRunner,
+): ByokProviderRuntime {
+  const wrappedRunner = new WorkspaceCommandRunner(
+    provider as "codex-cli" | "claude-cli",
+    workspace.additionalDirectories,
+    runner,
+  );
+  const options = {
+    command: provider === "codex-cli" ? "codex" : "claude",
+    ...(model === null ? {} : { model }),
+    cwd: workspace.primaryDirectory,
+    runner: wrappedRunner,
+  };
+  return provider === "codex-cli"
+    ? new CodexCliProvider(options)
+    : new ClaudeCliProvider(options);
 }
 
 export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeGateway {
@@ -203,12 +289,24 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
       }
     },
 
-    async generate(provider, model, prompt, signal, instructions) {
+    async generate(provider, model, prompt, signal, instructions, workspace) {
+      let verifiedWorkspace: WorkspaceConfig | undefined;
       try {
         signal?.throwIfAborted();
-        const selectedRuntime = await runtime(provider, model);
+        verifiedWorkspace = workspace === undefined
+          ? undefined
+          : await preflightWorkspace(provider, workspace);
         signal?.throwIfAborted();
-        const result = await selectedRuntime.generateText(
+        const providerRuntime = verifiedWorkspace === undefined
+          ? await runtime(provider, model)
+          : workspaceRuntime(
+            provider,
+            model,
+            verifiedWorkspace,
+            deps.workspaceRunner ?? new LocalCommandRunner(),
+          );
+        signal?.throwIfAborted();
+        const result = await providerRuntime.generateText(
           {
             prompt,
             ...(instructions === undefined ? {} : { instructions }),
@@ -217,7 +315,14 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
         );
         return result.text;
       } catch (error) {
-        throw runtimeStageError("generation", provider, error, sensitive, instructions);
+        throw runtimeStageError(
+          "generation",
+          provider,
+          error,
+          sensitive,
+          instructions,
+          [workspace, verifiedWorkspace],
+        );
       }
     },
   };
