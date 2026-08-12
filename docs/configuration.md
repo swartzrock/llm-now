@@ -62,21 +62,28 @@ directories:
 provider = "codex-cli"
 model = "default"
 directories = ["/absolute/project", "/absolute/shared", "/absolute/reference material"]
+directory_access = "read-write"
 ```
 
-`directories` is optional. When present, it must contain at least one absolute,
+`directories` and `directory_access` are optional as a pair. If either is
+present, both are required. `directories` must contain at least one absolute,
 unique path. The first directory is the CLI working directory; remaining
-entries are additional directories exposed as read-only roots in their listed
-order. Omit `directories` when the shortcut has no workspace. A workspace
-controls CLI execution context; it does not restrict where the shortcut is
-visible or callable. Ollama, LM Studio, and cloud API providers reject the
-field.
+entries are additional directories in their listed order. `directory_access` must be
+`"read-only"` or `"read-write"`. Omit both fields when the shortcut has no
+workspace.
 
-Workspace paths are machine-local plaintext. Codex keeps its read-only sandbox,
-and Claude receives only the `Read`, `Glob`, and `Grep` file tools for a
-workspace call. Files read from those roots may still be sent to the selected
-service. Missing, inaccessible, duplicate, or non-directory roots fail before
-the prompt is read or the provider is started.
+Codex supports both access modes. `"read-write"` allows Codex to create, edit,
+rename, and delete files in every configured directory, including the first
+working directory and every additional root. `"read-only"` keeps the Codex
+read-only sandbox. Claude supports only `"read-only"` and receives only the
+`Read`, `Glob`, and `Grep` file tools; a Claude `"read-write"` workspace is
+rejected. Ollama, LM Studio, and cloud API providers reject workspace fields.
+
+A workspace controls CLI execution context; it does not restrict where the
+shortcut is visible or callable. Workspace paths are machine-local plaintext,
+and files read from those roots may still be sent to the selected service.
+Missing, inaccessible, duplicate, or non-directory roots fail before the prompt
+is read or the provider is started. Read-write roots must also be writable.
 
 ## Configure voice
 

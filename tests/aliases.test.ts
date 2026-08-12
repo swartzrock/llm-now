@@ -136,6 +136,7 @@ describe("global aliases", () => {
           workspace: {
             primaryDirectory: "/projects/api",
             additionalDirectories: ["/projects/web", "/projects/shared lib"],
+            directoryAccess: "read-only",
           },
         },
         plain: { provider: "ollama", model: "llama3" },
@@ -269,6 +270,16 @@ describe("global aliases", () => {
         additionalDirectories: [],
         unknown: true,
       } } } },
+      { version: 3, aliases: { daily: { provider: "claude-cli", model: null, workspace: {
+        primaryDirectory: "/project",
+        additionalDirectories: [],
+        directoryAccess: "read-write",
+      } } } },
+      { version: 3, aliases: { daily: { provider: "codex-cli", model: null, workspace: {
+        primaryDirectory: "/project",
+        additionalDirectories: [],
+        directoryAccess: "write",
+      } } } },
     ];
 
     for (const document of invalidDocuments) {
@@ -333,6 +344,7 @@ describe("global aliases", () => {
     const workspace = {
       primaryDirectory: "/projects/api",
       additionalDirectories: ["/projects/web"],
+      directoryAccess: "read-write" as const,
     };
 
     expect(await saveAlias(path, "fred", {
@@ -388,6 +400,7 @@ describe("global aliases", () => {
       workspace: {
         primaryDirectory: "/projects/api",
         additionalDirectories: ["/projects/web", "/projects/shared"],
+        directoryAccess: "read-only",
       },
     };
 
@@ -399,6 +412,10 @@ describe("global aliases", () => {
         additionalDirectories: ["/projects/shared", "/projects/web"],
       },
     })).toBe(false);
+    expect(sameAliasRecord(base, {
+      ...base,
+      workspace: { ...base.workspace!, directoryAccess: "read-write" },
+    })).toBe(false);
     expect(sameAliasRecord(base, { provider: "claude-cli", model: null })).toBe(false);
   });
 
@@ -406,25 +423,30 @@ describe("global aliases", () => {
     expect(normalizeWorkspace("./api", ["../web", "../shared lib"], "/projects/root")).toEqual({
       primaryDirectory: "/projects/root/api",
       additionalDirectories: ["/projects/web", "/projects/shared lib"],
+      directoryAccess: "read-only",
     });
     expect(() => normalizeWorkspace("./api", ["./api"], "/projects/root"))
       .toThrow("workspace directories must be unique");
     expect(workspaceCapabilities("codex-cli")).toEqual({
       primaryDirectory: true,
       additionalDirectories: true,
+      readWrite: true,
     });
     expect(workspaceCapabilities("claude-cli")).toEqual({
       primaryDirectory: true,
       additionalDirectories: true,
+      readWrite: false,
     });
     expect(workspaceCapabilities("ollama")).toEqual({
       primaryDirectory: false,
       additionalDirectories: false,
+      readWrite: false,
     });
     expect(workspaceStateLabel({
       primaryDirectory: "/projects/api",
       additionalDirectories: ["/projects/web", "/projects/shared"],
-    })).toBe("workspace +2");
+      directoryAccess: "read-write",
+    })).toBe("read-write workspace +2");
   });
 
   test("rejects invalid instruction save input without creating storage artifacts", async () => {

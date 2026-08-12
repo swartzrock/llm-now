@@ -12,7 +12,7 @@ A candidate is ready when:
 - each supported provider completes at least one successful generation on a reference platform;
 - no credential appears in stdout, stderr, unified or legacy configuration, or captured shell logs;
 - shortcut inventory and diagnostics do not disclose saved instruction text or instruction-bearing child-process arguments;
-- workspace aliases remain globally callable, use their stored roots read-only, and do not disclose full paths in routine UI;
+- workspace aliases remain globally callable, enforce their declared read-only or read-write access, and do not disclose full paths in routine UI;
 - no unexplained release-blocking manual failure remains.
 
 Homebrew is a post-publication projection of each verified public Release and has dedicated commissioning cases below. Chocolatey remains outside the current release scope.
@@ -49,7 +49,7 @@ Before general availability, complete one successful explicit generation for eve
 
 It is not necessary to test all nine providers on all five operating-system targets. Test every provider on one reference platform, then use one representative provider for the native smoke on each other target. Use a short, inexpensive prompt and do not classify normal model wording variation as an `llm-now` failure.
 
-Workspace capability is intentionally narrower: Codex CLI (`codex-cli`) and Claude CLI (`claude-cli`) support one primary plus ordered additional directories. Ollama, LM Studio, and every cloud API provider must reject a configured workspace before credentials, network access, or provider construction.
+Workspace capability is intentionally narrower: Codex CLI (`codex-cli`) supports read-only and read-write access to one primary plus ordered additional directories. Claude CLI (`claude-cli`) supports the same roots read-only. Ollama, LM Studio, and every cloud API provider must reject a configured workspace before credentials, network access, or provider construction, and Claude must reject read-write access at the same boundary.
 
 ## Prepare an isolated test environment
 
@@ -374,7 +374,7 @@ Opening either root and opening the creation-source menu must not display discov
 - the final response appears only in `stdout.txt`;
 - the response is followed by a clean terminal boundary on stderr even when it has no trailing newline or leaves SGR styling active;
 - shortcut creation visibly requests optional multiline instructions after naming, preserves pasted line breaks, saves before its contextual first prompt, and generates exactly once;
-- Codex and Claude shortcut creation requests an optional primary workspace after instructions, then additional directories until blank; all other providers skip those prompts;
+- Codex and Claude shortcut creation requests an optional primary workspace after instructions, then additional directories until blank; Codex then asks for an explicit default-No read-write grant, while Claude remains read-only; all other providers skip those prompts;
 - each saved-shortcut call transmits its instructions separately from the prompt, subject to the selected provider's policies;
 - run once generates without an instruction, shortcut naming, or save offer;
 - connection management retains only discovery and API-key management; and
@@ -431,14 +431,24 @@ version = 1
 provider = "codex-cli"
 model = "default"
 directories = ["/absolute/primary", "/absolute/additional", "/absolute/additional with spaces"]
+directory_access = "read-write"
 ```
 
 The list must contain at least one directory. Its first entry is the primary
 working directory and all later entries are ordered additional roots. A
 primary-only workspace therefore stores a one-item list; no workspace omits
-the `directories` key.
+both `directories` and `directory_access`. When either field is present, both
+are required.
 
-The save receipt and later picker/inventory rows must show `workspace +2` without any full path. Recreate the alias with the same roots, changed roots, and then a blank primary. Exact reuse must report already saved; changes must default to No and show only `Workspace: unchanged`, `set → changed`, or `set → none`. Verify a duplicate, nonexistent, inaccessible, or non-directory root reprompts or fails with only its root role. Repeat with an Ollama, LM Studio, and cloud alias and confirm workspace prompts are absent; a manually edited unsupported-provider workspace must fail before credential or provider activity.
+For Codex, confirm that finishing the directory list shows `Allow Codex to
+create, edit, rename, and delete files in all 3 configured directories?` with
+No selected by default. Declining must save `directory_access = "read-only"`;
+accepting must save `directory_access = "read-write"`. Cancel at this prompt and
+confirm no shortcut is saved. Claude must save only `"read-only"` without a
+write prompt, and manually configuring Claude as `"read-write"` must fail before
+provider activity.
+
+The save receipt and later picker/inventory rows must show `read-only workspace +2` or `read-write workspace +2` without any full path. Recreate the alias with the same roots, changed roots, changed access, and then a blank primary. Exact reuse must report already saved; changes must default to No and show only `Workspace: unchanged`, `set → changed`, or `set → none`. Verify a duplicate, nonexistent, inaccessible, or non-directory root reprompts or fails with only its root role. A read-write root that is not writable must also fail before prompt collection. Repeat with an Ollama, LM Studio, and cloud alias and confirm workspace prompts are absent; a manually edited unsupported-provider workspace must fail before credential or provider activity.
 
 Inspect `config.toml` and confirm paths are plaintext machine-local configuration. Use only disposable roots whose contents may be disclosed: files the CLI reads may be sent to the selected Codex or Claude service under that service's policies. Confirm routine prompts, receipts, inventory, and diagnostics reveal only root roles and counts.
 
@@ -460,7 +470,7 @@ rm -f stdout.txt stderr.txt
 
 The terminal must show `Prompt for daily · PROVIDER · MODEL`, using `default model` only when the alias has no pinned model. It must not display the saved instruction text. Submit whitespace first and confirm validation keeps the field open, then enter `Summarize the idea of gravity.`. The command must transmit the saved instruction separately from that prompt, generate exactly once, exit `0`, and leave `stdout.txt` containing only the response even though stdout was redirected. Repeat the alias-only command with Escape and Ctrl-C; each cancellation must exit `130`, generate nothing, and leave stdout empty.
 
-For the workspace alias from MT-11A, invoke the positional form, `--alias`, piped-input form, launcher picker, and alias-only terminal prompt from this unrelated directory. Every surface must remain able to see the alias and must run the CLI with the stored primary as cwd plus one ordered `--add-dir` pair per additional root. The caller cwd must never filter the alias or replace its workspace. Codex must retain `--sandbox read-only`; Claude must expose only `Read`, `Glob`, and `Grep`. A request-scoped `--instruction` replacement must leave the workspace in `config.toml` unchanged. Move one root and repeat: the command must fail before reading an interactive or piped prompt and must not launch the CLI or fall back to any other directory.
+For the workspace alias from MT-11A, invoke the positional form, `--alias`, piped-input form, launcher picker, and alias-only terminal prompt from this unrelated directory. Every surface must remain able to see the alias and must run the CLI with the stored primary as cwd plus one ordered `--add-dir` pair per additional root. The caller cwd must never filter the alias or replace its workspace. Codex must use `--sandbox read-only` for `directory_access = "read-only"` and `--sandbox workspace-write` for `directory_access = "read-write"`; in the latter case, safely prove it can create, edit, rename, and delete a disposable file in both the primary and an additional root. Claude must expose only `Read`, `Glob`, and `Grep`. A request-scoped `--instruction` replacement must leave the workspace in `config.toml` unchanged. Move one root and repeat: the command must fail before reading an interactive or piped prompt and must not launch the CLI or fall back to any other directory.
 
 Then verify deterministic reuse:
 
@@ -680,7 +690,9 @@ creates no backup for that source.
 
 Repeat once with a legacy version 3 `aliases.json` containing a Codex or Claude
 workspace. Migration must preserve its primary and ordered additional roots in
-the alias's unified TOML `directories` list while `config.toml` remains version 1.
+the alias's unified TOML `directories` list, add
+`directory_access = "read-only"` for a legacy workspace that predates that
+field, and keep `config.toml` at version 1.
 The exact legacy JSON must remain available in its migration backup.
 
 ### MT-22B: Canonically rewrite without pinning defaults

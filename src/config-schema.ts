@@ -29,6 +29,7 @@ const ALIAS_FIELDS = new Set([
   "rate",
   "pitch",
   "directories",
+  "directory_access",
 ]);
 
 export interface StoredVoiceConfig {
@@ -191,6 +192,7 @@ function parseDirectories(
   name: string,
   provider: ByokProviderId,
   value: unknown,
+  directoryAccess: unknown,
 ): WorkspaceConfig {
   if (
     !Array.isArray(value)
@@ -202,13 +204,24 @@ function parseDirectories(
     );
   }
   const [primaryDirectory, ...additionalDirectories] = value as string[];
+  if (directoryAccess !== "read-only" && directoryAccess !== "read-write") {
+    throw new ConfigSchemaError(
+      `aliases.${name}.directory_access must be "read-only" or "read-write"`,
+    );
+  }
   const workspace = {
     primaryDirectory,
     additionalDirectories,
+    directoryAccess,
   };
   const capabilities = workspaceCapabilities(provider);
   if (!capabilities.primaryDirectory || !capabilities.additionalDirectories) {
     throw new ConfigSchemaError(`aliases.${name}.directories is unsupported for this provider`);
+  }
+  if (directoryAccess === "read-write" && !capabilities.readWrite) {
+    throw new ConfigSchemaError(
+      `aliases.${name}.directory_access is unsupported for this provider`,
+    );
   }
   if (!isWorkspaceConfig(workspace)) {
     throw new ConfigSchemaError(`aliases.${name}.directories is invalid`);
@@ -216,6 +229,7 @@ function parseDirectories(
   return Object.freeze({
     primaryDirectory: workspace.primaryDirectory,
     additionalDirectories: Object.freeze([...workspace.additionalDirectories]),
+    directoryAccess: workspace.directoryAccess,
   });
 }
 
@@ -253,8 +267,20 @@ function parseAlias(name: string, value: unknown): StoredAliasConfig {
   if (Object.hasOwn(value, "pitch")) {
     alias.pitch = optionalPitch(value.pitch, `aliases.${name}.pitch`);
   }
-  if (Object.hasOwn(value, "directories")) {
-    alias.workspace = parseDirectories(name, value.provider, value.directories);
+  const hasDirectories = Object.hasOwn(value, "directories");
+  const hasDirectoryAccess = Object.hasOwn(value, "directory_access");
+  if (hasDirectories !== hasDirectoryAccess) {
+    throw new ConfigSchemaError(
+      `aliases.${name}.directories and directory_access must be configured together`,
+    );
+  }
+  if (hasDirectories) {
+    alias.workspace = parseDirectories(
+      name,
+      value.provider,
+      value.directories,
+      value.directory_access,
+    );
   }
   return Object.freeze(alias);
 }
@@ -351,6 +377,7 @@ export function projectAliases(document: ConfigDocumentV1): Readonly<Record<stri
       record.workspace = Object.freeze({
         primaryDirectory: stored.workspace.primaryDirectory,
         additionalDirectories: Object.freeze([...stored.workspace.additionalDirectories]),
+        directoryAccess: stored.workspace.directoryAccess,
       });
     }
     aliases[name] = Object.freeze(record);
@@ -396,6 +423,7 @@ export function serializeConfigDocument(document: ConfigDocumentV1): string {
           stored.workspace.primaryDirectory,
           ...stored.workspace.additionalDirectories,
         ],
+        directory_access: stored.workspace.directoryAccess,
       }),
     };
   }

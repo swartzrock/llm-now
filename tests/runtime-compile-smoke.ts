@@ -58,6 +58,7 @@ try {
     workspace: {
       primaryDirectory: workspacePrimary,
       additionalDirectories: workspaceAdditions,
+      directoryAccess: "read-write",
     },
   });
   await saveConfigAlias(configPaths, "Review", {
@@ -67,6 +68,7 @@ try {
     workspace: {
       primaryDirectory: workspacePrimary,
       additionalDirectories: workspaceAdditions,
+      directoryAccess: "read-only",
     },
   });
   await Bun.write(shortcutInput, "daily, smoke");

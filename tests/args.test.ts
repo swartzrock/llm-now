@@ -37,7 +37,7 @@ Notes:
   A workspace fixes execution to one primary directory plus ordered additional directories.
   Saved shortcuts remain global; a stored workspace does not restrict where you can call one.
   Codex CLI and Claude CLI support workspaces; local HTTP servers and cloud APIs reject them.
-  Workspace file access is read-only. Paths are plaintext local configuration, and files read by the CLI may be sent to its selected service.
+  Workspace access must be declared as read-only or read-write; only Codex CLI supports read-write. Paths are plaintext local configuration, and files read by the CLI may be sent to its selected service.
 
 Options:
   --aliases            List saved shortcuts

@@ -73,16 +73,17 @@ describe("terminal alias selection", () => {
     const workspace = {
       primaryDirectory: "/Users/test/secret-project",
       additionalDirectories: ["/Users/test/shared-one", "/Users/test/shared two"],
+      directoryAccess: "read-write" as const,
     };
 
     expect(formatSelection({ provider: "codex-cli", model: null, workspace })).toBe(
-      "Codex CLI · default model · workspace +2",
+      "Codex CLI · default model · read-write workspace +2",
     );
     const inventory = formatAliasInventory({
       daily: { provider: "codex-cli", model: null, workspace },
       plain: { provider: "ollama", model: "llama3" },
     });
-    expect(inventory).toContain("daily → Codex CLI · provider default · workspace +2");
+    expect(inventory).toContain("daily → Codex CLI · provider default · read-write workspace +2");
     expect(inventory).toContain("plain → Ollama · llama3");
     expect(inventory).not.toContain("/Users/test");
   });

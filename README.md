@@ -70,7 +70,8 @@ Then follow this path without choosing another launcher branch:
    Tab to select `[ save ]`, then press Enter to save.
 6. For Codex CLI or Claude CLI, optionally enter one primary workspace
    directory and any additional directories. Press Enter at the primary prompt
-   to skip the workspace or at an additional prompt to finish the list.
+   to skip the workspace or at an additional prompt to finish the list. Codex
+   then asks whether to grant read-write access and defaults to No.
 7. After the shortcut is saved, enter your first prompt at
    `Prompt for local · <provider> · <model>` and receive the response.
 
@@ -138,24 +139,28 @@ additional directories. The primary directory becomes the CLI working
 directory, and each additional directory is forwarded separately. The shortcut
 remains globally callable: its workspace is execution context, not an availability rule.
 
-| Provider class | Workspace support |
-| --- | --- |
-| Codex CLI | Primary plus additional directories |
-| Claude CLI | Primary plus additional directories |
-| Ollama and LM Studio | Rejected |
-| Cloud API providers | Rejected |
+| Provider class | Workspace support | Access modes |
+| --- | --- | --- |
+| Codex CLI | Primary plus additional directories | `read-only`, `read-write` |
+| Claude CLI | Primary plus additional directories | `read-only` |
+| Ollama and LM Studio | Rejected | None |
+| Cloud API providers | Rejected | None |
 
-Workspace access remains read-only. Codex keeps its read-only sandbox, while
-Claude receives only the `Read`, `Glob`, and `Grep` file tools. Workspace paths
-are machine-local plaintext in `config.toml` and may appear in child-process
-arguments or local audit tools. A CLI may send file content it reads to the
-selected Codex or Claude service under that service's policies. Store only
-directories whose contents may be disclosed to that service.
+Every workspace explicitly stores its access mode. Read-write Codex workspaces
+allow Codex to create, edit, rename, and delete files in every configured
+directory; the interactive grant is an explicit confirmation that defaults to
+No. Read-only Codex workspaces keep its read-only sandbox, while Claude receives
+only the `Read`, `Glob`, and `Grep` file tools. Workspace paths are machine-local
+plaintext in `config.toml` and may appear in child-process arguments or local
+audit tools. A CLI may send file content it reads to the selected Codex or
+Claude service under that service's policies. Store only directories whose
+contents may be disclosed to that service, and grant write access only where
+those file operations are acceptable.
 
 Moving, removing, denying access to, or canonically duplicating a configured
 directory makes the shortcut fail before prompting or launching the CLI. It
-never falls back to the caller's directory. Inventory shows only `workspace` or
-`workspace +N`; it does not print full paths.
+never falls back to the caller's directory. Inventory shows only `read-only
+workspace +N` or `read-write workspace +N`; it does not print full paths.
 
 ## Credentials
 

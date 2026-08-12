@@ -187,6 +187,7 @@ function freezeLegacyAliases(document: AliasDocument): Readonly<Record<string, A
         workspace: Object.freeze({
           primaryDirectory: record.workspace.primaryDirectory,
           additionalDirectories: Object.freeze([...record.workspace.additionalDirectories]),
+          directoryAccess: record.workspace.directoryAccess,
         }),
       }),
     });
@@ -566,6 +567,7 @@ function storedAlias(record: AliasRecord, current?: StoredAliasConfig): StoredAl
     stored.workspace = Object.freeze({
       primaryDirectory: record.workspace.primaryDirectory,
       additionalDirectories: Object.freeze([...record.workspace.additionalDirectories]),
+      directoryAccess: record.workspace.directoryAccess,
     });
   }
   if (current?.spokenNames !== undefined) stored.spokenNames = current.spokenNames;

@@ -516,6 +516,7 @@ async function smoke(archivePath: string): Promise<void> {
             workspace: {
               primaryDirectory: workspacePrimary,
               additionalDirectories: workspaceAdditions,
+              directoryAccess: "read-write",
             },
           },
           review: {
@@ -525,6 +526,7 @@ async function smoke(archivePath: string): Promise<void> {
             workspace: {
               primaryDirectory: workspacePrimary,
               additionalDirectories: workspaceAdditions,
+              directoryAccess: "read-only",
             },
           },
         },
@@ -561,7 +563,7 @@ async function smoke(archivePath: string): Promise<void> {
         name: "alias inventory",
         args: ["--aliases"],
         code: 0,
-        stdout: "aliases → Codex CLI · provider default · workspace +2\nreview → Claude CLI · provider default · workspace +2\nzeta → OpenAI · gpt-5\n",
+        stdout: "aliases → Codex CLI · provider default · read-write workspace +2\nreview → Claude CLI · provider default · read-only workspace +2\nzeta → OpenAI · gpt-5\n",
         stderr: "",
       },
       { name: "explicit generation", args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:instruction-absent", stderrIncludes: "" },

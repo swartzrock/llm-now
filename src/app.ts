@@ -381,6 +381,34 @@ async function captureShortcutWorkspace(
 ): Promise<WorkspaceCaptureResult> {
   if (!workspaceCapabilities(provider).primaryDirectory) return { kind: "ready" };
 
+  async function finishWorkspace(workspace: WorkspaceConfig): Promise<WorkspaceCaptureResult | null> {
+    if (provider !== "codex-cli") return { kind: "ready", workspace };
+    const count = workspace.additionalDirectories.length + 1;
+    const writable = await deps.prompter.confirm(
+      `Allow Codex to create, edit, rename, and delete files in all ${count} configured ${
+        count === 1 ? "directory" : "directories"
+      }?`,
+      { initialValue: false },
+    );
+    if (writable === null) return { kind: "cancelled" };
+    if (!writable) return { kind: "ready", workspace };
+
+    const writableWorkspace = normalizeWorkspace(
+      workspace.primaryDirectory,
+      workspace.additionalDirectories,
+      deps.cwd,
+      "read-write",
+    );
+    try {
+      await preflightWorkspace(provider, writableWorkspace);
+      return { kind: "ready", workspace: writableWorkspace };
+    } catch (error) {
+      if (!(error instanceof WorkspaceError)) throw error;
+      diagnostic(`config: ${error.message}`);
+      return null;
+    }
+  }
+
   while (true) {
     const primary = await deps.prompter.input(
       "Primary workspace directory (press Enter to skip)",
@@ -403,7 +431,11 @@ async function captureShortcutWorkspace(
         "Additional workspace directory (press Enter when finished)",
       );
       if (additional === null) return { kind: "cancelled" };
-      if (additional === "") return { kind: "ready", workspace };
+      if (additional === "") {
+        const finished = await finishWorkspace(workspace);
+        if (finished !== null) return finished;
+        break;
+      }
 
       try {
         const candidate = normalizeWorkspace(

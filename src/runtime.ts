@@ -14,9 +14,13 @@ import {
   LocalCommandRunner,
   createByokNodeProvider,
   findAvailableProviders,
+  type LoginShellPathLoader,
   type LocalCommandRequest,
   type LocalCommandResult,
+  type LocalProcessSpawner,
 } from "@swartzrock/byok-runtime/node";
+import { spawn } from "node:child_process";
+import crossSpawn from "cross-spawn";
 import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
@@ -55,6 +59,7 @@ type WorkspaceCommandResolver = (
   command: "codex" | "claude",
   env: ByokEnvironment,
 ) => Promise<string>;
+type WorkspacePreflight = typeof preflightWorkspace;
 const CLOUD_PROVIDERS = Object.keys(
   BYOK_PROVIDER_API_KEY_ENV_VARS,
 ) as ByokCloudProviderId[];
@@ -69,6 +74,8 @@ export interface RuntimeGatewayDependencies {
   createProvider?: CreateProvider;
   workspaceRunner?: CommandRunner;
   workspaceCommandResolver?: WorkspaceCommandResolver;
+  workspaceLoginShellPathLoader?: LoginShellPathLoader;
+  workspacePreflight?: WorkspacePreflight;
   credentialResolver: CredentialResolver;
   sensitive: SensitiveValueRegistry;
 }
@@ -172,6 +179,7 @@ class WorkspaceCommandRunner implements CommandRunner {
   constructor(
     private readonly provider: WorkspaceProvider,
     private readonly additionalDirectories: readonly string[],
+    private readonly directoryAccess: WorkspaceConfig["directoryAccess"],
     private readonly runner: CommandRunner,
   ) {}
 
@@ -193,6 +201,13 @@ class WorkspaceCommandRunner implements CommandRunner {
   }
 
   private codexArgs(args: string[]): string[] {
+    const sandbox = args.indexOf("--sandbox");
+    if (sandbox === -1 || sandbox + 1 >= args.length) {
+      throw new Error("Codex CLI workspace runtime did not expose a sandbox mode");
+    }
+    args[sandbox + 1] = this.directoryAccess === "read-write"
+      ? "workspace-write"
+      : "read-only";
     return [
       args[0]!,
       ...this.additionalDirectoryArgs(),
@@ -202,7 +217,10 @@ class WorkspaceCommandRunner implements CommandRunner {
 
   private claudeArgs(args: string[]): string[] {
     const tools = args.indexOf("--tools");
-    if (tools !== -1 && tools + 1 < args.length) args[tools + 1] = "Read,Glob,Grep";
+    if (tools === -1 || tools + 1 >= args.length) {
+      throw new Error("Claude CLI workspace runtime did not expose a tool allowlist");
+    }
+    args[tools + 1] = "Read,Glob,Grep";
     return [...args, ...this.additionalDirectoryArgs()];
   }
 
@@ -225,11 +243,86 @@ function commandCandidates(command: "codex" | "claude", env: ByokEnvironment): s
   return extensions.map((extension) => `${command}${extension}`);
 }
 
+const LOGIN_SHELL_PATH_MARKER = "__LLM_NOW_LOGIN_SHELL_PATH__";
+const LOGIN_SHELL_PATH_TIMEOUT_MS = 3_000;
+const LOGIN_SHELL_PATH_MAX_CHARS = 65_536;
+let cachedLoginShellPath: string | undefined;
+let pendingLoginShellPath: Promise<string> | undefined;
+
+function parseLoginShellPath(stdout: string): string {
+  const escapedMarker = LOGIN_SHELL_PATH_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = stdout.matchAll(
+    new RegExp(`${escapedMarker}([\\s\\S]*?)${escapedMarker}`, "g"),
+  );
+  let path = "";
+  for (const match of matches) path = match[1]?.trim() ?? "";
+  return path;
+}
+
+function loadLoginShellPath(env: NodeJS.ProcessEnv): Promise<string> {
+  if (process.platform === "win32") return Promise.resolve("");
+  if (cachedLoginShellPath !== undefined) return Promise.resolve(cachedLoginShellPath);
+  if (pendingLoginShellPath !== undefined) return pendingLoginShellPath;
+
+  pendingLoginShellPath = new Promise((resolve) => {
+    const configuredShell = env.SHELL?.trim();
+    const fallbackShell = process.platform === "darwin" ? "/bin/zsh" : "/bin/sh";
+    const shell = configuredShell !== undefined && isAbsolute(configuredShell)
+      ? configuredShell
+      : fallbackShell;
+    const child = spawn(
+      shell,
+      ["-l", "-c", `printf '\\n${LOGIN_SHELL_PATH_MARKER}%s${LOGIN_SHELL_PATH_MARKER}\\n' "$PATH"`],
+      { env, shell: false, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    let stdout = "";
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settle = (path: string) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      if (path !== "") cachedLoginShellPath = path;
+      pendingLoginShellPath = undefined;
+      resolve(path);
+    };
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+      if (stdout.length > LOGIN_SHELL_PATH_MAX_CHARS) {
+        child.kill("SIGTERM");
+        settle("");
+      }
+    });
+    child.once("error", () => settle(""));
+    child.once("close", (code) => settle(code === 0 ? parseLoginShellPath(stdout) : ""));
+    timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      settle("");
+    }, LOGIN_SHELL_PATH_TIMEOUT_MS);
+  });
+  return pendingLoginShellPath;
+}
+
+function mergePathValues(...paths: string[]): string {
+  const seen = new Set<string>();
+  return paths
+    .flatMap((path) => path.split(delimiter))
+    .map((directory) => directory.trim())
+    .filter((directory) => {
+      if (directory === "" || seen.has(directory)) return false;
+      seen.add(directory);
+      return true;
+    })
+    .join(delimiter);
+}
+
 async function resolveWorkspaceCommand(
   command: "codex" | "claude",
   env: ByokEnvironment,
+  loginShellPathLoader: LoginShellPathLoader = loadLoginShellPath,
 ): Promise<string> {
-  const pathValue = env.PATH ?? env.Path ?? env.path ?? "";
+  const environmentPath = env.PATH ?? env.Path ?? env.path ?? "";
+  const pathValue = mergePathValues(await loginShellPathLoader(env), environmentPath);
   const directories = pathValue
     .split(delimiter)
     .map((directory) => directory.trim())
@@ -248,6 +341,26 @@ async function resolveWorkspaceCommand(
   throw new Error(`${command} was not found in an absolute PATH directory`);
 }
 
+function waitForAbort<T>(operation: () => Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  signal?.throwIfAborted();
+  const running = operation();
+  if (signal === undefined) return running;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    running.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
 function workspaceRuntime(
   provider: WorkspaceProvider,
   model: string | null,
@@ -258,6 +371,7 @@ function workspaceRuntime(
   const wrappedRunner = new WorkspaceCommandRunner(
     provider,
     workspace.additionalDirectories,
+    workspace.directoryAccess,
     runner,
   );
   const options = {
@@ -342,19 +456,32 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
         signal?.throwIfAborted();
         verifiedWorkspace = workspace === undefined
           ? undefined
-          : await preflightWorkspace(provider, workspace);
+          : await waitForAbort(
+            () => (deps.workspacePreflight ?? preflightWorkspace)(provider, workspace),
+            signal,
+          );
         signal?.throwIfAborted();
+        const command = provider === "codex-cli" ? "codex" : "claude";
         const providerRuntime = verifiedWorkspace === undefined
           ? await runtime(provider, model)
           : workspaceRuntime(
             workspaceProvider(provider),
             model,
             verifiedWorkspace,
-            await (deps.workspaceCommandResolver ?? resolveWorkspaceCommand)(
-              provider === "codex-cli" ? "codex" : "claude",
+            await waitForAbort(
+              () => deps.workspaceCommandResolver === undefined
+                ? resolveWorkspaceCommand(
+                  command,
+                  deps.env,
+                  deps.workspaceLoginShellPathLoader,
+                )
+                : deps.workspaceCommandResolver(command, deps.env),
+              signal,
+            ),
+            deps.workspaceRunner ?? new LocalCommandRunner(
+              crossSpawn as LocalProcessSpawner,
               deps.env,
             ),
-            deps.workspaceRunner ?? new LocalCommandRunner(),
           );
         signal?.throwIfAborted();
         const result = await providerRuntime.generateText(

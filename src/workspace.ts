@@ -9,11 +9,15 @@ import { isAbsolute, normalize, resolve } from "node:path";
 export interface WorkspaceConfig {
   readonly primaryDirectory: string;
   readonly additionalDirectories: readonly string[];
+  readonly directoryAccess: DirectoryAccess;
 }
+
+export type DirectoryAccess = "read-only" | "read-write";
 
 export interface WorkspaceCapabilities {
   primaryDirectory: boolean;
   additionalDirectories: boolean;
+  readWrite: boolean;
 }
 
 export class WorkspaceError extends Error {
@@ -26,18 +30,27 @@ export class WorkspaceError extends Error {
 const SUPPORTED_WORKSPACE: WorkspaceCapabilities = Object.freeze({
   primaryDirectory: true,
   additionalDirectories: true,
+  readWrite: false,
+});
+const WRITABLE_WORKSPACE: WorkspaceCapabilities = Object.freeze({
+  primaryDirectory: true,
+  additionalDirectories: true,
+  readWrite: true,
 });
 const UNSUPPORTED_WORKSPACE: WorkspaceCapabilities = Object.freeze({
   primaryDirectory: false,
   additionalDirectories: false,
+  readWrite: false,
 });
 
 const WORKSPACE_CAPABILITIES = Object.freeze(Object.fromEntries(
   BYOK_PROVIDER_IDS.map((provider) => [
     provider,
-    provider === "codex-cli" || provider === "claude-cli"
-      ? SUPPORTED_WORKSPACE
-      : UNSUPPORTED_WORKSPACE,
+    provider === "codex-cli"
+      ? WRITABLE_WORKSPACE
+      : provider === "claude-cli"
+        ? SUPPORTED_WORKSPACE
+        : UNSUPPORTED_WORKSPACE,
   ]),
 ) as Record<ByokProviderId, WorkspaceCapabilities>);
 
@@ -45,10 +58,16 @@ export function workspaceCapabilities(provider: ByokProviderId): WorkspaceCapabi
   return WORKSPACE_CAPABILITIES[provider];
 }
 
-export function assertWorkspaceSupported(provider: ByokProviderId): void {
+export function assertWorkspaceSupported(
+  provider: ByokProviderId,
+  directoryAccess: DirectoryAccess = "read-only",
+): void {
   const capabilities = workspaceCapabilities(provider);
   if (!capabilities.primaryDirectory || !capabilities.additionalDirectories) {
     throw new WorkspaceError(`provider ${provider} does not support alias workspaces`);
+  }
+  if (directoryAccess === "read-write" && !capabilities.readWrite) {
+    throw new WorkspaceError(`provider ${provider} does not support read-write alias workspaces`);
   }
 }
 
@@ -65,8 +84,10 @@ function hasExactlyKeys(value: Record<string, unknown>, keys: readonly string[])
 export function isWorkspaceConfig(value: unknown): value is WorkspaceConfig {
   if (!isObject(value) || !hasExactlyKeys(value, [
     "additionalDirectories",
+    "directoryAccess",
     "primaryDirectory",
   ])) return false;
+  if (value.directoryAccess !== "read-only" && value.directoryAccess !== "read-write") return false;
   if (typeof value.primaryDirectory !== "string" || !isAbsolute(value.primaryDirectory)) {
     return false;
   }
@@ -86,6 +107,7 @@ export function normalizeWorkspace(
   primaryDirectory: string,
   additionalDirectories: readonly string[],
   cwd: string,
+  directoryAccess: DirectoryAccess = "read-only",
 ): WorkspaceConfig {
   const primary = resolveWorkspaceDirectory(primaryDirectory, cwd);
   const additional = additionalDirectories.map((directory) => resolveWorkspaceDirectory(directory, cwd));
@@ -93,7 +115,7 @@ export function normalizeWorkspace(
   if (new Set(directories).size !== directories.length) {
     throw new WorkspaceError("workspace directories must be unique");
   }
-  return { primaryDirectory: primary, additionalDirectories: additional };
+  return { primaryDirectory: primary, additionalDirectories: additional, directoryAccess };
 }
 
 function resolveWorkspaceDirectory(value: string, cwd: string): string {
@@ -106,7 +128,8 @@ export function sameWorkspace(
   right: WorkspaceConfig | undefined,
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
-  return left.primaryDirectory === right.primaryDirectory
+  return left.directoryAccess === right.directoryAccess
+    && left.primaryDirectory === right.primaryDirectory
     && left.additionalDirectories.length === right.additionalDirectories.length
     && left.additionalDirectories.every(
       (directory, index) => directory === right.additionalDirectories[index],
@@ -115,14 +138,15 @@ export function sameWorkspace(
 
 export function workspaceStateLabel(workspace: WorkspaceConfig): string {
   const count = workspace.additionalDirectories.length;
-  return count === 0 ? "workspace" : `workspace +${count}`;
+  const workspaceLabel = count === 0 ? "workspace" : `workspace +${count}`;
+  return `${workspace.directoryAccess} ${workspaceLabel}`;
 }
 
 export async function preflightWorkspace(
   provider: ByokProviderId,
   workspace: WorkspaceConfig,
 ): Promise<WorkspaceConfig> {
-  assertWorkspaceSupported(provider);
+  assertWorkspaceSupported(provider, workspace.directoryAccess);
   if (!isWorkspaceConfig(workspace)) throw new WorkspaceError("invalid alias workspace");
 
   const verified = new Set<string>();
@@ -134,7 +158,12 @@ export async function preflightWorkspace(
       canonical = await realpath(directory);
       const info = await stat(canonical);
       if (!info.isDirectory()) throw new WorkspaceError(`workspace ${role} is not a directory`);
-      await access(canonical, constants.R_OK | constants.X_OK);
+      await access(
+        canonical,
+        constants.R_OK
+          | constants.X_OK
+          | (workspace.directoryAccess === "read-write" ? constants.W_OK : 0),
+      );
     } catch (error) {
       if (error instanceof WorkspaceError) throw error;
       throw new WorkspaceError(`workspace ${role} is unavailable`, { cause: error });
@@ -147,7 +176,7 @@ export async function preflightWorkspace(
 
   const [primaryDirectory, ...additionalDirectories] = [...verified];
   if (primaryDirectory === undefined) throw new WorkspaceError("invalid alias workspace");
-  return { primaryDirectory, additionalDirectories };
+  return { primaryDirectory, additionalDirectories, directoryAccess: workspace.directoryAccess };
 }
 
 export function workspacePathVariants(workspace: WorkspaceConfig): string[] {

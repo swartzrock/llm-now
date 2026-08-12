@@ -222,7 +222,7 @@ function canonicalizeDocument(document: AliasDocument, path: string): AliasDocum
 function validateWorkspaceSupport(name: string, record: AliasRecord): void {
   if (record.workspace === undefined) return;
   try {
-    assertWorkspaceSupported(record.provider);
+    assertWorkspaceSupported(record.provider, record.workspace.directoryAccess);
   } catch (error) {
     if (error instanceof WorkspaceError) {
       throw new AliasStoreError(`alias "${summarizeDiagnosticValue(name)}": ${error.message}`, {
@@ -247,6 +247,14 @@ function summarizeDiagnosticValue(value: string): string {
 export function parseAliasDocument(text: string, path: string): AliasDocument {
   try {
     const parsed: unknown = JSON.parse(text);
+    if (isObject(parsed) && parsed.version === 3 && isObject(parsed.aliases)) {
+      for (const record of Object.values(parsed.aliases)) {
+        if (!isObject(record) || !isObject(record.workspace)) continue;
+        if (hasExactlyKeys(record.workspace, ["additionalDirectories", "primaryDirectory"])) {
+          record.workspace.directoryAccess = "read-only";
+        }
+      }
+    }
     if (!validateDocument(parsed)) throw new Error("invalid alias document schema");
     return canonicalizeDocument(parsed, path);
   } catch (error) {
@@ -300,6 +308,7 @@ function storedAliasRecord(record: AliasRecord): AliasRecord {
       workspace: {
         primaryDirectory: record.workspace.primaryDirectory,
         additionalDirectories: [...record.workspace.additionalDirectories],
+        directoryAccess: record.workspace.directoryAccess,
       },
     }),
   };

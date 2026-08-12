@@ -17,7 +17,7 @@ execution: code
 - **Authority:** The Product Contract owns alias identity, global callability, workspace behavior, failure semantics, privacy, and compatibility. The Planning Contract owns schema v3, path handling, provider capabilities, the runtime adapter bridge, tests, documentation, and release mechanics. Repository instructions and tests remain binding where this plan is silent.
 - **Execution profile:** One implementation phase and one pull request based on current `origin/main`. The pull request includes the originating ideation artifact, this plan, implementation, focused and packaged tests, active documentation, and a minor changeset.
 - **Stop conditions:** Stop if the exported `@swartzrock/byok-runtime` CLI providers cannot be composed without copying provider output/auth logic, if a supported CLI lacks a current multi-directory launch contract, if workspace validation would require credential or provider access, or if implementation would need alias availability or invocation-cwd matching.
-- **Implementation reconciliation:** `main` adopted unified `config.toml` while this feature branch was in progress. Unified configuration remains version 1 and stores workspace as one optional `directories` key directly on the alias; when present, the list is nonempty, its first entry is the primary working directory, and later entries are ordered additional roots. The strict sticky v3 rules in this plan apply to the legacy `aliases.json` format, which remains readable and migrates workspaces into unified TOML without loss.
+- **Implementation reconciliation:** `main` adopted unified `config.toml` while this feature branch was in progress. Unified configuration remains version 1 and stores workspace as the required pair `directories` plus `directory_access` directly on the alias; when present, the list is nonempty, its first entry is the primary working directory, later entries are ordered additional roots, and access is `read-only` or `read-write`. The strict sticky v3 rules in this plan apply to the legacy `aliases.json` format, which remains readable and migrates older workspaces as read-only without loss.
 - **Tail ownership:** LFG implements and verifies the plan, simplifies and reviews the diff, applies review fixes, opens the pull request, and watches CI to a decided state.
 
 ---
@@ -26,9 +26,9 @@ execution: code
 
 ### Summary
 
-A saved alias may contain one optional `workspace` with an absolute `primaryDirectory` and an ordered `additionalDirectories` list. The workspace changes the local execution context of a capable CLI provider. It does not change the alias's provider/model target or where the alias can be called.
+A saved alias may contain one optional `workspace` with an absolute `primaryDirectory`, an ordered `additionalDirectories` list, and explicit `directoryAccess`. The workspace changes the local execution context and filesystem authority of a capable CLI provider. It does not change the alias's provider/model target or where the alias can be called.
 
-Codex CLI and Claude CLI support the complete workspace in this release. Ollama, LM Studio server, and cloud API providers reject workspace configuration before credentials, network calls, or provider creation. No provider may silently discard a configured directory.
+Codex CLI supports read-only and read-write workspaces in this release. Claude CLI supports the complete directory list read-only. Ollama, LM Studio server, and cloud API providers reject workspace configuration before credentials, network calls, or provider creation. No provider may silently discard a configured directory or weaken the declared access policy.
 
 ### Problem Frame
 
@@ -53,25 +53,25 @@ Users also need simultaneous context from more than one directory. A process has
 
 **Workspace configuration and persistence**
 
-- R4. A workspace must contain exactly one absolute primary directory and an ordered zero-or-more list of absolute additional directories. The primary directory is the CLI process cwd; additional directories are explicit accessible roots.
-- R5. Interactive Codex and Claude shortcut-save flows must allow the user to skip workspace, enter a primary directory, then enter zero or more additional directories. Relative creation input resolves once against the creation-time cwd before persistence.
+- R4. A workspace must contain exactly one absolute primary directory, an ordered zero-or-more list of absolute additional directories, and one explicit access policy of `read-only` or `read-write`. The primary directory is the CLI process cwd; additional directories are explicit accessible roots; the access policy covers every listed directory.
+- R5. Interactive Codex and Claude shortcut-save flows must allow the user to skip workspace, enter a primary directory, then enter zero or more additional directories. Relative creation input resolves once against the creation-time cwd before persistence. Codex must then ask whether to grant create, edit, rename, and delete authority across all configured directories, defaulting to No; Claude records read-only without a write prompt.
 - R6. Workspace paths must be machine-local plaintext configuration. Saving must reject blank paths, malformed fields, duplicate normalized paths, and the primary directory repeated as an additional directory. Paths containing spaces must remain individual process arguments.
 - R7. Alias document v3 must permit optional instructions and optional workspace while retaining exact-key validation. V1 and V2 documents load without eager rewriting. The first workspace save upgrades the document to v3, and a v3 document never downgrades automatically.
 - R8. Workspace must participate in complete-record equality, case-conflict detection, overwrite confirmation, atomic persistence, and same-invocation first-run state. Adding, changing, or removing instructions must preserve the workspace unless the save flow explicitly replaces it.
 
 **Capability and execution safety**
 
-- R9. Codex CLI and Claude CLI must advertise support for a primary directory and additional directories. Ollama, LM Studio, and every cloud API provider must advertise no workspace support.
+- R9. Codex CLI must advertise primary-directory, additional-directory, and read-write support. Claude CLI must advertise primary-directory and additional-directory support without read-write. Ollama, LM Studio, and every cloud API provider must advertise no workspace support.
 - R10. Unsupported workspace configuration must fail with a provider-specific configuration diagnostic before credential resolution, provider construction, network access, or generation.
-- R11. Every configured directory must exist, be accessible, and be a directory before interactive prompt collection and again immediately before provider construction. Canonically duplicate live paths must fail. Missing, moved, or invalid roots must never fall back to ambient cwd or the runtime temporary directory.
-- R12. Workspace-bearing Codex runs must retain the current read-only sandbox. Workspace-bearing Claude runs must expose only read-only file discovery tools (`Read`, `Glob`, and `Grep`) under the current noninteractive permission policy. Existing workspace-free provider behavior must remain unchanged.
+- R11. Every configured directory must exist, be accessible, and be a directory before interactive prompt collection and again immediately before provider construction. Read-write roots must also be writable. Canonically duplicate live paths must fail. Missing, moved, invalid, or insufficiently accessible roots must never fall back to ambient cwd or the runtime temporary directory.
+- R12. Read-only Codex workspaces must retain the current read-only sandbox; read-write Codex workspaces must use `--sandbox workspace-write`, which applies to the primary and every `--add-dir` root. Workspace-bearing Claude runs must expose only read-only file discovery tools (`Read`, `Glob`, and `Grep`) under the current noninteractive permission policy, and Claude read-write configuration must fail closed. Existing workspace-free provider behavior must remain unchanged.
 - R13. Additional directories must be forwarded in stored order through each CLI's documented `--add-dir` arguments. Failure from an installed CLI version that does not support the required flags must remain a clear generation error.
 
 **Observability, privacy, and release compatibility**
 
-- R14. Picker hints, alias inventory, save receipts, overwrite confirmation, and workspace-derived failures must make workspace state or the failing root role visible without printing full saved paths or saved instruction text.
+- R14. Picker hints, alias inventory, save receipts, overwrite confirmation, and workspace-derived failures must make the declared access state or failing root role visible without printing full saved paths or saved instruction text.
 - R15. `--instruction` must continue to override only instructions for one request and must leave the saved workspace active and unchanged.
-- R16. Help, README guidance, manual testing, compiled/native smoke coverage, the maintained demo source, and a minor changeset must document and prove global callability, fixed stored execution context, multi-root support, unsupported-provider rejection, machine-local plaintext paths, and read-only access.
+- R16. Help, README guidance, manual testing, compiled/native smoke coverage, the maintained demo source, and a minor changeset must document and prove global callability, fixed stored execution context, multi-root support, unsupported-provider rejection, machine-local plaintext paths, explicit access, and the full consequences of Codex write authority.
 
 ### Key Decisions
 
@@ -79,10 +79,11 @@ Users also need simultaneous context from more than one directory. A process has
 - **Multiple stored directories.** (session-settled: user-directed — chosen over a single-directory workspace because the user explicitly required support for multiple directories.) Governs R4-R7 and R9-R13.
 - **No availability policy.** (session-settled: user-directed — chosen over cwd-filtered alias visibility because the user asked to remove availability from option 1.) Governs R2-R3 and R14.
 - **Capability-checked failure.** (session-settled: user-approved — chosen over silently ignoring workspace on HTTP providers because provider execution boundaries were surfaced before the user selected option 1.) Governs R9-R13.
+- **Explicit access policy.** (session-settled: user-directed — chosen so configuration and routine UI say whether a workspace grants write authority.) `directories` and `directory_access` are a required pair; Codex supports `read-only` and `read-write`, Claude supports only `read-only`, and no implicit write grant exists. Governs R4-R6 and R9-R16.
 
 ### Key Flows
 
-- F1. **Create a CLI workspace shortcut.** Select Codex or Claude, select a model, name the shortcut, enter optional instructions, optionally enter the primary directory, add directories until blank input, save the complete record, then run the first prompt with that saved workspace.
+- F1. **Create a CLI workspace shortcut.** Select Codex or Claude, select a model, name the shortcut, enter optional instructions, optionally enter the primary directory, and add directories until blank input. For Codex, explicitly accept or decline the default-No write grant; for Claude, use read-only. Save the complete record, then run the first prompt with that saved workspace.
 - F2. **Invoke globally.** Resolve the alias through the unchanged global store from any caller directory, preflight the stored paths before collecting an interactive prompt, re-check them at the runtime boundary, construct the capable CLI adapter, and generate from the stored primary plus additional roots.
 - F3. **Keep old behavior.** Resolve a workspace-free alias or explicit provider/model selection and use the existing runtime-factory path without adding cwd, file tools, or additional-root arguments.
 - F4. **Reject unsupported configuration.** Detect a manually configured HTTP-provider workspace while loading or before generation, report the provider/capability mismatch, and perform no credential or provider work.
@@ -96,7 +97,7 @@ Users also need simultaneous context from more than one directory. A process has
 - AE3. **Covers R7-R8.** Existing v1 and v2 files load unchanged. Saving the first workspace produces v3; later removing the last workspace leaves the file at v3. Workspace differences trigger collision and overwrite behavior.
 - AE4. **Covers R6 and R11.** Blank, relative persisted, malformed, duplicate, missing, inaccessible, non-directory, or canonically duplicate roots fail before interactive prompt collection and provider construction. A directory path containing spaces remains one argv value.
 - AE5. **Covers R9-R10.** A v3 Ollama, LM Studio, or cloud alias with workspace fails with a provider-specific unsupported-workspace diagnostic and performs zero credential reads, network calls, or generation.
-- AE6. **Covers R9, R12-R13.** A workspace-bearing Claude alias receives the stored cwd, repeated `--add-dir` values, and only `Read`, `Glob`, and `Grep`; a Codex alias retains `--sandbox read-only`. Neither provider gains write access.
+- AE6. **Covers R9, R12-R13.** A workspace-bearing Claude alias receives the stored cwd, repeated `--add-dir` values, and only `Read`, `Glob`, and `Grep`; a read-only Codex alias retains `--sandbox read-only`; and a read-write Codex alias uses `--sandbox workspace-write` across its primary and additional roots. Claude read-write configuration fails before launch.
 - AE7. **Covers R3 and R12.** Workspace-free Codex and Claude aliases still use the existing factory behavior, and explicit provider/model calls receive no workspace or newly enabled tools.
 - AE8. **Covers R8 and R15.** `--instruction temporary` replaces a saved instruction for one invocation while the stored workspace remains active. The alias record is not mutated.
 - AE9. **Covers R14 and R16.** Inventory, selection, save, overwrite, diagnostics, docs, and fixtures reveal workspace state and root count where useful but never print a full personal path during routine success.
@@ -113,7 +114,7 @@ Users also need simultaneous context from more than one directory. A process has
 
 - Optional absolute machine-local workspace on global aliases.
 - Codex and Claude primary cwd plus ordered additional roots.
-- Capability declarations, fail-closed path preflight, read-only access, schema v3, interactive capture, state-only UI cues, tests, documentation, and release metadata.
+- Capability declarations, fail-closed path preflight, explicit read-only/read-write access, schema v3 compatibility, interactive capture and write consent, state-only UI cues, tests, documentation, and release metadata.
 - Inclusion of `docs/ideation/2026-08-11-directory-scoped-aliases-ideation.html` and this plan in the pull request.
 
 **Deferred follow-up**
@@ -148,13 +149,13 @@ Users also need simultaneous context from more than one directory. A process has
 ### Key Technical Decisions
 
 - KTD1. **Add a shared workspace domain in `src/workspace.ts`.** Define the stored shape, provider capability matrix, creation-time absolute normalization, structural checks, state comparison helpers, and asynchronous live-path preflight in one module used by persistence, application, and runtime. Keep alias lookup and provider discovery out of this module.
-- KTD2. **Use strict sticky alias schema v3.** V3 alias records accept provider/model plus optional instructions and optional workspace. A present workspace always serializes both `primaryDirectory` and `additionalDirectories`. Copy nested state when persisting, compare ordered roots in `sameAliasRecord`, preserve v1/v2 no-eager-migration behavior, and choose the highest document version already present or required by the record.
+- KTD2. **Keep unified TOML explicit and legacy v3 compatible.** Unified aliases serialize a present workspace as the required pair `directories` and `directory_access`. Legacy v3 records carry `primaryDirectory`, `additionalDirectories`, and `directoryAccess`; pre-access v3 workspaces load as read-only for migration. Copy nested state when persisting, compare ordered roots and access in `sameAliasRecord`, and preserve v1/v2 no-eager-migration behavior.
 - KTD3. **Store syntactically normalized absolute paths; verify canonical live identity at invocation.** Resolve relative capture input once against `ApplicationDependencies.cwd`, normalize it, and validate it exists before saving. Before generation, `realpath` and inspect every root, reject canonical duplicates, and pass the verified canonical paths to the child process. Do not reinterpret stored paths against a later caller cwd.
-- KTD4. **Keep capabilities independent of alias availability.** Codex and Claude are `{ primaryDirectory: true, additionalDirectories: true }`; all HTTP-backed providers are false/false. Consume this one matrix during capture eligibility, persisted-record validation, and runtime defense-in-depth. Never branch alias resolution or inventory membership on capabilities or cwd.
+- KTD4. **Keep capabilities independent of alias availability.** Codex is `{ primaryDirectory: true, additionalDirectories: true, readWrite: true }`; Claude has the same directory capabilities with `readWrite: false`; all HTTP-backed providers are false for all three. Consume this one matrix during capture eligibility, persisted-record validation, and runtime defense-in-depth. Never branch alias resolution or inventory membership on capabilities or cwd.
 - KTD5. **Bridge the pinned runtime through composition, not copied provider logic.** Workspace-free calls continue through `createByokNodeProvider`. Workspace-bearing CLI calls instantiate the exported `CodexCliProvider` or `ClaudeCliProvider` with the verified cwd and a narrow `LocalCommandRunner` decorator that injects ordered `--add-dir` arguments into generation argv. The decorator may replace Claude's empty tool list with `Read,Glob,Grep` only for workspace-bearing calls. Output parsing, auth diagnostics, model selection, timeouts, and command execution remain owned by the runtime package.
-- KTD6. **Validate in side-effect order at two boundaries.** Reject provider capability before filesystem work. The application preflights resolved alias workspaces before any interactive prompt collection, while the runtime repeats live validation immediately before credentials or provider creation for race resistance and direct callers. Keep inventory and model discovery workspace-free. Return fixed role-based failures such as `primary directory` or `additional directory 2`, and redact raw plus serialized workspace paths from downstream CLI diagnostics without registering ordinary paths as credentials.
+- KTD6. **Validate in side-effect order at two boundaries.** Reject provider and access capability before filesystem work. The application preflights resolved alias workspaces before any interactive prompt collection, while the runtime repeats live validation immediately before credentials or provider creation for race resistance and direct callers. Require write permission for read-write roots. Keep inventory and model discovery workspace-free. Return fixed role-based failures such as `primary directory` or `additional directory 2`, and redact raw plus serialized workspace paths from downstream CLI diagnostics without registering ordinary paths as credentials.
 - KTD7. **Append workspace to the shared generation seam.** Add the optional workspace as the final `RuntimeGateway.generate` and `generateWithTimeout` argument, then pass `selection.selection.workspace` once where all launcher, positional alias, `--alias`, stdin, and same-invocation first-run paths converge. Keep `--instruction` as an independent request overlay.
-- KTD8. **Capture and disclose state consistently.** Add `cwd` to `ApplicationDependencies`. Reuse one workspace-capture/composition helper in the required shortcut and legacy post-run save flows. Cloud credential shortcut flow never offers workspace. Routine UI uses `workspace` or `workspace +N` state, not paths; overwrite confirmation adds `Workspace: none → set`, `set → none`, `set → changed`, or `unchanged`.
+- KTD8. **Capture and disclose state consistently.** Add `cwd` to `ApplicationDependencies`. Reuse one workspace-capture/composition helper in the required shortcut and legacy post-run save flows. Cloud credential shortcut flow never offers workspace. Codex capture ends with a default-No warning that names create, edit, rename, and delete authority across the exact root count; Claude resolves directly to read-only. Routine UI uses `read-only workspace +N` or `read-write workspace +N`, not paths; overwrite confirmation adds `Workspace: none → set`, `set → none`, `set → changed`, or `unchanged`.
 - KTD9. **Preserve unscoped equivalence semantics.** A fresh provider/model selection may match an existing alias only when that alias has neither instructions nor workspace. Otherwise the stored alias would not reproduce the fresh run.
 
 ### High-Level Technical Design
@@ -171,10 +172,10 @@ flowchart TB
   G -->|valid| I["Exported CLI provider plus runner decorator"]
   I --> J["Verified primary cwd"]
   I --> K["Ordered repeated --add-dir arguments"]
-  I --> L["Existing read-only execution policy"]
+  I --> L["Declared read-only or Codex read-write policy"]
 ```
 
-The design keeps two paths intentionally. Existing aliases and explicit calls stay on the proven runtime factory. Only an explicitly stored, capability-checked workspace enters the adapter bridge and the broader read-only local context boundary.
+The design keeps two paths intentionally. Existing aliases and explicit calls stay on the proven runtime factory. Only an explicitly stored, capability-checked workspace enters the adapter bridge and its declared local filesystem authority boundary.
 
 ### Assumptions
 
@@ -184,7 +185,8 @@ The design keeps two paths intentionally. Existing aliases and explicit calls st
 - Additional directories preserve user order. Nested roots are allowed; only duplicate canonical identities are rejected.
 - Canonical preflight may resolve symlinks for child execution. The persisted path remains the normalized path entered at creation so the store remains understandable and moved symlinks fail predictably.
 - Current Codex CLI supports `--cd` and repeated `--add-dir`; current Claude CLI supports process cwd and repeated `--add-dir`. Older installed versions may fail through their normal stderr path.
-- Claude additional roots grant file access, not automatic loading of all project configuration. This feature promises bounded read-only access to configured roots, not merged project settings.
+- Codex `workspace-write` applies to both its cwd and repeated `--add-dir` roots. The product therefore describes one access policy across every listed directory, not separate primary/additional permissions.
+- Claude additional roots grant file access, not automatic loading of all project configuration. Claude promises bounded read-only access to configured roots, not merged project settings.
 - The current `@swartzrock/byok-runtime` 2.2.0 exported provider classes and runner types remain public for this release. A future runtime-native contract can replace the decorator without changing alias schema.
 
 ### Sequencing
@@ -234,13 +236,13 @@ Use one implementation phase and one pull request:
   2. Check capability, then preflight live roots, before resolving credentials or constructing any provider. Redact raw and serialized workspace path variants from provider-derived errors.
   3. Keep no-workspace calls on `createByokNodeProvider`.
   4. For workspace CLI calls, instantiate the exported runtime provider with the canonical primary cwd and a runner decorator that preserves argv elements while adding one `--add-dir` pair per additional root.
-  5. Retain Codex read-only sandbox args. Replace Claude's empty tool restriction with only `Read,Glob,Grep` for workspace calls while retaining safe mode, `dontAsk`, no persistence, and all other runtime-owned args.
+  5. Keep `--sandbox read-only` for read-only Codex workspaces and replace it with `--sandbox workspace-write` for read-write workspaces. Replace Claude's empty tool restriction with only `Read,Glob,Grep` for workspace calls while retaining safe mode, `dontAsk`, no persistence, and all other runtime-owned args; reject Claude read-write before launch.
   6. Preserve timeout, abort, instruction redaction, output extraction, and provider error translation.
 - **Patterns to follow:** `providerConfig`, `runtimeStageError`, the runtime package's exported provider constructors and `LocalCommandRunner`, and fake CLI fixture argv/cwd assertions.
 - **Test scenarios:**
   - Assert the complete provider capability matrix and unsupported rejection before credential resolver, factory, runner, or network activity.
   - Pass a primary-only and multi-root workspace to each CLI; assert exact canonical cwd, ordered argv, paths with spaces, model/instruction args, and abort behavior.
-  - Assert Codex remains read-only and Claude receives exactly the three read-only file tools only for workspace calls.
+  - Assert Codex enforces the declared sandbox and Claude receives exactly the three read-only file tools only for workspace calls; prove Claude read-write fails closed.
   - Reject missing, inaccessible, non-directory, and canonical duplicate roots before provider construction with no temp-cwd fallback.
   - Prove workspace-free CLI, HTTP, cloud, credential validation, discovery, and model listing behavior is unchanged.
   - Compile the CLI and prove cwd plus additional-root transport survives the production boundary.
@@ -255,20 +257,20 @@ Use one implementation phase and one pull request:
 - **Approach:**
   1. Add the process cwd to application dependencies only as the base for creation-time relative input.
   2. Capture workspace after instructions in required CLI shortcut creation and legacy post-run alias saving. Skip the entire prompt sequence for HTTP providers.
-  3. Validate primary input before collecting extras, allow blank to mean no workspace, loop extras until blank, and preserve existing cancellation/durable-save semantics.
+  3. Validate primary input before collecting extras, allow blank to mean no workspace, loop extras until blank, then ask the explicit default-No Codex write warning and preserve existing cancellation/durable-save semantics.
   4. Compose instructions and workspace without dropping either field, then pass the complete saved selection into the same-invocation first prompt and shared generation tail.
   5. Preflight the resolved workspace before prompt collection in launcher, alias-only TTY, and same-invocation first-run flows. Resolve deterministic selection before reading noninteractive prompt input so a stale alias also fails early; retain the defensive runtime check.
   6. Add state-only workspace transitions to overwrite copy and make unscoped fresh-selection alias equivalence exclude workspace-bearing records.
   7. Leave `resolveSelection`, launcher inventory membership, positional aliases, `--alias`, and `--aliases` cwd-independent.
 - **Patterns to follow:** `captureShortcutInstructions`, `prepareRequiredShortcut`, `offerAliasSave`, `instructionTransition`, `finishCreatedShortcut`, and the single `generateWithTimeout` call in `runApplication`.
 - **Test scenarios:**
-  - Create Codex and Claude aliases with skipped, primary-only, and multiple-directory workspaces; resolve relative input from injected cwd.
+  - Create Codex and Claude aliases with skipped, primary-only, and multiple-directory workspaces; resolve relative input from injected cwd; prove Codex's default-No warning and Claude's read-only default.
   - Reject invalid creation paths without saving and preserve cancellation before save versus cancellation after a durable shortcut save.
   - Run the freshly saved shortcut once and assert its complete workspace reaches generation.
   - Invoke one saved workspace alias through launcher selection, positional form, `--alias`, `--input`, stdin, and alias-only TTY prompt from unrelated caller directories.
   - Remove a configured root and prove launcher, alias-only TTY, and deterministic calls fail before prompt reads while the runtime still rejects a direct injected call before provider work.
   - Prove HTTP/cloud creation does not offer workspace and injected incompatible records fail before credentials.
-  - Overwrite set/changed/removed workspaces with default-No confirmation and path-free transition text.
+  - Overwrite set/changed/removed workspaces and changed access with default-No confirmation and path-free transition text.
   - Prove `--instruction` replacement leaves workspace active and persistent state unchanged.
   - Prove an unscoped fresh run is not described as reproducible by a workspace alias.
 - **Verification:** `bun test tests/app.test.ts` proves creation, overwrite, cancellation, global parity, privacy, and shared-tail forwarding.
@@ -280,7 +282,7 @@ Use one implementation phase and one pull request:
 - **Dependencies:** U1-U3.
 - **Files:** `src/args.ts`, `tests/args.test.ts`, `scripts/release-validate.ts`, `tests/build.test.ts`, `README.md`, `docs/manual-testing.md`, `docs/demos/llm-now-demo.tape`, `.changeset/<generated-workspace-name>.md`, `docs/ideation/2026-08-11-directory-scoped-aliases-ideation.html`, `docs/plans/2026-08-11-001-feat-multi-directory-workspace-plan.md`
 - **Approach:**
-  1. Update help and README with the interactive capture flow, global-alias versus stored-workspace distinction, provider capability matrix, machine-local plaintext warning, read-only access, and v3 downgrade recovery.
+  1. Update help and README with the interactive capture flow, global-alias versus stored-workspace distinction, provider/access capability matrix, machine-local plaintext warning, explicit access, Codex write consequences, and legacy read-only migration.
   2. Add manual cases for zero/one/many roots, invocation from another cwd, spaces, stale/moved roots, unsupported manual config, instruction independence, path privacy, and real Codex/Claude observation.
   3. Extend fake CLI and native archive validation with a v3 workspace alias whose primary and additions emit fixed presence/count markers rather than personal paths.
   4. Update the maintained VHS tape input for the new optional CLI prompts. Do not render or edit `docs/demos/demo.gif`.
@@ -300,15 +302,15 @@ Use one implementation phase and one pull request:
 - **Alias storage:** A strict v3 record adds optional machine-local paths while reusing existing global location, locking, permissions, atomic replacement, and conflict behavior.
 - **Selection:** Alias identity and visibility stay global. Workspace becomes part of record equality and reproducibility, not lookup precedence.
 - **Runtime:** One optional final gateway argument and one workspace-only CLI composition path are added. HTTP configs and discovery remain unchanged.
-- **Local data boundary:** A workspace-bearing alias grants the selected CLI read-only access to the configured roots. Routine UI hides full paths, but the alias file and child-process arguments contain them as plaintext.
+- **Local data boundary:** A workspace-bearing alias grants the selected CLI its declared access to every configured root. Read-write Codex may create, edit, rename, and delete files there. Routine UI hides full paths, but the alias file and child-process arguments contain them as plaintext.
 - **Credentials and network:** Capability and live-path failures happen before credential resolution or provider work. Existing redaction still owns downstream runtime diagnostics.
 - **Packaging:** Native fixtures must carry a temporary v3 alias and directories so compiled behavior, not only TypeScript mocks, proves cwd and additional-root transport.
-- **Agent parity:** Human and automated callers use the same globally callable alias, path preflight, read-only context, output, and failure contract. Noninteractive alias administration remains deferred.
+- **Agent parity:** Human and automated callers use the same globally callable alias, access policy, path preflight, output, and failure contract. Noninteractive alias administration remains deferred.
 
 ### Risks and Mitigations
 
 - **Pinned runtime factory cannot accept workspace.** Compose its exported providers and runner instead of editing `node_modules` or duplicating provider implementation. Focused contract tests make a future runtime upgrade failure obvious.
-- **Configured roots expose more local data.** Require an explicit saved workspace, retain Codex read-only sandboxing, enable only Claude read tools, show workspace presence, and document plaintext paths and child-process visibility.
+- **Configured roots expose more local data and can permit mutations.** Require explicit `directory_access`, use a default-No Codex write warning, retain Codex read-only sandboxing when write is declined, enable only Claude read tools, show access in workspace labels, preflight write permission, and document plaintext paths and child-process visibility.
 - **Moved or symlinked roots can drift.** Store absolute normalized paths, canonicalize immediately before launch, reject duplicates and missing roots, and never fall back.
 - **CLI flags can change across installed versions.** Assert current official contracts and exact argv in fixtures. Preserve child stderr as a clear generation error for older versions; version negotiation is deferred.
 - **New prompt steps can desynchronize demos and tests.** Centralize capture, update all interactive fixtures and the VHS source, and keep the rendered GIF as a user-owned manual gate.
@@ -338,8 +340,8 @@ Use one implementation phase and one pull request:
 - Workspace never affects provider/model identity, alias visibility, or selection precedence.
 - Unsupported providers and invalid live roots fail before credentials, providers, networks, or child processes and never fall back to temp or caller cwd.
 - V1/V2 compatibility, strict sticky v3 persistence, workspace equality, overwrite behavior, and instruction independence are proven.
-- Codex remains read-only. Claude workspace calls expose only `Read`, `Glob`, and `Grep`; workspace-free calls retain their existing tool contract.
-- Routine inventory, prompts, receipts, and overwrite text reveal workspace state without printing full paths or instructions.
+- Codex enforces the declared read-only or read-write sandbox. Claude workspace calls expose only `Read`, `Glob`, and `Grep`; Claude read-write fails closed; workspace-free calls retain their existing tool contract.
+- Routine inventory, prompts, receipts, and overwrite text reveal workspace access without printing full paths or instructions.
 - Help, README, manual tests, demo source, compiled/package validation, and the minor changeset match the implementation.
 - Every gate in the Verification Contract passes.
 - The pull request contains the ideation artifact, this plan, and only files required by this feature. `docs/demos/demo.gif` and unrelated user-owned files remain untouched.

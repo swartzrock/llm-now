@@ -4417,6 +4417,8 @@ describe("one-shot application", () => {
     const second = join(directory, "shared lib");
     await Promise.all([primary, first, second].map((path) => mkdir(path)));
     const inputMessages: string[] = [];
+    const confirmMessages: string[] = [];
+    const confirmInitialValues: Array<boolean | undefined> = [];
     let saved: AliasRecord | undefined;
     let generatedWorkspace: AliasRecord["workspace"];
     const app = dependencies({
@@ -4450,7 +4452,10 @@ describe("one-shot application", () => {
           "first prompt",
         ],
         instructions: ["Review all configured roots."],
+        confirms: [true],
         inputMessages,
+        confirmMessages,
+        confirmInitialValues,
       }),
       loadAliases: async () => ({ version: 1, aliases: {} }),
       saveAlias: async (_path, _name, selection) => {
@@ -4463,6 +4468,7 @@ describe("one-shot application", () => {
     expect(saved?.workspace).toEqual({
       primaryDirectory: primary,
       additionalDirectories: [first, second],
+      directoryAccess: "read-write",
     });
     expect(generatedWorkspace).toEqual(saved?.workspace);
     expect(inputMessages).toEqual([
@@ -4472,10 +4478,60 @@ describe("one-shot application", () => {
       "Additional workspace directory (press Enter when finished)",
       "Additional workspace directory (press Enter when finished)",
       "Additional workspace directory (press Enter when finished)",
-      "Prompt for daily · Codex CLI · default model · workspace +2",
+      "Prompt for daily · Codex CLI · default model · read-write workspace +2",
     ]);
+    expect(confirmMessages).toEqual([
+      "Allow Codex to create, edit, rename, and delete files in all 3 configured directories?",
+    ]);
+    expect(confirmInitialValues).toEqual([false]);
     expect(app.stderr.text()).toContain("workspace primary directory is unavailable");
     expect(app.stderr.text()).not.toContain(directory);
+  });
+
+  test("keeps a captured Codex workspace read-only when write access is declined", async () => {
+    const directory = await temporaryDirectory();
+    const primary = join(directory, "primary");
+    await mkdir(primary);
+    let savedWorkspace: AliasRecord["workspace"];
+    let generatedWorkspace: AliasRecord["workspace"];
+    const app = dependencies({
+      args: [],
+      cwd: directory,
+      stdin: input("", true),
+      stderrTty: true,
+      runtime: runtime({
+        providers: ["codex-cli"],
+        listModels: async () => [],
+        generate: async (_provider, _model, _prompt, _signal, _instructions, workspace) => {
+          generatedWorkspace = workspace;
+          return "read-only response";
+        },
+      }),
+      prompter: prompts({
+        choices: [
+          "launcher:create-shortcut",
+          "shortcut-source:available-provider",
+          "codex-cli",
+          false,
+        ],
+        names: ["daily", "./primary", "", "first prompt"],
+        instructions: [""],
+        confirms: [false],
+      }),
+      loadAliases: async () => ({ version: 1, aliases: {} }),
+      saveAlias: async (_path, _name, selection) => {
+        savedWorkspace = selection.workspace;
+        return "saved";
+      },
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(savedWorkspace).toEqual({
+      primaryDirectory: primary,
+      additionalDirectories: [],
+      directoryAccess: "read-only",
+    });
+    expect(generatedWorkspace).toEqual(savedWorkspace);
   });
 
   test("preflights a stale deterministic alias before reading piped input", async () => {
@@ -4497,6 +4553,7 @@ describe("one-shot application", () => {
         workspace: {
           primaryDirectory: join(directory, "missing"),
           additionalDirectories: [],
+          directoryAccess: "read-only",
         },
       }),
     });
@@ -4513,7 +4570,11 @@ describe("one-shot application", () => {
     const primary = join(directory, "primary");
     const additional = join(directory, "additional");
     await Promise.all([primary, additional].map((path) => mkdir(path)));
-    const workspace = { primaryDirectory: primary, additionalDirectories: [additional] };
+    const workspace = {
+      primaryDirectory: primary,
+      additionalDirectories: [additional],
+      directoryAccess: "read-only" as const,
+    };
     let observed: { instructions?: string; workspace?: AliasRecord["workspace"] } = {};
     const app = dependencies({
       args: ["daily", "--input", "hello", "--instruction", "temporary role"],
@@ -4579,7 +4640,11 @@ describe("one-shot application", () => {
         current: {
           provider: "codex-cli",
           model: null,
-          workspace: { primaryDirectory: oldPrimary, additionalDirectories: [] },
+          workspace: {
+            primaryDirectory: oldPrimary,
+            additionalDirectories: [],
+            directoryAccess: "read-only",
+          },
         },
         primaryInput: newPrimary,
       },
@@ -4588,7 +4653,11 @@ describe("one-shot application", () => {
         current: {
           provider: "codex-cli",
           model: null,
-          workspace: { primaryDirectory: oldPrimary, additionalDirectories: [] },
+          workspace: {
+            primaryDirectory: oldPrimary,
+            additionalDirectories: [],
+            directoryAccess: "read-only",
+          },
         },
         primaryInput: "",
       },
@@ -4597,6 +4666,7 @@ describe("one-shot application", () => {
     for (const scenario of cases) {
       const confirmMessages: string[] = [];
       const confirmInitialValues: Array<boolean | undefined> = [];
+      let savedWorkspace: AliasRecord["workspace"];
       const app = dependencies({
         args: ["--input", "hello", "--provider", "codex-cli", "--model", "default"],
         stdin: input("", true),
@@ -4604,21 +4674,33 @@ describe("one-shot application", () => {
         prompter: prompts({
           names: ["daily", scenario.primaryInput, ...(scenario.primaryInput === "" ? [] : [""])],
           instructions: [""],
-          confirms: [false],
+          confirms: scenario.primaryInput === "" ? [false] : [false, false],
           confirmMessages,
           confirmInitialValues,
         }),
-        saveAlias: async (_path, _name, _selection, options) => {
+        saveAlias: async (_path, _name, selection, options) => {
+          savedWorkspace = selection.workspace;
           expect(await options?.confirmOverwrite?.("daily", scenario.current)).toBe(false);
           return "declined";
         },
       });
 
       expect(await runApplication(app.value)).toBe(0);
-      expect(confirmInitialValues).toEqual([false]);
-      expect(confirmMessages).toHaveLength(1);
-      expect(confirmMessages[0]).toContain(`Workspace: ${scenario.transition}`);
-      expect(confirmMessages[0]).not.toContain(directory);
+      expect(confirmInitialValues).toEqual(
+        scenario.primaryInput === "" ? [false] : [false, false],
+      );
+      expect(confirmMessages).toHaveLength(scenario.primaryInput === "" ? 1 : 2);
+      const overwriteMessage = confirmMessages.at(-1) ?? "";
+      expect(overwriteMessage).toContain(`Workspace: ${scenario.transition}`);
+      expect(overwriteMessage).not.toContain(directory);
+      const expectedWorkspace: AliasRecord["workspace"] = scenario.primaryInput === ""
+        ? undefined
+        : {
+          primaryDirectory: newPrimary,
+          additionalDirectories: [],
+          directoryAccess: "read-only",
+        };
+      expect(savedWorkspace).toEqual(expectedWorkspace);
     }
   });
 });

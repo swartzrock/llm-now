@@ -328,6 +328,7 @@ describe("configuration transactions", () => {
         resolve(directory, "additional"),
         resolve(directory, "additional with spaces"),
       ],
+      directoryAccess: "read-write" as const,
     };
 
     expect(await saveConfigAlias(paths, "daily", {
@@ -361,14 +362,18 @@ describe("configuration transactions", () => {
       legacyAliasPath: join(directory, "aliases.json"),
       legacyVoicePath: join(directory, "voice-router.toml"),
     };
-    const workspace = {
+    const legacyWorkspace = {
       primaryDirectory: resolve(directory, "primary"),
       additionalDirectories: [resolve(directory, "additional")],
+    };
+    const workspace = {
+      ...legacyWorkspace,
+      directoryAccess: "read-only" as const,
     };
     const legacy = `${JSON.stringify({
       version: 3,
       aliases: {
-        review: { provider: "claude-cli", model: null, workspace },
+        review: { provider: "claude-cli", model: null, workspace: legacyWorkspace },
       },
     })}\n`;
     await writeFile(paths.legacyAliasPath, legacy);
@@ -380,6 +385,7 @@ describe("configuration transactions", () => {
         review: { provider: "claude-cli", model: "default", workspace },
       },
     });
+    expect(await readFile(paths.configPath, "utf8")).toContain('directory_access = "read-only"');
     expect(await readFile(`${paths.legacyAliasPath}.pre-unified-v1.bak`, "utf8")).toBe(legacy);
   });
 
@@ -758,19 +764,23 @@ describe("unified configuration schema", () => {
       provider = "claude-cli"
       model = "default"
       directories = ${JSON.stringify([primaryDirectory, ...additionalDirectories])}
+      directory_access = "read-only"
     `);
 
     expect(document.aliases.review?.workspace).toEqual({
       primaryDirectory,
       additionalDirectories,
+      directoryAccess: "read-only",
     });
     expect(projectAliases(document).review?.workspace).toEqual({
       primaryDirectory,
       additionalDirectories,
+      directoryAccess: "read-only",
     });
     const serialized = serializeConfigDocument(document);
     expect(serialized).not.toContain("[aliases.review.workspace]");
     expect(serialized).toContain("directories = [");
+    expect(serialized).toContain('directory_access = "read-only"');
     expect(serialized).not.toContain("primary_directory");
     expect(serialized).not.toContain("additional_directories");
     expect(serializeConfigDocument(parseConfigDocument(serialized))).toBe(serialized);
@@ -781,14 +791,17 @@ describe("unified configuration schema", () => {
       provider = "claude-cli"
       model = "default"
       directories = [${JSON.stringify(primaryDirectory)}]
+      directory_access = "read-only"
     `);
     expect(primaryOnly.aliases.review?.workspace).toEqual({
       primaryDirectory,
       additionalDirectories: [],
+      directoryAccess: "read-only",
     });
     expect(serializeConfigDocument(primaryOnly)).toContain(
       `directories = [ ${JSON.stringify(primaryDirectory)} ]`,
     );
+    expect(serializeConfigDocument(primaryOnly)).toContain('directory_access = "read-only"');
   });
 
   test("round-trips aliases canonically while retaining omission state", () => {
@@ -912,12 +925,16 @@ Keep this on two lines."""
     const primaryDirectory = resolve("workspace", "primary");
     const additionalDirectory = resolve("workspace", "additional");
     const documents = [
-      `version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\ndirectories=[${JSON.stringify(primaryDirectory)}]`,
-      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=['relative']",
-      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[]",
-      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[1]",
-      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\nextra=true`,
-      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}, ${JSON.stringify(additionalDirectory)}, ${JSON.stringify(additionalDirectory)}]`,
+      `version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='read-only'`,
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=['relative']\ndirectory_access='read-only'",
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[]\ndirectory_access='read-only'",
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[1]\ndirectory_access='read-only'",
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='read-only'\nextra=true`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}, ${JSON.stringify(additionalDirectory)}, ${JSON.stringify(additionalDirectory)}]\ndirectory_access='read-only'`,
+      `version = 1\n[aliases.slug]\nprovider='claude-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='read-write'`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]`,
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectory_access='read-only'",
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='write'`,
       `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[]`,
       `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[${JSON.stringify(primaryDirectory)}]`,
     ];

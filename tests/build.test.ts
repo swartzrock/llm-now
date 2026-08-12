@@ -246,17 +246,20 @@ describe("native release build", () => {
       expect(document).toContain("Claude CLI");
       expect(document).toContain("additional directories");
       expect(document).toContain("read-only");
+      expect(document).toContain("read-write");
       expect(document).toContain("plaintext");
     }
     expect(readme).toContain("workspace is execution context, not an availability rule");
     expect(configuration).not.toContain("[aliases.codex.workspace]");
     expect(configuration).toContain("directories = [");
+    expect(configuration).toContain('directory_access = "read-write"');
     expect(configuration).not.toContain("primary_directory");
     expect(configuration).not.toContain("additional_directories");
     expect(manualTesting).toContain("fake:instruction-present:workspace-3");
     expect(demo).toContain("Primary workspace directory \\(press Enter to skip\\)");
     expect(changeset).toContain('"llm-now": minor');
     expect(changeset).toContain("globally callable");
+    expect(changeset).toContain("default-No");
   });
 
   test("creates a deterministic archive containing one executable", () => {

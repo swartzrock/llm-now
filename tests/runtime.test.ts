@@ -141,6 +141,29 @@ function createTestGateway(
 }
 
 describe("runtime gateway", () => {
+  if (process.platform === "win32") {
+    test("launches workspace CLIs installed as Windows command shims", async () => {
+      const directory = await temporaryDirectory();
+      const primary = join(directory, "workspace");
+      const commands = join(directory, "commands");
+      await Promise.all([mkdir(primary), mkdir(commands)]);
+      await writeFile(
+        join(commands, "codex.cmd"),
+        '@echo off\r\n@echo {"type":"item.completed","item":{"type":"agent_message","text":"cmd-result"}}\r\n',
+      );
+      const gateway = createTestGateway({
+        env: { PATH: commands, PATHEXT: ".CMD" },
+        workspaceLoginShellPathLoader: async () => "",
+      });
+
+      await expect(gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
+        primaryDirectory: primary,
+        additionalDirectories: [],
+        directoryAccess: "read-only",
+      })).resolves.toBe("cmd-result");
+    });
+  }
+
   test("preserves runtime discovery order without probing providers itself", async () => {
     let calls = 0;
     const gateway = createTestGateway({
@@ -361,6 +384,7 @@ describe("runtime gateway", () => {
     await expect(gateway.generate("openai", "gpt-test", "prompt", undefined, undefined, {
       primaryDirectory: "/project",
       additionalDirectories: [],
+      directoryAccess: "read-only",
     })).rejects.toThrow("provider openai does not support alias workspaces");
     expect(credentialReads).toBe(0);
     expect(providerCalls).toBe(0);
@@ -399,10 +423,12 @@ describe("runtime gateway", () => {
         throw new Error("workspace generation must not use the provider factory");
       },
     });
-    const workspace = {
+    const writableWorkspace = {
       primaryDirectory: primary,
       additionalDirectories: [first, second],
+      directoryAccess: "read-write" as const,
     };
+    const readOnlyWorkspace = { ...writableWorkspace, directoryAccess: "read-only" as const };
 
     await expect(gateway.generate(
       "codex-cli",
@@ -410,7 +436,7 @@ describe("runtime gateway", () => {
       "prompt",
       undefined,
       "Be concise.",
-      workspace,
+      writableWorkspace,
     )).resolves.toBe("codex-result");
     await expect(gateway.generate(
       "claude-cli",
@@ -418,13 +444,22 @@ describe("runtime gateway", () => {
       "prompt",
       undefined,
       "Be concise.",
-      workspace,
+      readOnlyWorkspace,
     )).resolves.toBe("claude-result");
+    await expect(gateway.generate(
+      "codex-cli",
+      "gpt-test",
+      "prompt",
+      undefined,
+      "Be concise.",
+      readOnlyWorkspace,
+    )).resolves.toBe("codex-result");
 
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(3);
     expect(requests.map((request) => request.command)).toEqual([
       "/trusted/codex",
       "/trusted/claude",
+      "/trusted/codex",
     ]);
     expect(requests[0]?.cwd).toBe(primary);
     expect(requests[0]?.args).toEqual([
@@ -435,7 +470,7 @@ describe("runtime gateway", () => {
       second,
       "--skip-git-repo-check",
       "--sandbox",
-      "read-only",
+      "workspace-write",
       "--json",
       "-c",
       'developer_instructions="Be concise."',
@@ -467,6 +502,31 @@ describe("runtime gateway", () => {
       "--add-dir",
       second,
     ]);
+    expect(requests[2]?.args).toEqual([
+      "exec",
+      "--add-dir",
+      first,
+      "--add-dir",
+      second,
+      "--skip-git-repo-check",
+      "--sandbox",
+      "read-only",
+      "--json",
+      "-c",
+      'developer_instructions="Be concise."',
+      "--model",
+      "gpt-test",
+    ]);
+
+    await expect(gateway.generate(
+      "claude-cli",
+      "claude-test",
+      "prompt",
+      undefined,
+      undefined,
+      writableWorkspace,
+    )).rejects.toThrow("provider claude-cli does not support read-write alias workspaces");
+    expect(requests).toHaveLength(3);
   });
 
   test("ignores relative PATH entries before running a workspace CLI", async () => {
@@ -505,12 +565,14 @@ describe("runtime gateway", () => {
     await expect(gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
       primaryDirectory: primary,
       additionalDirectories: [],
+      directoryAccess: "read-only",
     })).resolves.toBe("trusted-result");
     expect(requests).toHaveLength(1);
     expect(requests[0]?.command).toBe(trustedExecutable);
 
     const relativeOnly = createTestGateway({
       env: { PATH: "." },
+      workspaceLoginShellPathLoader: async () => "",
       workspaceRunner: {
         run: async () => {
           throw new Error("relative workspace executable must not run");
@@ -520,7 +582,129 @@ describe("runtime gateway", () => {
     await expect(relativeOnly.generate("codex-cli", null, "prompt", undefined, undefined, {
       primaryDirectory: primary,
       additionalDirectories: [],
+      directoryAccess: "read-only",
     })).rejects.toThrow("codex was not found in an absolute PATH directory");
+  });
+
+  test("resolves workspace CLIs from the login-shell PATH used by ordinary aliases", async () => {
+    const directory = await temporaryDirectory();
+    const primary = join(directory, "workspace");
+    const trusted = join(directory, "login-shell-bin");
+    const executableName = process.platform === "win32" ? "codex.exe" : "codex";
+    const trustedExecutable = join(trusted, executableName);
+    await Promise.all([mkdir(primary), mkdir(trusted)]);
+    await writeFile(trustedExecutable, "trusted executable");
+    if (process.platform !== "win32") await chmod(trustedExecutable, 0o755);
+    const requests: LocalCommandRequest[] = [];
+    const gateway = createTestGateway({
+      env: { PATH: "." },
+      workspaceLoginShellPathLoader: async () => `${trusted}${delimiter}.`,
+      workspaceRunner: {
+        run: async (request) => {
+          requests.push(request);
+          return {
+            stdout: `${JSON.stringify({
+              type: "item.completed",
+              item: { type: "agent_message", text: "login-shell-result" },
+            })}\n`,
+            stderr: "",
+            exitCode: 0,
+          };
+        },
+      },
+    });
+
+    await expect(gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
+      primaryDirectory: primary,
+      additionalDirectories: [],
+      directoryAccess: "read-only",
+    })).resolves.toBe("login-shell-result");
+    expect(requests[0]?.command).toBe(trustedExecutable);
+  });
+
+  test("aborts a pending workspace preflight before command resolution", async () => {
+    const root = new AbortController();
+    let resolverCalls = 0;
+    let runnerCalls = 0;
+    const gateway = createTestGateway({
+      env: {},
+      workspacePreflight: async () => new Promise(() => undefined),
+      workspaceCommandResolver: async () => {
+        resolverCalls += 1;
+        return "/trusted/codex";
+      },
+      workspaceRunner: {
+        run: async () => {
+          runnerCalls += 1;
+          throw new Error("runner must not start");
+        },
+      },
+    });
+    const generation = gateway.generate("codex-cli", null, "prompt", root.signal, undefined, {
+      primaryDirectory: "/pending/primary",
+      additionalDirectories: [],
+      directoryAccess: "read-only",
+    });
+    root.abort(new Error("cancel pending preflight"));
+
+    await expect(generation).rejects.toThrow("cancel pending preflight");
+    expect(resolverCalls).toBe(0);
+    expect(runnerCalls).toBe(0);
+  });
+
+  test("requires write permission only for read-write workspaces", async () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const directory = await temporaryDirectory();
+    const primary = join(directory, "read-only-root");
+    await mkdir(primary, { mode: 0o555 });
+    await chmod(primary, 0o555);
+    let resolverCalls = 0;
+    let runnerCalls = 0;
+    const gateway = createTestGateway({
+      env: {},
+      workspaceCommandResolver: async () => {
+        resolverCalls += 1;
+        return "/trusted/codex";
+      },
+      workspaceRunner: {
+        run: async () => {
+          runnerCalls += 1;
+          return {
+            stdout: `${JSON.stringify({
+              type: "item.completed",
+              item: { type: "agent_message", text: "read-only-result" },
+            })}\n`,
+            stderr: "",
+            exitCode: 0,
+          };
+        },
+      },
+    });
+    const readOnlyWorkspace = {
+      primaryDirectory: primary,
+      additionalDirectories: [],
+      directoryAccess: "read-only" as const,
+    };
+
+    await expect(gateway.generate(
+      "codex-cli",
+      null,
+      "prompt",
+      undefined,
+      undefined,
+      readOnlyWorkspace,
+    )).resolves.toBe("read-only-result");
+    await expect(gateway.generate(
+      "codex-cli",
+      null,
+      "prompt",
+      undefined,
+      undefined,
+      { ...readOnlyWorkspace, directoryAccess: "read-write" },
+    )).rejects.toThrow("workspace primary directory is unavailable");
+    expect(resolverCalls).toBe(1);
+    expect(runnerCalls).toBe(1);
+    await chmod(primary, 0o755);
   });
 
   test("preflights live roots and redacts paths from CLI failures", async () => {
@@ -544,6 +728,7 @@ describe("runtime gateway", () => {
       await gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
         primaryDirectory: primary,
         additionalDirectories: [additional],
+        directoryAccess: "read-only",
       });
       throw new Error("expected generation to fail");
     } catch (error) {
@@ -557,12 +742,14 @@ describe("runtime gateway", () => {
     await expect(gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
       primaryDirectory: join(directory, "not-a-directory"),
       additionalDirectories: [],
+      directoryAccess: "read-only",
     })).rejects.toThrow("workspace primary directory is not a directory");
     expect(runnerCalls).toBe(1);
 
     await expect(gateway.generate("codex-cli", null, "prompt", undefined, undefined, {
       primaryDirectory: join(directory, "missing"),
       additionalDirectories: [],
+      directoryAccess: "read-only",
     })).rejects.toThrow("workspace primary directory is unavailable");
     expect(runnerCalls).toBe(1);
   });

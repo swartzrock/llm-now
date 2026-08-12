@@ -43,10 +43,14 @@ if (args[0] === "exec") {
   const additions = addDirectoryIndexes.map((index) => args[index + 1]);
   const isWorkspaceInvocation = expectedWorkspacePrimary !== undefined
     && process.cwd() === expectedWorkspacePrimary;
+  const sandboxIndex = args.indexOf("--sandbox");
+  const expectedSandbox = isWorkspaceInvocation ? "workspace-write" : "read-only";
   if (
     (isWorkspaceInvocation
       && JSON.stringify(additions) !== JSON.stringify(expectedWorkspaceAdditions))
     || (!isWorkspaceInvocation && additions.length !== 0)
+    || sandboxIndex === -1
+    || args[sandboxIndex + 1] !== expectedSandbox
   ) {
     console.error("unexpected fake CLI workspace configuration");
     process.exit(2);
