@@ -192,6 +192,9 @@ function diagnosticWriter(
       redactVoiceRequestValues(text, requestValues),
       deps.env,
       deps.sensitive,
+    ).replace(
+      /^Selecting alias '[a-z0-9][a-z0-9_-]{0,63}'$/gm,
+      "diagnostic: $&",
     );
     deps.stderr.write(`${sanitized}${sanitized.endsWith("\n") ? "" : "\n"}`);
   };

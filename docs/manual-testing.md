@@ -381,19 +381,30 @@ Cancel before and after each durable boundary. Pre-write cancellation must exit 
 
 ### MT-10A: Observe packaged voice selection before fake generation
 
-On macOS or Linux, use the packaged `$BIN`, isolated fake `daily` shortcut, and
-compiled maintained fake Codex fixture from MT-10. Move the fixture behind a
-temporary gate wrapper:
+On macOS or Linux, use the packaged `$BIN` and an isolated `daily` shortcut
+that targets `codex-cli` with the SC-02 instructions. Compile the maintained
+fake Codex fixture from a source checkout, then place a temporary gate wrapper
+in front of it. The packaged `llm-now` executable still runs outside the source
+checkout and does not require Bun or Node.js:
 
 ```bash
-mv "$TEST_ROOT/bin/codex" "$TEST_ROOT/bin/codex-fixture"
+LLM_NOW_SOURCE="/absolute/path/to/llm-now2"
+bun build "$LLM_NOW_SOURCE/tests/fixtures/fake-cli.ts" --compile \
+  --outfile "$TEST_ROOT/bin/codex-fixture"
+
 export LLM_NOW_TEST_FAKE_CODEX="$TEST_ROOT/bin/codex-fixture"
 export LLM_NOW_TEST_GENERATION_GATE="$TEST_ROOT/release-generation"
 export LLM_NOW_TEST_GENERATION_STARTED="$TEST_ROOT/generation-started"
+export LLM_NOW_TEST_STDERR="$TEST_ROOT/work/stderr.txt"
+export LLM_NOW_TEST_STDERR_AT_GENERATION="$TEST_ROOT/stderr-at-generation-start.txt"
+export PATH="$TEST_ROOT/bin:/usr/bin:/bin"
+export SHELL="$TEST_ROOT/bin/missing-login-shell"
+test -x "$LLM_NOW_TEST_FAKE_CODEX"
 
 cat >"$TEST_ROOT/bin/codex" <<'SH'
 #!/bin/sh
 if [ "$1" = "exec" ]; then
+  /bin/cp "$LLM_NOW_TEST_STDERR" "$LLM_NOW_TEST_STDERR_AT_GENERATION"
   : >"$LLM_NOW_TEST_GENERATION_STARTED"
   while [ ! -e "$LLM_NOW_TEST_GENERATION_GATE" ]; do
     /bin/sleep 0.05
@@ -408,7 +419,9 @@ From the isolated work directory, start a fuzzy route in the background and
 wait only for its stderr output:
 
 ```bash
-rm -f "$LLM_NOW_TEST_GENERATION_GATE" "$LLM_NOW_TEST_GENERATION_STARTED" stdout.bin stderr.txt
+rm -f "$LLM_NOW_TEST_GENERATION_GATE" "$LLM_NOW_TEST_GENERATION_STARTED" \
+  "$LLM_NOW_TEST_STDERR_AT_GENERATION" stdout.bin stderr.txt
+printf "Selecting alias 'daily'\n" >expected-stderr.txt
 "$BIN" --voice-route --input "dail, smoke" >stdout.bin 2>stderr.txt &
 ROUTE_PID=$!
 
@@ -419,8 +432,8 @@ while { [ ! -s stderr.txt ] || [ ! -e "$LLM_NOW_TEST_GENERATION_STARTED" ]; } \
   /bin/sleep 0.05
 done
 
-printf "Selecting alias 'daily'\n" >expected-stderr.txt
 test -e "$LLM_NOW_TEST_GENERATION_STARTED"
+/usr/bin/cmp expected-stderr.txt "$LLM_NOW_TEST_STDERR_AT_GENERATION"
 /usr/bin/cmp expected-stderr.txt stderr.txt
 test ! -s stdout.bin
 kill -0 "$ROUTE_PID"

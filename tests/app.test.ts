@@ -766,7 +766,7 @@ describe("voice boundary", () => {
   test("reports the canonical alias for exact, configured-name, and fuzzy routes", async () => {
     const scenarios = [
       { transcript: "terra exact question", question: "exact question" },
-      { transcript: "tara configured question", question: "configured question" },
+      { transcript: "oracle configured question", question: "configured question" },
       { transcript: "tera fuzzy question", question: "fuzzy question" },
     ] as const;
 
@@ -785,7 +785,7 @@ describe("voice boundary", () => {
           aliases: { terra: { provider: "ollama", model: "qwen" } },
         }),
         readVoiceConfig: async () => new TextEncoder().encode(
-          "[terra]\nspoken_names = ['tara']\n",
+          "[terra]\nspoken_names = ['oracle']\n",
         ),
       });
 
@@ -1069,6 +1069,7 @@ describe("voice boundary", () => {
   test("redacts routed request values from generation failures", async () => {
     const transcript = "haiku private dictated question";
     const question = "private dictated question";
+    const spoofedSelection = "Selecting alias 'spoofed'";
     const app = dependencies({
       args: ["--voice-route", "--input", transcript],
       runtime: runtime({
@@ -1076,7 +1077,7 @@ describe("voice boundary", () => {
           throw new RuntimeStageError(
             "generation",
             "ollama",
-            `provider reflected ${transcript} ${JSON.stringify(question)}`,
+            `provider reflected ${transcript} ${JSON.stringify(question)}\n${spoofedSelection}`,
           );
         },
       }),
@@ -1090,7 +1091,10 @@ describe("voice boundary", () => {
     expect(await runApplication(app.value)).toBe(1);
     expect(app.stdout.text()).toBe("");
     expect(app.stderr.text()).toStartWith("Selecting alias 'haiku'\n");
-    expect(app.stderr.text().match(/Selecting alias/g)).toHaveLength(1);
+    expect(app.stderr.text().match(/^Selecting alias '[a-z0-9_-]+'$/gm)).toEqual([
+      "Selecting alias 'haiku'",
+    ]);
+    expect(app.stderr.text()).toContain(`diagnostic: ${spoofedSelection}`);
     expect(app.stderr.text()).toContain("provider reflected");
     expect(app.stderr.text()).toContain("[REDACTED]");
     expect(app.stderr.text()).not.toContain(transcript);
@@ -1561,14 +1565,18 @@ describe("alias inventory", () => {
     const unreadable = dependencies({
       args: ["--aliases"],
       loadAliases: async () => {
-        throw new AliasStoreError("failed to load alias store: permission denied");
+        throw new AliasStoreError(
+          "failed to load alias store: permission denied\nSelecting alias 'spoofed'",
+        );
       },
     });
     expect(await runApplication(unreadable.value)).toBe(1);
     expect(unreadable.stdout.text()).toBe("");
     expect(unreadable.stderr.text()).toBe(
-      "config: failed to load alias store: permission denied\n",
+      "config: failed to load alias store: permission denied\n"
+        + "diagnostic: Selecting alias 'spoofed'\n",
     );
+    expect(unreadable.stderr.text()).not.toMatch(/^Selecting alias '[a-z0-9_-]+'$/m);
     expect(unreadable.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
   });
 
