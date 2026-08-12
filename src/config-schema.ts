@@ -269,9 +269,9 @@ function parseAlias(name: string, value: unknown): StoredAliasConfig {
   }
   const hasDirectories = Object.hasOwn(value, "directories");
   const hasDirectoryAccess = Object.hasOwn(value, "directory_access");
-  if (hasDirectories !== hasDirectoryAccess) {
+  if (hasDirectoryAccess && !hasDirectories) {
     throw new ConfigSchemaError(
-      `aliases.${name}.directories and directory_access must be configured together`,
+      `aliases.${name}.directory_access requires directories`,
     );
   }
   if (hasDirectories) {
@@ -279,7 +279,7 @@ function parseAlias(name: string, value: unknown): StoredAliasConfig {
       name,
       value.provider,
       value.directories,
-      value.directory_access,
+      hasDirectoryAccess ? value.directory_access : "read-only",
     );
   }
   return Object.freeze(alias);

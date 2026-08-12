@@ -146,10 +146,11 @@ remains globally callable: its workspace is execution context, not an availabili
 | Ollama and LM Studio | Rejected | None |
 | Cloud API providers | Rejected | None |
 
-Every workspace explicitly stores its access mode. Read-write Codex workspaces
-allow Codex to create, edit, rename, and delete files in every configured
-directory; the interactive grant is an explicit confirmation that defaults to
-No. Read-only Codex workspaces keep its read-only sandbox, while Claude receives
+Every workspace has an access mode; omitting `directory_access` defaults to
+read-only, while read-write must be explicit. Read-write Codex workspaces allow
+Codex to create, edit, rename, and delete files in every configured directory;
+the interactive grant is an explicit confirmation that defaults to No.
+Read-only Codex workspaces keep its read-only sandbox, while Claude receives
 only the `Read`, `Glob`, and `Grep` file tools. Workspace paths are machine-local
 plaintext in `config.toml` and may appear in child-process arguments or local
 audit tools. A CLI may send file content it reads to the selected Codex or

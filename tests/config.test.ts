@@ -804,6 +804,25 @@ describe("unified configuration schema", () => {
     expect(serializeConfigDocument(primaryOnly)).toContain('directory_access = "read-only"');
   });
 
+  test("defaults omitted directory access to read-only", () => {
+    const primaryDirectory = resolve("workspace", "primary");
+    const document = parseConfigDocument(`
+      version = 1
+      [aliases.review]
+      provider = "codex-cli"
+      model = "default"
+      directories = [${JSON.stringify(primaryDirectory)}]
+    `);
+
+    expect(document.aliases.review?.workspace).toEqual({
+      primaryDirectory,
+      additionalDirectories: [],
+      directoryAccess: "read-only",
+    });
+    expect(projectAliases(document).review?.workspace?.directoryAccess).toBe("read-only");
+    expect(serializeConfigDocument(document)).toContain('directory_access = "read-only"');
+  });
+
   test("round-trips aliases canonically while retaining omission state", () => {
     const document = parseConfigDocument(`
       # removed by canonical rewrite
@@ -932,7 +951,6 @@ Keep this on two lines."""
       `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='read-only'\nextra=true`,
       `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}, ${JSON.stringify(additionalDirectory)}, ${JSON.stringify(additionalDirectory)}]\ndirectory_access='read-only'`,
       `version = 1\n[aliases.slug]\nprovider='claude-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='read-write'`,
-      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]`,
       "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectory_access='read-only'",
       `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='write'`,
       `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[]`,

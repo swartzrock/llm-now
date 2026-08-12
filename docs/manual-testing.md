@@ -436,9 +436,10 @@ directory_access = "read-write"
 
 The list must contain at least one directory. Its first entry is the primary
 working directory and all later entries are ordered additional roots. A
-primary-only workspace therefore stores a one-item list; no workspace omits
-both `directories` and `directory_access`. When either field is present, both
-are required.
+primary-only workspace therefore stores a one-item list. Manually remove
+`directory_access` and confirm the workspace loads as read-only and is
+canonically rewritten with `directory_access = "read-only"` on the next save.
+Setting `directory_access` without `directories` must fail.
 
 For Codex, confirm that finishing the directory list shows `Allow Codex to
 create, edit, rename, and delete files in all 3 configured directories?` with

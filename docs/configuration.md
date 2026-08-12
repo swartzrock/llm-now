@@ -65,12 +65,12 @@ directories = ["/absolute/project", "/absolute/shared", "/absolute/reference mat
 directory_access = "read-write"
 ```
 
-`directories` and `directory_access` are optional as a pair. If either is
-present, both are required. `directories` must contain at least one absolute,
-unique path. The first directory is the CLI working directory; remaining
-entries are additional directories in their listed order. `directory_access` must be
-`"read-only"` or `"read-write"`. Omit both fields when the shortcut has no
-workspace.
+`directories` must contain at least one absolute, unique path. The first
+directory is the CLI working directory; remaining entries are additional
+directories in their listed order. `directory_access` may be `"read-only"` or
+`"read-write"`; omitting it defaults the workspace to read-only. Setting
+`directory_access` without `directories` is invalid. Omit `directories` when
+the shortcut has no workspace.
 
 Codex supports both access modes. `"read-write"` allows Codex to create, edit,
 rename, and delete files in every configured directory, including the first
