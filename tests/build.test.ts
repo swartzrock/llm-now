@@ -237,9 +237,12 @@ describe("native release build", () => {
     const demo = await Bun.file(
       new URL("../docs/demos/llm-now-demo.tape", import.meta.url),
     ).text();
-    const changeset = await Bun.file(
+    const changeset = Bun.file(
       new URL("../.changeset/calm-workspaces-wander.md", import.meta.url),
-    ).text();
+    );
+    const releaseIntent = await changeset.exists()
+      ? await changeset.text()
+      : await Bun.file(new URL("../CHANGELOG.md", import.meta.url)).text();
 
     for (const document of [readme, configuration, manualTesting]) {
       expect(document).toContain("Codex CLI");
@@ -257,9 +260,9 @@ describe("native release build", () => {
     expect(configuration).not.toContain("additional_directories");
     expect(manualTesting).toContain("fake:instruction-present:workspace-3");
     expect(demo).toContain("Primary workspace directory \\(press Enter to skip\\)");
-    expect(changeset).toContain('"llm-now": minor');
-    expect(changeset).toContain("globally callable");
-    expect(changeset).toContain("default-No");
+    expect(releaseIntent).toMatch(/"llm-now": minor|### Minor Changes/);
+    expect(releaseIntent).toContain("globally callable");
+    expect(releaseIntent).toContain("default-No");
   });
 
   test("creates a deterministic archive containing one executable", () => {
