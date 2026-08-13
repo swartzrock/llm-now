@@ -6,6 +6,7 @@ import { promptValidationMessage } from "../src/io.ts";
 import {
   createSearchablePrompter,
   createTerminalColors,
+  formatAliasInventory,
   formatSelection,
   NO_PROVIDER_DIAGNOSTIC,
   selectAlias,
@@ -68,6 +69,25 @@ function choices(
 }
 
 describe("terminal alias selection", () => {
+  test("shows workspace state without exposing saved paths", () => {
+    const workspace = {
+      primaryDirectory: "/Users/test/secret-project",
+      additionalDirectories: ["/Users/test/shared-one", "/Users/test/shared two"],
+      directoryAccess: "read-write" as const,
+    };
+
+    expect(formatSelection({ provider: "codex-cli", model: null, workspace })).toBe(
+      "Codex CLI · default model · read-write workspace +2",
+    );
+    const inventory = formatAliasInventory({
+      daily: { provider: "codex-cli", model: null, workspace },
+      plain: { provider: "ollama", model: "llama3" },
+    });
+    expect(inventory).toContain("daily → Codex CLI · provider default · read-write workspace +2");
+    expect(inventory).toContain("plain → Ollama · llama3");
+    expect(inventory).not.toContain("/Users/test");
+  });
+
   test("presents sorted sanitized aliases only and returns the exact alias snapshot", async () => {
     const unsafeAlias = "\u001b[31mZulu-secret";
     const aliases = {

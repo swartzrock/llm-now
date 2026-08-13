@@ -1,7 +1,7 @@
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
-import { resolveAliasPath, saveAlias } from "../src/aliases";
+import { resolveConfigPaths, saveConfigAlias } from "../src/config";
 
 if (
   packageMetadata.dependencies["@3leaps/string-metrics-wasm"] !== "0.3.11"
@@ -11,7 +11,8 @@ if (
 }
 
 const directory = await mkdtemp(join(process.cwd(), ".tmp-runtime-"));
-const fakeCli = join(directory, process.platform === "win32" ? "codex.exe" : "codex");
+const fakeCodex = join(directory, process.platform === "win32" ? "codex.exe" : "codex");
+const fakeClaude = join(directory, process.platform === "win32" ? "claude.exe" : "claude");
 const spike = join(
   directory,
   process.platform === "win32" ? "llm-now-spike.exe" : "llm-now-spike",
@@ -30,24 +31,51 @@ const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each a
 const overrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
 
 try {
+  const invocationDirectory = join(directory, "caller");
+  const workspacePrimary = join(directory, "workspace", "primary");
+  const workspaceAdditions = [
+    join(directory, "workspace", "additional"),
+    join(directory, "workspace", "additional with spaces"),
+  ];
+  await Promise.all([
+    mkdir(invocationDirectory, { recursive: true }),
+    mkdir(workspacePrimary, { recursive: true }),
+    ...workspaceAdditions.map((path) => mkdir(path, { recursive: true })),
+  ]);
   const configHome = join(directory, "config");
   const aliasEnvironment = process.platform === "win32"
     ? { APPDATA: configHome }
     : { XDG_CONFIG_HOME: configHome };
-  const aliasPath = resolveAliasPath({
+  const configPaths = resolveConfigPaths({
     platform: process.platform,
     home: directory,
     env: aliasEnvironment,
   });
-  await saveAlias(aliasPath, "Daily", {
+  await saveConfigAlias(configPaths, "Daily", {
     provider: "codex-cli",
     model: null,
     instructions: smokeInstructions,
+    workspace: {
+      primaryDirectory: workspacePrimary,
+      additionalDirectories: workspaceAdditions,
+      directoryAccess: "read-write",
+    },
+  });
+  await saveConfigAlias(configPaths, "Review", {
+    provider: "claude-cli",
+    model: null,
+    instructions: smokeInstructions,
+    workspace: {
+      primaryDirectory: workspacePrimary,
+      additionalDirectories: workspaceAdditions,
+      directoryAccess: "read-only",
+    },
   });
   await Bun.write(shortcutInput, "daily, smoke");
 
   const builds: Array<[string, string]> = [
-    [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCli],
+    [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeCodex],
+    [join(import.meta.dir, "fixtures/fake-cli.ts"), fakeClaude],
     [join(import.meta.dir, "fixtures/runtime-smoke-entry.ts"), runtimeSmoke],
     [join(import.meta.dir, "fixtures/voice-routing-compile-entry.ts"), voiceRoutingSmoke],
     ...(process.platform === "darwin"
@@ -78,6 +106,8 @@ try {
       ? {}
       : { SHELL: join(directory, "missing-login-shell") }),
     ...aliasEnvironment,
+    LLM_NOW_FAKE_WORKSPACE_PRIMARY: workspacePrimary,
+    LLM_NOW_FAKE_WORKSPACE_ADDITIONS: JSON.stringify(workspaceAdditions),
   };
   const voiceProcessCase = {
     name: "voice process stream boundary",
@@ -99,7 +129,7 @@ try {
     {
       name: "runtime boundary",
       executable: runtimeSmoke,
-      args: [fakeCli, directory],
+      args: [fakeCodex, invocationDirectory],
       exitCode: 0,
       stdout: "http-ok\nfake:instruction-absent\nconfig-defaults-ok\nmigration-routing-ok\n",
       stderr: "",
@@ -113,6 +143,7 @@ try {
       stdoutLandmarks: [
         "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--speak]\n  llm-now --provider <id> --model <id|default> [--input <text>]",
         "Notes:\n  Run without arguments to open the interactive launcher.\n  Read input from --input, stdin, or a terminal prompt; choose one.",
+        "A workspace fixes execution to one primary directory plus ordered additional directories.\n  Saved shortcuts remain global; a stored workspace does not restrict where you can call one.\n  Codex CLI and Claude CLI support workspaces; local HTTP servers and cloud APIs reject them.",
         "Options:\n  --aliases            List saved shortcuts\n  --config-path        Print the config.toml path\n  --migrate-config     Migrate legacy configuration to config.toml\n  --voice-route        Parse “[wake word] <shortcut> <question>” from input",
         "API key environment variables:\n  ANTHROPIC_API_KEY     DEEPINFRA_TOKEN",
         "  OPENROUTER_API_KEY    XAI_API_KEY",
@@ -168,7 +199,7 @@ try {
       executable: spike,
       args: ["dAiLy", "--input", "smoke"],
       exitCode: 0,
-      stdout: "fake:instruction-present",
+      stdout: "fake:instruction-present:workspace-3",
       stderr: "",
     },
     {
@@ -176,7 +207,7 @@ try {
       executable: spike,
       args: ["--voice-route", "--input", "dail, smoke"],
       exitCode: 0,
-      stdout: "fake:instruction-present",
+      stdout: "fake:instruction-present:workspace-3",
       stderr: "Selecting alias 'daily'\n",
     },
     {
@@ -185,7 +216,7 @@ try {
       args: ["--voice-route"],
       stdin: Bun.file(shortcutInput),
       exitCode: 0,
-      stdout: "fake:instruction-present",
+      stdout: "fake:instruction-present:workspace-3",
       stderr: "Selecting alias 'daily'\n",
     },
     ...(process.platform === "darwin" ? [voiceProcessCase] : [{
@@ -201,14 +232,22 @@ try {
       executable: spike,
       args: ["dAiLy", "--input", "smoke", "--instruction", overrideInstructions],
       exitCode: 0,
-      stdout: "fake:instruction-override",
+      stdout: "fake:instruction-override:workspace-3",
+      stderr: "",
+    },
+    {
+      name: "fake Claude generation through positional alias",
+      executable: spike,
+      args: ["review", "--input", "smoke"],
+      exitCode: 0,
+      stdout: "fake:claude-instruction-present:workspace-3",
       stderr: "",
     },
   ] as const;
 
-  for (const smoke of cases) {
-    const result = Bun.spawnSync([smoke.executable, ...smoke.args], {
-      cwd: directory,
+    for (const smoke of cases) {
+      const result = Bun.spawnSync([smoke.executable, ...smoke.args], {
+      cwd: invocationDirectory,
       env,
       stdin: "stdin" in smoke ? smoke.stdin : new Uint8Array(),
     });

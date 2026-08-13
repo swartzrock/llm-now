@@ -1,5 +1,5 @@
 # A short, credential-free instructed-shortcut demo:
-# hook → create with instructions → first run → saved reuse → install CTA.
+# hook → create with instructions and no workspace → first run → saved reuse → install CTA.
 #
 # Render from the repository root with:
 #   mkdir -p .tmp-llm-now-demo
@@ -91,6 +91,8 @@ Type `Use "quoted" runtime smoke \ transport.`
 Enter
 Type "Keep each answer concise."
 Tab
+Enter
+Wait+Screen@10 s /Primary workspace directory \(press Enter to skip\)/
 Enter
 Wait+Screen@10 s /Saved shortcut explain → Codex CLI · fake-model/
 Sleep 1500 ms

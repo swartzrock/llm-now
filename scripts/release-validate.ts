@@ -6,6 +6,7 @@ import {
   NATIVE_VAULT_COMPATIBILITY,
   type NativeVaultTarget,
 } from "../src/credentials.ts";
+import { serializeConfigDocument } from "../src/config-schema.ts";
 import {
   RELEASE_TARGETS,
   archiveName,
@@ -466,19 +467,22 @@ async function smoke(archivePath: string): Promise<void> {
       }
     }
 
-    const fakeCli = join(temporary, process.platform === "win32" ? "codex.exe" : "codex");
-    const fakeBuild = await Bun.build({
-      entrypoints: [join(import.meta.dir, "../tests/fixtures/fake-cli.ts")],
-      compile: {
-        outfile: fakeCli,
-        autoloadDotenv: false,
-        autoloadBunfig: false,
-        autoloadTsconfig: false,
-        autoloadPackageJson: false,
-      },
-    });
-    if (!fakeBuild.success) throw new AggregateError(fakeBuild.logs, "failed to compile fake CLI");
-    if (process.platform !== "win32") await chmod(fakeCli, 0o755);
+    const fakeCodex = join(temporary, process.platform === "win32" ? "codex.exe" : "codex");
+    const fakeClaude = join(temporary, process.platform === "win32" ? "claude.exe" : "claude");
+    for (const fakeCli of [fakeCodex, fakeClaude]) {
+      const fakeBuild = await Bun.build({
+        entrypoints: [join(import.meta.dir, "../tests/fixtures/fake-cli.ts")],
+        compile: {
+          outfile: fakeCli,
+          autoloadDotenv: false,
+          autoloadBunfig: false,
+          autoloadTsconfig: false,
+          autoloadPackageJson: false,
+        },
+      });
+      if (!fakeBuild.success) throw new AggregateError(fakeBuild.logs, "failed to compile fake CLI");
+      if (process.platform !== "win32") await chmod(fakeCli, 0o755);
+    }
 
     await Bun.write(join(temporary, ".env"), "OPENAI_API_KEY=must-not-autoload\n");
     await Bun.write(join(temporary, "bunfig.toml"), "this is intentionally invalid");
@@ -486,19 +490,48 @@ async function smoke(archivePath: string): Promise<void> {
     await Bun.write(join(temporary, "package.json"), "this is intentionally invalid");
 
     const configHome = join(temporary, "config");
+    const invocationDirectory = join(temporary, "caller");
+    const workspacePrimary = join(temporary, "workspace", "primary");
+    const workspaceAdditions = [
+      join(temporary, "workspace", "additional"),
+      join(temporary, "workspace", "additional with spaces"),
+    ];
     await mkdir(join(configHome, "llm-now"), { recursive: true });
+    await Promise.all([
+      mkdir(invocationDirectory, { recursive: true }),
+      mkdir(workspacePrimary, { recursive: true }),
+      ...workspaceAdditions.map((path) => mkdir(path, { recursive: true })),
+    ]);
     const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
-    await Bun.write(join(configHome, "llm-now", "aliases.json"), `${JSON.stringify({
-      version: 2,
-      aliases: {
-        zeta: { provider: "openai", model: "gpt-5" },
+    await Bun.write(
+      join(configHome, "llm-now", "config.toml"),
+      serializeConfigDocument({
+        version: 1,
         aliases: {
-          provider: "codex-cli",
-          model: null,
-          instructions: smokeInstructions,
+          zeta: { provider: "openai", model: "gpt-5" },
+          aliases: {
+            provider: "codex-cli",
+            model: "default",
+            instructions: smokeInstructions,
+            workspace: {
+              primaryDirectory: workspacePrimary,
+              additionalDirectories: workspaceAdditions,
+              directoryAccess: "read-write",
+            },
+          },
+          review: {
+            provider: "claude-cli",
+            model: "default",
+            instructions: smokeInstructions,
+            workspace: {
+              primaryDirectory: workspacePrimary,
+              additionalDirectories: workspaceAdditions,
+              directoryAccess: "read-only",
+            },
+          },
         },
-      },
-    }, null, 2)}\n`);
+      }),
+    );
     const aliasEnvironment = process.platform === "win32"
       ? { APPDATA: configHome }
       : { XDG_CONFIG_HOME: configHome };
@@ -512,6 +545,8 @@ async function smoke(archivePath: string): Promise<void> {
       PATH: temporary,
       ...(process.platform === "win32" ? {} : { SHELL: join(temporary, "missing-login-shell") }),
       ...aliasEnvironment,
+      LLM_NOW_FAKE_WORKSPACE_PRIMARY: workspacePrimary,
+      LLM_NOW_FAKE_WORKSPACE_ADDITIONS: JSON.stringify(workspaceAdditions),
     };
     const cases = [
       { name: "help", args: ["--help"], code: 0, stdoutIncludes: "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--speak]\n  llm-now --provider <id> --model <id|default> [--input <text>]", stderrIncludes: "" },
@@ -528,23 +563,30 @@ async function smoke(archivePath: string): Promise<void> {
         name: "alias inventory",
         args: ["--aliases"],
         code: 0,
-        stdout: "aliases → Codex CLI · provider default\nzeta → OpenAI · gpt-5\n",
+        stdout: "aliases → Codex CLI · provider default · read-write workspace +2\nreview → Claude CLI · provider default · read-only workspace +2\nzeta → OpenAI · gpt-5\n",
         stderr: "",
       },
       { name: "explicit generation", args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:instruction-absent", stderrIncludes: "" },
-      { name: "saved alias instruction", args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:instruction-present", stderr: "" },
-      { name: "cross-platform fuzzy voice routing", args: ["--voice-route", "--input", "aliase, smoke"], code: 0, stdout: "fake:instruction-present", stderr: "Selecting alias 'aliases'\n" },
+      { name: "saved alias workspace", args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:instruction-present:workspace-3", stderr: "" },
+      { name: "cross-platform fuzzy voice routing", args: ["--voice-route", "--input", "aliase, smoke"], code: 0, stdout: "fake:instruction-present:workspace-3", stderr: "Selecting alias 'aliases'\n" },
       {
         name: "alias instruction replacement",
         args: ["aliases", "--input", "smoke", "--instruction", overrideInstructions],
         code: 0,
-        stdout: "fake:instruction-override",
+        stdout: "fake:instruction-override:workspace-3",
+        stderr: "",
+      },
+      {
+        name: "saved Claude alias workspace",
+        args: ["review", "--input", "smoke"],
+        code: 0,
+        stdout: "fake:claude-instruction-present:workspace-3",
         stderr: "",
       },
     ] as const;
 
     for (const testCase of cases) {
-      const result = run(executable, [...testCase.args], { cwd: temporary, env });
+      const result = run(executable, [...testCase.args], { cwd: invocationDirectory, env });
       const stdout = result.stdout.toString();
       const stderr = result.stderr.toString();
       const stdoutMatches = "stdout" in testCase
@@ -567,7 +609,7 @@ async function smoke(archivePath: string): Promise<void> {
     });
     try {
       const result = await runProcess(executable, ["--input", "smoke", "--provider", "ollama", "--model", "fake-model"], {
-        cwd: temporary,
+        cwd: invocationDirectory,
         env,
       });
       if (result.exitCode !== 0 || result.stdout !== "http:smoke" || result.stderr !== "") {

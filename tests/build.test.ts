@@ -118,7 +118,7 @@ describe("native release build", () => {
     expect(readme).not.toContain("$Version =");
   });
 
-  test("keeps packaged shortcut-instruction coverage hermetic and observable", async () => {
+  test("keeps packaged shortcut workspace and instruction coverage hermetic and observable", async () => {
     const releaseValidation = await Bun.file(
       new URL("../scripts/release-validate.ts", import.meta.url),
     ).text();
@@ -130,7 +130,11 @@ describe("native release build", () => {
     const expectedOverrideInstructions =
       "  Replace saved smoke instructions.\\nUse the one-run override.  ";
 
-    expect(releaseValidation).toContain("version: 2");
+    expect(releaseValidation).toContain('"config.toml"');
+    expect(releaseValidation).toContain("serializeConfigDocument");
+    expect(releaseValidation).toContain("additional with spaces");
+    expect(releaseValidation).toContain("fake:instruction-present:workspace-3");
+    expect(releaseValidation).toContain("fake:claude-instruction-present:workspace-3");
     expect(releaseValidation).toContain(expectedInstructions);
     expect(fakeCli).toContain(expectedInstructions);
     expect(releaseValidation).toContain(expectedOverrideInstructions);
@@ -139,6 +143,10 @@ describe("native release build", () => {
     expect(releaseValidation).toContain("fake:instruction-absent");
     expect(releaseValidation).toContain("fake:instruction-override");
     expect(fakeCli).toContain("fake:instruction-override");
+    expect(fakeCli).toContain("unexpected fake CLI workspace configuration");
+    expect(fakeCli).toContain("unexpected fake Claude workspace configuration");
+    expect(fakeCli).toContain('args[toolsIndex + 1] !== "Read,Glob,Grep"');
+    expect(fakeCli).toContain("LLM_NOW_FAKE_WORKSPACE_PRIMARY");
     expect(releaseValidation).toContain("PATH: temporary");
     expect(releaseValidation).toContain('name.toUpperCase() !== "PATH"');
     expect(releaseValidation).toContain("missing-login-shell");
@@ -216,6 +224,45 @@ describe("native release build", () => {
       "package.json",
       "types.d.ts",
     ]);
+  });
+
+  test("keeps workspace documentation and release intent aligned", async () => {
+    const readme = await Bun.file(new URL("../README.md", import.meta.url)).text();
+    const configuration = await Bun.file(
+      new URL("../docs/configuration.md", import.meta.url),
+    ).text();
+    const manualTesting = await Bun.file(
+      new URL("../docs/manual-testing.md", import.meta.url),
+    ).text();
+    const demo = await Bun.file(
+      new URL("../docs/demos/llm-now-demo.tape", import.meta.url),
+    ).text();
+    const changeset = Bun.file(
+      new URL("../.changeset/calm-workspaces-wander.md", import.meta.url),
+    );
+    const releaseIntent = await changeset.exists()
+      ? await changeset.text()
+      : await Bun.file(new URL("../CHANGELOG.md", import.meta.url)).text();
+
+    for (const document of [readme, configuration, manualTesting]) {
+      expect(document).toContain("Codex CLI");
+      expect(document).toContain("Claude CLI");
+      expect(document).toContain("additional directories");
+      expect(document).toContain("read-only");
+      expect(document).toContain("read-write");
+      expect(document).toContain("plaintext");
+    }
+    expect(readme).toContain("workspace is execution context, not an availability rule");
+    expect(configuration).not.toContain("[aliases.codex.workspace]");
+    expect(configuration).toContain("directories = [");
+    expect(configuration).toContain('directory_access = "read-write"');
+    expect(configuration).not.toContain("primary_directory");
+    expect(configuration).not.toContain("additional_directories");
+    expect(manualTesting).toContain("fake:instruction-present:workspace-3");
+    expect(demo).toContain("Primary workspace directory \\(press Enter to skip\\)");
+    expect(releaseIntent).toMatch(/"llm-now": minor|### Minor Changes/);
+    expect(releaseIntent).toContain("globally callable");
+    expect(releaseIntent).toContain("default-No");
   });
 
   test("creates a deterministic archive containing one executable", () => {

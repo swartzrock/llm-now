@@ -1,5 +1,17 @@
 # llm-now
 
+## 2.5.0
+
+### Minor Changes
+
+- 978461b: Add optional, explicitly permissioned multi-directory workspaces to Codex CLI and Claude CLI shortcuts while keeping aliases globally callable. Workspaces may be read-only, or read-write for Codex with an explicit default-No grant.
+
+## 2.4.1
+
+### Patch Changes
+
+- 28aea5e: Fix macOS speech in native executables by reading child-process streams without relying on `SharedArrayBuffer`.
+
 ## 2.4.0
 
 ### Minor Changes

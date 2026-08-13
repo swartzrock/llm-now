@@ -13,6 +13,7 @@ A candidate is ready when:
 - each supported provider completes at least one successful generation on a reference platform;
 - no credential appears in stdout, stderr, unified or legacy configuration, or captured shell logs;
 - shortcut inventory and diagnostics do not disclose saved instruction text or instruction-bearing child-process arguments;
+- workspace aliases remain globally callable, enforce their declared read-only or read-write access, and do not disclose full paths in routine UI;
 - no unexplained release-blocking manual failure remains.
 
 Homebrew is a post-publication projection of each verified public Release and has dedicated commissioning cases below. Chocolatey remains outside the current release scope.
@@ -48,6 +49,8 @@ Before general availability, complete one successful explicit generation for eve
 - `openrouter`
 
 It is not necessary to test all nine providers on all five operating-system targets. Test every provider on one reference platform, then use one representative provider for the native smoke on each other target. Use a short, inexpensive prompt and do not classify normal model wording variation as an `llm-now` failure.
+
+Workspace capability is intentionally narrower: Codex CLI (`codex-cli`) supports read-only and read-write access to one primary plus ordered additional directories. Claude CLI (`claude-cli`) supports the same roots read-only. Ollama, LM Studio, and every cloud API provider must reject a configured workspace before credentials, network access, or provider construction, and Claude must reject read-write access at the same boundary.
 
 ## Prepare an isolated test environment
 
@@ -372,6 +375,7 @@ Opening either root and opening the creation-source menu must not display discov
 - the final response appears only in `stdout.txt`;
 - the response is followed by a clean terminal boundary on stderr even when it has no trailing newline or leaves SGR styling active;
 - shortcut creation visibly requests optional multiline instructions after naming, preserves pasted line breaks, saves before its contextual first prompt, and generates exactly once;
+- Codex and Claude shortcut creation requests an optional primary workspace after instructions, then additional directories until blank; Codex then asks for an explicit default-No read-write grant, while Claude remains read-only; all other providers skip those prompts;
 - each saved-shortcut call transmits its instructions separately from the prompt, subject to the selected provider's policies;
 - run once generates without an instruction, shortcut naming, or save offer;
 - connection management retains only discovery and API-key management; and
@@ -487,7 +491,8 @@ model = "MODEL_ID"
 For a supported CLI provider's default model, the stored value must be the
 string `"default"`, never TOML null. Confirm that no key, token, endpoint
 credential, prompt, generated text, `instructions`, `[voice]`, routing default,
-speech default, or example alias is stored.
+speech default, `workspace`, or example alias is stored. For a Codex or Claude
+shortcut, submit a blank primary workspace for this first save.
 
 Next recreate `daily` and paste two visible instruction lines: `You are a Realtime Voice Agent Architect` and `Focus on interruption handling.` Accept the default-No overwrite only after confirming the transition is `none → set`. The document must remain version 1 and preserve the exact line break in a TOML multiline or escaped string accepted by both Bun and Python `tomllib`:
 
@@ -507,6 +512,39 @@ instructions and exact migration backups are plaintext configuration. On Unix,
 the directory must have mode `700` and unified, backup, lock, and temporary
 files mode `600`. No lock or temporary file should remain.
 
+### MT-11A: Save and overwrite a multi-directory workspace
+
+Create three readable temporary directories, including one whose name contains a space. Recreate a Codex or Claude alias, leave instructions unchanged, enter the first directory as the primary workspace, then enter the other two as additional directories and finish with a blank value. Relative input must be stored as absolute paths resolved against the creation-time cwd. The unified document remains version 1 with this semantic shape:
+
+```toml
+version = 1
+
+[aliases.daily]
+provider = "codex-cli"
+model = "default"
+directories = ["/absolute/primary", "/absolute/additional", "/absolute/additional with spaces"]
+directory_access = "read-write"
+```
+
+The list must contain at least one directory. Its first entry is the primary
+working directory and all later entries are ordered additional roots. A
+primary-only workspace therefore stores a one-item list. Manually remove
+`directory_access` and confirm the workspace loads as read-only and is
+canonically rewritten with `directory_access = "read-only"` on the next save.
+Setting `directory_access` without `directories` must fail.
+
+For Codex, confirm that finishing the directory list shows `Allow Codex to
+create, edit, rename, and delete files in all 3 configured directories?` with
+No selected by default. Declining must save `directory_access = "read-only"`;
+accepting must save `directory_access = "read-write"`. Cancel at this prompt and
+confirm no shortcut is saved. Claude must save only `"read-only"` without a
+write prompt, and manually configuring Claude as `"read-write"` must fail before
+provider activity.
+
+The save receipt and later picker/inventory rows must show `read-only workspace +2` or `read-write workspace +2` without any full path. Recreate the alias with the same roots, changed roots, changed access, and then a blank primary. Exact reuse must report already saved; changes must default to No and show only `Workspace: unchanged`, `set → changed`, or `set → none`. Verify a duplicate, nonexistent, inaccessible, or non-directory root reprompts or fails with only its root role. A read-write root that is not writable must also fail before prompt collection. Repeat with an Ollama, LM Studio, and cloud alias and confirm workspace prompts are absent; a manually edited unsupported-provider workspace must fail before credential or provider activity.
+
+Inspect `config.toml` and confirm paths are plaintext machine-local configuration. Use only disposable roots whose contents may be disclosed: files the CLI reads may be sent to the selected Codex or Claude service under that service's policies. Confirm routine prompts, receipts, inventory, and diagnostics reveal only root roles and counts.
+
 ### MT-12: Use an alias from another directory
 
 First run the bare command and choose “Run with a saved shortcut…”. Confirm that the focused
@@ -524,6 +562,8 @@ rm -f stdout.txt stderr.txt
 ```
 
 The terminal must show `Prompt for daily · PROVIDER · MODEL`, using `default model` only when the alias has no pinned model. It must not display the saved instruction text. Submit whitespace first and confirm validation keeps the field open, then enter `Summarize the idea of gravity.`. The command must transmit the saved instruction separately from that prompt, generate exactly once, exit `0`, and leave `stdout.txt` containing only the response even though stdout was redirected. Repeat the alias-only command with Escape and Ctrl-C; each cancellation must exit `130`, generate nothing, and leave stdout empty.
+
+For the workspace alias from MT-11A, invoke the positional form, `--alias`, piped-input form, launcher picker, and alias-only terminal prompt from this unrelated directory. Every surface must remain able to see the alias and must run the CLI with the stored primary as cwd plus one ordered `--add-dir` pair per additional root. The caller cwd must never filter the alias or replace its workspace. Codex must use `--sandbox read-only` for `directory_access = "read-only"` and `--sandbox workspace-write` for `directory_access = "read-write"`; in the latter case, safely prove it can create, edit, rename, and delete a disposable file in both the primary and an additional root. Claude must expose only `Read`, `Glob`, and `Grep`. A request-scoped `--instruction` replacement must leave the workspace in `config.toml` unchanged. Move one root and repeat: the command must fail before reading an interactive or piped prompt and must not launch the CLI or fall back to any other directory.
 
 Then verify deterministic reuse:
 
@@ -741,6 +781,13 @@ explicit migration with no legacy files creates only a minimal version 1
 document with an empty `[aliases]` table, while a missing single legacy source
 creates no backup for that source.
 
+Repeat once with a legacy version 3 `aliases.json` containing a Codex or Claude
+workspace. Migration must preserve its primary and ordered additional roots in
+the alias's unified TOML `directories` list, add
+`directory_access = "read-only"` for a legacy workspace that predates that
+field, and keep `config.toml` at version 1.
+The exact legacy JSON must remain available in its migration backup.
+
 ### MT-22B: Canonically rewrite without pinning defaults
 
 Manually edit valid `config.toml` to add comments, irregular spacing, two
@@ -842,12 +889,15 @@ Use a temporary `HOME` or `USERPROFILE` for fallback tests.
 
 ### MT-23A: Verify safe instruction transport boundaries
 
-Use only the maintained fake Codex fixture and its two non-secret multiline
-sentinels. The packaged smoke must pass the saved sentinel for an alias call and
-receive `fake:instruction-present`; the otherwise identical explicit call must
+Use only the maintained fake Codex fixture, its two non-secret multiline
+sentinels, and temporary workspace roots. The packaged smoke must invoke a
+workspace alias from outside its primary root, pass two additional roots in
+order (including a path with spaces), and receive
+`fake:instruction-present:workspace-3`; the otherwise identical explicit call must
 receive `fake:instruction-absent`. A second alias call supplies the distinct
 command-line sentinel and must receive `fake:instruction-override`, proving
-replacement rather than mere presence. `config.toml` must remain unchanged.
+replacement rather than mere presence while `workspace-3` remains present. The
+`config.toml` file must remain unchanged.
 The fixture `PATH` must contain only the temporary fixture directory, and
 non-Windows runs must set `SHELL` to a nonexistent file, so no real CLI or LLM
 can be selected. The loopback fake Ollama check may still run, but no external
@@ -1229,7 +1279,9 @@ Keep the Bun test suite as the authority for behavior that is difficult or unrel
 - diagnostic truncation at 1,024 characters;
 - unified TOML validation, sparse canonical rewrites, omission preservation,
   deterministic legacy backups, migration retries, and add/change/remove
-  instruction transitions;
+  instruction and workspace transitions;
+- legacy JSON v1-to-v2 instruction migration, sticky v3 workspace migration,
+  and plaintext validation;
 - exact per-invocation instruction forwarding with absent instructions on explicit and run-once calls;
 - Homebrew exact/older/drift/newer/invalid classification, one-write concurrency, nullable response metadata, and credential-safe diagnostics in `tests/homebrew-reconcile.test.ts`;
 - fixed fake-CLI diagnostics that never echo instruction-bearing arguments;
