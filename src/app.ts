@@ -209,6 +209,9 @@ function diagnosticWriter(
       redactVoiceRequestValues(text, requestValues),
       deps.env,
       deps.sensitive,
+    ).replace(
+      /^Selecting alias '[a-z0-9][a-z0-9_-]{0,63}'$/gm,
+      "diagnostic: $&",
     );
     deps.stderr.write(`${sanitized}${sanitized.endsWith("\n") ? "" : "\n"}`);
   };
@@ -1701,10 +1704,14 @@ function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
   stderr.write(`\u001b[0m${response.endsWith("\n") ? "\n" : "\n\n"}`);
 }
 
-function writeResponse(stdout: TextOutput, response: string): Promise<void> {
+function writeOutput(output: TextOutput, text: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    stdout.write(response, (error) => error ? reject(error) : resolve());
+    output.write(text, (error) => error ? reject(error) : resolve());
   });
+}
+
+function writeVoiceRouteSelection(stderr: TextOutput, alias: string): Promise<void> {
+  return writeOutput(stderr, `Selecting alias '${alias}'\n`);
 }
 
 async function voiceNoticeExit(
@@ -1852,6 +1859,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           shortcutFollowUp: "none",
           alias: route.alias,
         };
+        await writeVoiceRouteSelection(deps.stderr, route.alias);
       } else if (
         interactive
         && (deps.args.length === 0 || (parsed.speak && deps.args.length === 1))
@@ -2013,7 +2021,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           diagnostic("generation: response withheld because it contained a registered credential.");
           return 1;
         }
-        await writeResponse(deps.stdout, response);
+        await writeOutput(deps.stdout, response);
         if (interactive) writeInteractiveBoundary(deps.stderr, response);
       }
 

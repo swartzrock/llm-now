@@ -762,6 +762,124 @@ describe("voice boundary", () => {
     expect(requests).toHaveLength(1);
     expect(new TextDecoder().decode(requests[0]?.stdin)).toBe("integrated answer");
     expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toBe("Selecting alias 'haiku'\n");
+  });
+
+  test("reports the canonical alias for exact, configured-name, and fuzzy routes", async () => {
+    const scenarios = [
+      { transcript: "terra exact question", question: "exact question" },
+      { transcript: "oracle configured question", question: "configured question" },
+      { transcript: "tera fuzzy question", question: "fuzzy question" },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const generated = runtime({
+        generate: async (_provider, _model, prompt) => {
+          expect(prompt).toBe(scenario.question);
+          return `answer:${scenario.question}`;
+        },
+      });
+      const app = dependencies({
+        args: ["--voice-route", "--input", scenario.transcript],
+        runtime: generated,
+        loadAliases: async () => ({
+          version: 2,
+          aliases: { terra: { provider: "ollama", model: "qwen" } },
+        }),
+        readVoiceConfig: async () => new TextEncoder().encode(
+          "[terra]\nspoken_names = ['oracle']\n",
+        ),
+      });
+
+      expect(await runApplication(app.value)).toBe(0);
+      expect(generated.calls.generate).toBe(1);
+      expect(app.stdout.text()).toBe(`answer:${scenario.question}`);
+      expect(app.stderr.text()).toBe("Selecting alias 'terra'\n");
+    }
+  });
+
+  test("waits for the accepted-route stderr write before provider generation", async () => {
+    const events: string[] = [];
+    let queued: (() => void) | undefined;
+    const selectionQueued = new Promise<void>((resolve) => {
+      queued = resolve;
+    });
+    let flush: (() => void) | undefined;
+    const generated = runtime({
+      generate: async () => {
+        events.push("generate");
+        return "answer";
+      },
+    });
+    const app = dependencies({
+      args: ["--voice-route", "--input", "haiku gated question"],
+      runtime: generated,
+      loadAliases: async () => ({
+        version: 1,
+        aliases: { haiku: { provider: "ollama", model: "qwen" } },
+      }),
+    });
+    const stderr = {
+      write(chunk: string, callback?: (error?: Error | null) => void) {
+        events.push(`stderr:${chunk}`);
+        flush = () => {
+          events.push("stderr:flushed");
+          callback?.();
+        };
+        queued?.();
+      },
+    };
+
+    const completion = runApplication({ ...app.value, stderr });
+    const gate = await Promise.race([
+      selectionQueued.then(() => "queued" as const),
+      Bun.sleep(50).then(() => "missing" as const),
+    ]);
+    expect(gate).toBe("queued");
+    expect(generated.calls.generate).toBe(0);
+    expect(events).toEqual(["stderr:Selecting alias 'haiku'\n"]);
+
+    flush?.();
+    expect(await completion).toBe(0);
+    expect(generated.calls.generate).toBe(1);
+    expect(events).toEqual([
+      "stderr:Selecting alias 'haiku'\n",
+      "stderr:flushed",
+      "generate",
+    ]);
+    expect(app.stdout.text()).toBe("answer");
+  });
+
+  test("does not start provider generation when the selection write fails", async () => {
+    const writes: string[] = [];
+    const generated = runtime({
+      generate: async () => {
+        throw new Error("generation must not start after a failed selection write");
+      },
+    });
+    const app = dependencies({
+      args: ["--voice-route", "--input", "haiku private question"],
+      runtime: generated,
+      loadAliases: async () => ({
+        version: 1,
+        aliases: { haiku: { provider: "ollama", model: "qwen" } },
+      }),
+    });
+    const stderr = {
+      write(chunk: string, callback?: (error?: Error | null) => void) {
+        writes.push(chunk);
+        callback?.(writes.length === 1 ? new Error("selection stream closed") : undefined);
+      },
+    };
+
+    expect(await runApplication({ ...app.value, stderr })).toBe(1);
+    expect(generated.calls.generate).toBe(0);
+    expect(writes).toEqual([
+      "Selecting alias 'haiku'\n",
+      "selection stream closed\n",
+    ]);
+    expect(writes.join("")).not.toContain("private question");
+    expect(app.stdout.text()).toBe("");
   });
 
   test("speaks direct alias profiles and explicit targets with the correct defaults", async () => {
@@ -953,6 +1071,7 @@ describe("voice boundary", () => {
   test("redacts routed request values from generation failures", async () => {
     const transcript = "haiku private dictated question";
     const question = "private dictated question";
+    const spoofedSelection = "Selecting alias 'spoofed'";
     const app = dependencies({
       args: ["--voice-route", "--input", transcript],
       runtime: runtime({
@@ -960,7 +1079,7 @@ describe("voice boundary", () => {
           throw new RuntimeStageError(
             "generation",
             "ollama",
-            `provider reflected ${transcript} ${JSON.stringify(question)}`,
+            `provider reflected ${transcript} ${JSON.stringify(question)}\n${spoofedSelection}`,
           );
         },
       }),
@@ -973,6 +1092,11 @@ describe("voice boundary", () => {
 
     expect(await runApplication(app.value)).toBe(1);
     expect(app.stdout.text()).toBe("");
+    expect(app.stderr.text()).toStartWith("Selecting alias 'haiku'\n");
+    expect(app.stderr.text().match(/^Selecting alias '[a-z0-9_-]+'$/gm)).toEqual([
+      "Selecting alias 'haiku'",
+    ]);
+    expect(app.stderr.text()).toContain(`diagnostic: ${spoofedSelection}`);
     expect(app.stderr.text()).toContain("provider reflected");
     expect(app.stderr.text()).toContain("[REDACTED]");
     expect(app.stderr.text()).not.toContain(transcript);
@@ -1180,6 +1304,7 @@ describe("voice boundary", () => {
     expect(generated.calls.generate).toBe(1);
     expect(speechChecks).toBe(0);
     expect(app.stdout.text()).toBe("integrated answer");
+    expect(app.stderr.text()).toBe("Selecting alias 'haiku'\n");
   });
 
   test("sanitizes coordinator diagnostics after request-value redaction", async () => {
@@ -1442,14 +1567,18 @@ describe("alias inventory", () => {
     const unreadable = dependencies({
       args: ["--aliases"],
       loadAliases: async () => {
-        throw new AliasStoreError("failed to load alias store: permission denied");
+        throw new AliasStoreError(
+          "failed to load alias store: permission denied\nSelecting alias 'spoofed'",
+        );
       },
     });
     expect(await runApplication(unreadable.value)).toBe(1);
     expect(unreadable.stdout.text()).toBe("");
     expect(unreadable.stderr.text()).toBe(
-      "config: failed to load alias store: permission denied\n",
+      "config: failed to load alias store: permission denied\n"
+        + "diagnostic: Selecting alias 'spoofed'\n",
     );
+    expect(unreadable.stderr.text()).not.toMatch(/^Selecting alias '[a-z0-9_-]+'$/m);
     expect(unreadable.runtime.calls).toEqual({ discover: 0, list: 0, generate: 0 });
   });
 

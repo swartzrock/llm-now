@@ -8,6 +8,7 @@ A candidate is ready when:
 
 - all five native executables launch without Bun or Node.js installed;
 - help, version, prompt input, provider selection, aliases, output separation, diagnostics, and exit codes match the documented CLI contract;
+- accepted voice routes report only the canonical alias on stderr before generation, without changing response stdout;
 - every target with native credential storage enabled passes the compiled production-adapter lifecycle gate in its representative user session;
 - each supported provider completes at least one successful generation on a reference platform;
 - no credential appears in stdout, stderr, unified or legacy configuration, or captured shell logs;
@@ -382,6 +383,97 @@ Opening either root and opening the creation-source menu must not display discov
 
 Cancel before and after each durable boundary. Pre-write cancellation must exit `130` without mutation. Cancellation after a key or shortcut receipt must preserve the completed write, report the incomplete later step, exit `0`, and generate nothing. A delegated CLI model must appear as `default model`.
 
+### MT-10A: Observe packaged voice selection before fake generation
+
+On macOS or Linux, use the packaged `$BIN` and an isolated `daily` shortcut
+that targets `codex-cli` with the SC-02 instructions. Compile the maintained
+fake Codex fixture from a source checkout, then place a temporary gate wrapper
+in front of it. The packaged `llm-now` executable still runs outside the source
+checkout and does not require Bun or Node.js:
+
+```bash
+LLM_NOW_SOURCE="/absolute/path/to/llm-now2"
+bun build "$LLM_NOW_SOURCE/tests/fixtures/fake-cli.ts" --compile \
+  --outfile "$TEST_ROOT/bin/codex-fixture"
+
+export LLM_NOW_TEST_FAKE_CODEX="$TEST_ROOT/bin/codex-fixture"
+export LLM_NOW_TEST_GENERATION_GATE="$TEST_ROOT/release-generation"
+export LLM_NOW_TEST_GENERATION_STARTED="$TEST_ROOT/generation-started"
+export LLM_NOW_TEST_STDERR="$TEST_ROOT/work/stderr.txt"
+export LLM_NOW_TEST_STDERR_AT_GENERATION="$TEST_ROOT/stderr-at-generation-start.txt"
+export PATH="$TEST_ROOT/bin:/usr/bin:/bin"
+export SHELL="$TEST_ROOT/bin/missing-login-shell"
+test -x "$LLM_NOW_TEST_FAKE_CODEX"
+
+cat >"$TEST_ROOT/bin/codex" <<'SH'
+#!/bin/sh
+if [ "$1" = "exec" ]; then
+  /bin/cp "$LLM_NOW_TEST_STDERR" "$LLM_NOW_TEST_STDERR_AT_GENERATION"
+  : >"$LLM_NOW_TEST_GENERATION_STARTED"
+  while [ ! -e "$LLM_NOW_TEST_GENERATION_GATE" ]; do
+    /bin/sleep 0.05
+  done
+fi
+exec "$LLM_NOW_TEST_FAKE_CODEX" "$@"
+SH
+chmod +x "$TEST_ROOT/bin/codex"
+```
+
+From the isolated work directory, start a fuzzy route in the background and
+wait only for its stderr output:
+
+```bash
+rm -f "$LLM_NOW_TEST_GENERATION_GATE" "$LLM_NOW_TEST_GENERATION_STARTED" \
+  "$LLM_NOW_TEST_STDERR_AT_GENERATION" stdout.bin stderr.txt
+printf "Selecting alias 'daily'\n" >expected-stderr.txt
+"$BIN" --voice-route --input "dail, smoke" >stdout.bin 2>stderr.txt &
+ROUTE_PID=$!
+
+ATTEMPTS=0
+while { [ ! -s stderr.txt ] || [ ! -e "$LLM_NOW_TEST_GENERATION_STARTED" ]; } \
+  && [ "$ATTEMPTS" -lt 100 ]; do
+  ATTEMPTS=$((ATTEMPTS + 1))
+  /bin/sleep 0.05
+done
+
+test -e "$LLM_NOW_TEST_GENERATION_STARTED"
+/usr/bin/cmp expected-stderr.txt "$LLM_NOW_TEST_STDERR_AT_GENERATION"
+/usr/bin/cmp expected-stderr.txt stderr.txt
+test ! -s stdout.bin
+kill -0 "$ROUTE_PID"
+```
+
+The exact canonical-alias line must be complete while the fake response remains
+blocked and stdout is empty. Release the fake generation and verify the final
+streams:
+
+```bash
+/usr/bin/touch "$LLM_NOW_TEST_GENERATION_GATE"
+wait "$ROUTE_PID"
+STATUS=$?
+
+printf 'fake:instruction-present' >expected-stdout.bin
+test "$STATUS" -eq 0
+/usr/bin/cmp expected-stdout.bin stdout.bin
+/usr/bin/cmp expected-stderr.txt stderr.txt
+```
+
+The selection line must not repeat or gain transcript, question, prompt,
+provider, instruction, credential, or response content. Repeat with a rejected
+route: it must write no selection line, keep stdout empty, and never reach the
+gate wrapper's `exec` branch:
+
+```bash
+rm -f "$LLM_NOW_TEST_GENERATION_GATE" "$LLM_NOW_TEST_GENERATION_STARTED" stdout.bin stderr.txt
+"$BIN" --voice-route --input "unknown smoke" >stdout.bin 2>stderr.txt
+STATUS=$?
+
+test "$STATUS" -eq 1
+test ! -s stdout.bin
+test ! -e "$LLM_NOW_TEST_GENERATION_STARTED"
+if /usr/bin/grep -q "Selecting alias" stderr.txt; then exit 1; fi
+```
+
 ## Alias lifecycle
 
 ### MT-11: Save an alias
@@ -730,9 +822,10 @@ alias `--speak` request and one combined `--voice-route --speak` request. None
 may create `config.toml`, a migration backup, lock, temporary file, or changed
 legacy file. Repeat with valid unified configuration and confirm it too remains
 byte-for-byte unchanged. On Linux and Windows, route-only execution must retain
-the ordinary stdout contract, while `--speak` must reject before reading input
-or configuration. A normal alias save must continue to retain configured voice
-fields on those platforms.
+the ordinary response-only stdout contract and write exactly one canonical
+alias selection line to stderr before generation, while `--speak` must reject
+before reading input or configuration. A normal alias save must continue to
+retain configured voice fields on those platforms.
 
 Run the packaged executable with Python and uv absent from `PATH` and outside a
 repository checkout. Config discovery, migration, alias save, native routing,
@@ -1146,12 +1239,15 @@ From Terminal, also complete each independent composition boundary:
 ```
 
 Route-only execution must generate once, write the answer only to stdout, and
-start no speech process. Direct alias speech must use that alias's optional
-voice profile; explicit provider/model speech must use system speech defaults.
-Both speech calls must generate once, speak once, and leave answer stdout empty.
-On Linux and Windows, repeat route-only successfully and confirm either speech
-call returns the fixed macOS-only failure before reading stdin, configuration,
-credentials, or routing state.
+write exactly `Selecting alias 'haiku'\n` to stderr before generation, and start
+no speech process. Direct alias speech must use that alias's optional voice
+profile; explicit provider/model speech must use system speech defaults. Both
+speech calls must generate once, speak once, and leave answer stdout empty. The
+combined routed speech path must also write the canonical selection line; the
+direct and explicit speech paths must not. On Linux and Windows, repeat
+route-only successfully and confirm either speech call returns the fixed
+macOS-only failure before reading stdin, configuration, credentials, or routing
+state.
 
 For the clipboard-negative check, copy a distinctive sentinel in another
 application before the combined Shortcut run. After it finishes, paste into a
