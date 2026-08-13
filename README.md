@@ -68,7 +68,11 @@ Then follow this path without choosing another launcher branch:
 5. At `Optional instructions for this shortcut (press Enter to skip)`, enter
    reusable guidance or press Enter to skip it. If you entered guidance, press
    Tab to select `[ save ]`, then press Enter to save.
-6. After the shortcut is saved, enter your first prompt at
+6. For Codex CLI or Claude CLI, optionally enter one primary workspace
+   directory and any additional directories. Press Enter at the primary prompt
+   to skip the workspace or at an additional prompt to finish the list. Codex
+   then asks whether to grant read-write access and defaults to No.
+7. After the shortcut is saved, enter your first prompt at
    `Prompt for local · <provider> · <model>` and receive the response.
 
 Reuse the saved shortcut from any directory:
@@ -127,6 +131,24 @@ rewrite it in a consistent order. Instructions are plaintext and credentials
 never belong in this file. See the
 [configuration guide](docs/configuration.md) to find and edit the file,
 configure aliases, and customize voice routing and speech.
+
+### Workspace shortcuts
+
+Add one or more absolute directories to a Codex CLI or Claude CLI alias:
+
+```toml
+[aliases.terra]
+provider = "codex-cli"
+model = "default"
+directories = ["/absolute/project", "/absolute/shared"]
+directory_access = "read-write"
+```
+
+The first path is the working directory; the rest are additional directories.
+Omit `directory_access` for `read-only`; `read-write` lets Codex modify every
+listed directory, while Claude CLI supports read-only only. Paths are plaintext
+in `config.toml`. The workspace is execution context, not an availability rule,
+so the alias remains callable from any directory.
 
 ## Credentials
 

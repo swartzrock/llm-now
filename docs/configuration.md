@@ -52,6 +52,39 @@ Instructions are plaintext. `--instruction` replaces saved instructions for
 one request without changing the file. Never put credentials or secrets in
 `config.toml`; see the [credentials guide](credentials.md).
 
+### Configure a shortcut workspace
+
+Codex CLI and Claude CLI shortcuts may store an ordered, nonempty list of
+directories:
+
+```toml
+[aliases.codex]
+provider = "codex-cli"
+model = "default"
+directories = ["/absolute/project", "/absolute/shared", "/absolute/reference material"]
+directory_access = "read-write"
+```
+
+`directories` must contain at least one absolute, unique path. The first path is
+the CLI working directory. Remaining entries are additional directories, in
+their listed order. `directory_access` may be `"read-only"` or `"read-write"`;
+omitting it defaults the workspace to read-only. Setting
+`directory_access` without `directories` is invalid. Omit `directories` when
+the shortcut has no workspace.
+
+Codex supports both access modes. `"read-write"` allows Codex to create, edit,
+rename, and delete files in every configured directory, including the first
+working directory and every additional root. `"read-only"` keeps the Codex
+read-only sandbox. Claude supports only `"read-only"` and receives only the
+`Read`, `Glob`, and `Grep` file tools; a Claude `"read-write"` workspace is
+rejected. Ollama, LM Studio, and cloud API providers reject workspace fields.
+
+A workspace controls CLI execution context; it does not restrict where the
+shortcut is visible or callable. Workspace paths are machine-local plaintext,
+and files read from those roots may still be sent to the selected service.
+Missing, inaccessible, duplicate, or non-directory roots fail before the prompt
+is read or the provider is started. Read-write roots must also be writable.
+
 ## Configure voice
 
 Voice routing uses the same aliases. Add global routing settings under

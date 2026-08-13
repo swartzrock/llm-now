@@ -93,6 +93,14 @@ import {
   type VoiceProcessRunner,
   type VoiceSpeechPreflightOutcome,
 } from "./voice.ts";
+import {
+  normalizeWorkspace,
+  preflightWorkspace,
+  sameWorkspace,
+  workspaceCapabilities,
+  WorkspaceError,
+  type WorkspaceConfig,
+} from "./workspace.ts";
 
 const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
 const DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS = 500;
@@ -124,6 +132,7 @@ export interface ApplicationDependencies {
   env: ByokEnvironment;
   platform: NodeJS.Platform;
   home: string;
+  cwd: string;
   version: string;
   aliasPath?: string;
   configPath?: string;
@@ -157,6 +166,14 @@ interface ResolvedSelection {
 interface LauncherWork {
   prompt: string;
   selection: ResolvedSelection;
+}
+
+async function preflightAliasWorkspace(selection: AliasRecord): Promise<AliasRecord> {
+  if (selection.workspace === undefined) return selection;
+  return withWorkspace(
+    selection,
+    await preflightWorkspace(selection.provider, selection.workspace),
+  );
 }
 
 function recognizedCredentialValues(env: ByokEnvironment): string[] {
@@ -274,11 +291,8 @@ function aliasPromptMessage(
   alias: string,
   selection: AliasRecord,
 ): string {
-  const model = selection.model === null
-    ? "default model"
-    : sanitizePromptText(selection.model);
   return sanitizeDiagnostic(
-    `Prompt for ${sanitizePromptText(alias)} · ${providerLabel(selection.provider)} · ${model}`,
+    `Prompt for ${sanitizePromptText(alias)} · ${formatSelection(selection)}`,
     deps.env,
     deps.sensitive,
   );
@@ -356,6 +370,118 @@ async function captureShortcutInstructions(
   }
 }
 
+type WorkspaceCaptureResult =
+  | { kind: "ready"; workspace?: WorkspaceConfig }
+  | { kind: "cancelled" };
+
+async function captureShortcutWorkspace(
+  deps: ApplicationDependencies,
+  provider: ByokProviderId,
+  diagnostic: (text: string) => void,
+): Promise<WorkspaceCaptureResult> {
+  if (!workspaceCapabilities(provider).primaryDirectory) return { kind: "ready" };
+
+  async function finishWorkspace(workspace: WorkspaceConfig): Promise<WorkspaceCaptureResult | null> {
+    if (provider !== "codex-cli") return { kind: "ready", workspace };
+    const count = workspace.additionalDirectories.length + 1;
+    const writable = await deps.prompter.confirm(
+      `Allow Codex to create, edit, rename, and delete files in all ${count} configured ${
+        count === 1 ? "directory" : "directories"
+      }?`,
+      { initialValue: false },
+    );
+    if (writable === null) return { kind: "cancelled" };
+    if (!writable) return { kind: "ready", workspace };
+
+    const writableWorkspace = normalizeWorkspace(
+      workspace.primaryDirectory,
+      workspace.additionalDirectories,
+      deps.cwd,
+      "read-write",
+    );
+    try {
+      await preflightWorkspace(provider, writableWorkspace);
+      return { kind: "ready", workspace: writableWorkspace };
+    } catch (error) {
+      if (!(error instanceof WorkspaceError)) throw error;
+      diagnostic(`config: ${error.message}`);
+      return null;
+    }
+  }
+
+  while (true) {
+    const primary = await deps.prompter.input(
+      "Primary workspace directory (press Enter to skip)",
+    );
+    if (primary === null) return { kind: "cancelled" };
+    if (primary === "") return { kind: "ready" };
+
+    let workspace: WorkspaceConfig;
+    try {
+      workspace = normalizeWorkspace(primary, [], deps.cwd);
+      await preflightWorkspace(provider, workspace);
+    } catch (error) {
+      if (!(error instanceof WorkspaceError)) throw error;
+      diagnostic(`config: ${error.message}`);
+      continue;
+    }
+
+    while (true) {
+      const additional = await deps.prompter.input(
+        "Additional workspace directory (press Enter when finished)",
+      );
+      if (additional === null) return { kind: "cancelled" };
+      if (additional === "") {
+        const finished = await finishWorkspace(workspace);
+        if (finished !== null) return finished;
+        break;
+      }
+
+      try {
+        const candidate = normalizeWorkspace(
+          workspace.primaryDirectory,
+          [...workspace.additionalDirectories, additional],
+          deps.cwd,
+        );
+        await preflightWorkspace(provider, candidate);
+        workspace = candidate;
+      } catch (error) {
+        if (!(error instanceof WorkspaceError)) throw error;
+        diagnostic(`config: ${error.message}`);
+      }
+    }
+  }
+}
+
+type ShortcutConfigurationResult =
+  | { kind: "ready"; selection: AliasRecord; persistenceBlocker?: PersistenceBlocker }
+  | { kind: "cancelled" }
+  | { kind: "failed" };
+
+async function captureShortcutConfiguration(
+  deps: ApplicationDependencies,
+  selection: AliasRecord,
+  diagnostic: (text: string) => void,
+  validatedCredentials: readonly string[] = [],
+): Promise<ShortcutConfigurationResult> {
+  const instructions = await captureShortcutInstructions(
+    deps,
+    diagnostic,
+    validatedCredentials,
+  );
+  if (instructions.kind !== "ready") return instructions;
+  const workspace = await captureShortcutWorkspace(deps, selection.provider, diagnostic);
+  if (workspace.kind === "cancelled") return workspace;
+  return {
+    kind: "ready",
+    selection: withWorkspace(
+      withInstructions(selection, instructions.instructions),
+      workspace.workspace,
+    ),
+    persistenceBlocker: instructions.persistenceBlocker,
+  };
+}
+
 function runWithAllCredentialMutationLocks<T>(
   deps: ApplicationDependencies,
   operation: () => Promise<T>,
@@ -405,10 +531,21 @@ function withInstructions(
   selection: AliasRecord,
   instructions: string | undefined,
 ): AliasRecord {
+  const { instructions: _instructions, ...rest } = selection;
   return {
-    provider: selection.provider,
-    model: selection.model,
+    ...rest,
     ...(instructions === undefined ? {} : { instructions }),
+  };
+}
+
+function withWorkspace(
+  selection: AliasRecord,
+  workspace: WorkspaceConfig | undefined,
+): AliasRecord {
+  const { workspace: _workspace, ...rest } = selection;
+  return {
+    ...rest,
+    ...(workspace === undefined ? {} : { workspace }),
   };
 }
 
@@ -421,6 +558,16 @@ function instructionTransition(
   if (currentValue === nextValue) return "unchanged";
   if (currentValue === undefined) return "none → set";
   if (nextValue === undefined) return "set → none";
+  return "set → changed";
+}
+
+function workspaceTransition(
+  current: AliasRecord | undefined,
+  next: AliasRecord,
+): "none → set" | "set → none" | "set → changed" | "unchanged" {
+  if (sameWorkspace(current?.workspace, next.workspace)) return "unchanged";
+  if (current?.workspace === undefined) return "none → set";
+  if (next.workspace === undefined) return "set → none";
   return "set → changed";
 }
 
@@ -521,16 +668,21 @@ async function prepareCredentialAlias(
       continue;
     }
 
-    const capture = await captureShortcutInstructions(deps, diagnostic, validatedCredentials);
+    const capture = await captureShortcutConfiguration(
+      deps,
+      selection,
+      diagnostic,
+      validatedCredentials,
+    );
     if (capture.kind === "cancelled") return { kind: "none" };
     if (capture.kind === "failed") return { kind: "failed" };
-    const pendingSelection = withInstructions(selection, capture.instructions);
+    const pendingSelection = capture.selection;
 
     const canonicalName = normalizeAliasName(name);
     const current = Object.hasOwn(aliases, canonicalName) ? aliases[canonicalName] : undefined;
     if (current !== undefined && !sameAliasRecord(current, pendingSelection)) {
       const overwrite = await deps.prompter.confirm(
-        `Overwrite alias ${canonicalName}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, pendingSelection)}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
+        `Overwrite alias ${canonicalName}?\nOld: ${safeFormatSelection(deps, current)}\nNew: ${safeFormatSelection(deps, pendingSelection)}\nInstructions: ${instructionTransition(current, pendingSelection)}\nWorkspace: ${workspaceTransition(current, pendingSelection)}`,
         { initialValue: false },
       );
       if (overwrite === null) return { kind: "none" };
@@ -602,7 +754,6 @@ async function prepareRequiredShortcut(
   }
 
   const save = deps.saveAlias ?? saveStoredAlias;
-  const targetLabel = safeFormatSelection(deps, selection);
   namePrompt: while (true) {
     const name = await deps.prompter.input("Name this shortcut", {
       validate: (value) => {
@@ -630,10 +781,16 @@ async function prepareRequiredShortcut(
     }
 
     while (true) {
-      const capture = await captureShortcutInstructions(deps, diagnostic, validatedCredentials);
+      const capture = await captureShortcutConfiguration(
+        deps,
+        selection,
+        diagnostic,
+        validatedCredentials,
+      );
       if (capture.kind === "cancelled") return { kind: "cancelled" };
       if (capture.kind === "failed") return { kind: "failed", reason: "instructions" };
-      const pendingSelection = withInstructions(selection, capture.instructions);
+      const pendingSelection = capture.selection;
+      const pendingTargetLabel = safeFormatSelection(deps, pendingSelection);
 
       let overwriteCancelled = false;
       let result: SaveAliasResult;
@@ -643,14 +800,14 @@ async function prepareRequiredShortcut(
           onStaleProfiles: staleProfileReporter(diagnostic),
           persistenceGuard: instructionPersistenceGuard(
             deps,
-            capture.instructions,
+            pendingSelection.instructions,
             capture.persistenceBlocker,
           ),
           confirmOverwrite: async (_name, current) => {
             const overwrite = await deps.prompter.confirm(
               `Overwrite shortcut ${name}?\nOld: ${
                 current === undefined ? "(not present)" : safeFormatSelection(deps, current)
-              }\nNew: ${targetLabel}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
+              }\nNew: ${pendingTargetLabel}\nInstructions: ${instructionTransition(current, pendingSelection)}\nWorkspace: ${workspaceTransition(current, pendingSelection)}`,
               { initialValue: false },
             );
             overwriteCancelled = overwrite === null;
@@ -676,8 +833,8 @@ async function prepareRequiredShortcut(
       const colors = createTerminalColors(deps.stderr, deps.env);
       deps.stderr.write(
         result === "already-saved"
-          ? `${colors.green(`◆ Shortcut already saved ${name} → ${targetLabel}`)}\n`
-          : `${colors.green(`◆ Saved shortcut ${name} → ${targetLabel}`)}\n`,
+          ? `${colors.green(`◆ Shortcut already saved ${name} → ${pendingTargetLabel}`)}\n`
+          : `${colors.green(`◆ Saved shortcut ${name} → ${pendingTargetLabel}`)}\n`,
       );
       return { kind: "saved", name, selection: pendingSelection };
     }
@@ -769,6 +926,7 @@ async function generateWithTimeout(
   model: string | null,
   prompt: string,
   instructions?: string,
+  workspace?: WorkspaceConfig,
   rootSignal?: AbortSignal,
 ): Promise<GenerationOutcome> {
   const timeoutMs = deps.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS;
@@ -792,6 +950,7 @@ async function generateWithTimeout(
       prompt,
       controller.signal,
       instructions,
+      workspace,
     )).then<GenerationOutcome, GenerationOutcome>(
       (response) => ({ kind: "completed", response }),
       (error) => ({ kind: "failed", error }),
@@ -850,7 +1009,9 @@ async function resolveSelection(
         throw new AliasStoreError(`alias not found: ${deterministic.alias}`);
       }
       return {
-        selection: await deps.resolveAlias(applicationAliasPath(deps), deterministic.alias),
+        selection: await preflightAliasWorkspace(
+          await deps.resolveAlias(applicationAliasPath(deps), deterministic.alias),
+        ),
         shortcutFollowUp: "none",
         alias: normalizeAliasName(deterministic.alias),
       };
@@ -859,7 +1020,7 @@ async function resolveSelection(
     const resolved = snapshot.aliases[canonicalName];
     if (resolved === undefined) throw new AliasStoreError(`alias not found: ${deterministic.alias}`);
     return {
-      selection: resolved,
+      selection: await preflightAliasWorkspace(resolved),
       shortcutFollowUp: "none",
       alias: canonicalName,
     };
@@ -878,7 +1039,7 @@ async function resolveSelection(
     if (aliasResult.kind === "cancelled") return aliasResult.exitCode;
     if (aliasResult.kind === "selected") {
       return {
-        selection: aliasResult.selection,
+        selection: await preflightAliasWorkspace(aliasResult.selection),
         shortcutFollowUp: "none",
         alias: aliasResult.alias,
       };
@@ -917,6 +1078,7 @@ async function resolveFreshSelection(
       candidate.provider === resolved.provider
       && candidate.model === resolved.model
       && candidate.instructions === undefined
+      && candidate.workspace === undefined
     )
     .map(([alias]) => ({ value: alias, label: alias })))[0]?.value;
   return {
@@ -950,10 +1112,11 @@ async function offerAliasSave(
       continue;
     }
     while (true) {
-      const capture = await captureShortcutInstructions(deps, diagnostic);
+      const capture = await captureShortcutConfiguration(deps, selection, diagnostic);
       if (capture.kind === "cancelled") return true;
       if (capture.kind === "failed") return false;
-      const pendingSelection = withInstructions(selection, capture.instructions);
+      const pendingSelection = capture.selection;
+      const pendingTarget = safeFormatSelection(deps, pendingSelection);
       const canonicalName = normalizeAliasName(name);
       try {
         const result = await save(applicationConfigPaths(deps), canonicalName, pendingSelection, {
@@ -961,12 +1124,12 @@ async function offerAliasSave(
           onStaleProfiles: staleProfileReporter(diagnostic),
           persistenceGuard: instructionPersistenceGuard(
             deps,
-            capture.instructions,
+            pendingSelection.instructions,
             capture.persistenceBlocker,
           ),
           confirmOverwrite: async (_alias, current) =>
             (await deps.prompter.confirm(
-              `Overwrite alias ${canonicalName}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${target}\nInstructions: ${instructionTransition(current, pendingSelection)}`,
+              `Overwrite alias ${canonicalName}?\nOld: ${current === undefined ? "(not present)" : safeFormatSelection(deps, current)}\nNew: ${pendingTarget}\nInstructions: ${instructionTransition(current, pendingSelection)}\nWorkspace: ${workspaceTransition(current, pendingSelection)}`,
               { initialValue: false },
             )) === true,
         });
@@ -974,12 +1137,12 @@ async function offerAliasSave(
           deps.stderr.write(
             colors.green("◆ Saved alias ")
             + colors.white(canonicalName)
-            + colors.green(` → ${target}\n  Next time, use `)
+            + colors.green(` → ${pendingTarget}\n  Next time, use `)
             + colors.white(`llm-now ${canonicalName} --input "<prompt>"`)
             + "\n",
           );
         } else if (result === "already-saved") {
-          deps.stderr.write(`${colors.green(`◆ Already saved ${canonicalName} → ${target}`)}\n`);
+          deps.stderr.write(`${colors.green(`◆ Already saved ${canonicalName} → ${pendingTarget}`)}\n`);
         }
         return true;
       } catch (error) {
@@ -1286,9 +1449,10 @@ async function finishCreatedShortcut(
   shortcut: Extract<RequiredShortcutResult, { kind: "saved" }>,
   diagnostic: (text: string) => void,
 ): Promise<LauncherWork | number> {
+  const selection = await preflightAliasWorkspace(shortcut.selection);
   const prompt = await collectOneShotPrompt(
     deps,
-    aliasPromptMessage(deps, shortcut.name, shortcut.selection),
+    aliasPromptMessage(deps, shortcut.name, selection),
   );
   if (prompt === null) {
     diagnostic("The shortcut was saved, but its first prompt was cancelled; no generation ran.");
@@ -1297,7 +1461,7 @@ async function finishCreatedShortcut(
   return {
     prompt,
     selection: {
-      selection: shortcut.selection,
+      selection,
       shortcutFollowUp: "none",
       alias: shortcut.name,
     },
@@ -1499,15 +1663,16 @@ async function runLauncher(
       }),
     );
     if (aliasResult.kind === "cancelled") return aliasResult.exitCode;
+    const selection = await preflightAliasWorkspace(aliasResult.selection);
     const prompt = await collectOneShotPrompt(
       deps,
-      aliasPromptMessage(deps, aliasResult.alias, aliasResult.selection),
+      aliasPromptMessage(deps, aliasResult.alias, selection),
     );
     if (prompt === null) return 130;
     return {
       prompt,
       selection: {
-        selection: aliasResult.selection,
+        selection,
         shortcutFollowUp: "none",
         alias: aliasResult.alias,
       },
@@ -1683,7 +1848,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         }
         prompt = route.question;
         selection = {
-          selection: route.aliasRecord,
+          selection: await preflightAliasWorkspace(route.aliasRecord),
           shortcutFollowUp: "none",
           alias: route.alias,
         };
@@ -1729,6 +1894,31 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         if (!interactive && parsed.selection.kind === "interactive") {
           requireDeterministicSelection(parsed.selection, false);
         }
+        if (
+          parsed.input === undefined
+          && !interactive
+          && deps.stdin.isTTY === true
+        ) {
+          throw new UsageError("provide --input or pipe prompt text on stdin.");
+        }
+        let resolvedBeforePrompt: ResolvedSelection | undefined;
+        if (parsed.selection.kind === "alias") {
+          snapshot = parsed.speak || deps.resolveAlias === undefined
+            ? await loadApplicationConfigSnapshot(deps, parsed.speak)
+            : await preflightUnifiedConfig(deps);
+          if (signal?.aborted) return cancelled();
+          const resolved = await resolveSelection(
+            requestDeps,
+            parsed.selection,
+            snapshot,
+            interactive,
+            diagnostic,
+          );
+          if (typeof resolved === "number") {
+            return signal?.aborted ? cancelled() : resolved;
+          }
+          resolvedBeforePrompt = resolved;
+        }
         if (signal === undefined) {
           prompt = await resolvePrompt(parsed.input, deps.stdin);
         } else {
@@ -1743,25 +1933,25 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           if (validationMessage !== undefined) throw new UsageError(validationMessage);
         }
         if (signal?.aborted) return cancelled();
-        snapshot = parsed.selection.kind === "explicit"
-          ? await preflightUnifiedConfig(deps)
-          : parsed.selection.kind === "alias"
-            && deps.resolveAlias !== undefined
-            && !parsed.speak
-          ? await preflightUnifiedConfig(deps)
-          : await loadApplicationConfigSnapshot(deps, parsed.speak);
-        if (signal?.aborted) return cancelled();
-        const resolved = await resolveSelection(
-          requestDeps,
-          parsed.selection,
-          snapshot,
-          interactive,
-          diagnostic,
-        );
-        if (typeof resolved === "number") {
-          return signal?.aborted ? cancelled() : resolved;
+        if (resolvedBeforePrompt !== undefined) {
+          selection = resolvedBeforePrompt;
+        } else {
+          snapshot = parsed.selection.kind === "explicit"
+            ? await preflightUnifiedConfig(deps)
+            : await loadApplicationConfigSnapshot(deps, parsed.speak);
+          if (signal?.aborted) return cancelled();
+          const resolved = await resolveSelection(
+            requestDeps,
+            parsed.selection,
+            snapshot,
+            interactive,
+            diagnostic,
+          );
+          if (typeof resolved === "number") {
+            return signal?.aborted ? cancelled() : resolved;
+          }
+          selection = resolved;
         }
-        selection = resolved;
       }
 
       const effectiveInstructions = parsed.instruction ?? selection.selection.instructions;
@@ -1786,6 +1976,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         selection.selection.model,
         prompt,
         effectiveInstructions,
+        selection.selection.workspace,
         signal,
       );
       if (generated.kind === "cancelled") return cancelled();

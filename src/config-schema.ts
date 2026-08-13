@@ -6,6 +6,11 @@ import {
   type AliasRecord,
 } from "./aliases.ts";
 import { compactKey, type AliasProfile, type VoiceConfig } from "./voice-routing.ts";
+import {
+  isWorkspaceConfig,
+  workspaceCapabilities,
+  type WorkspaceConfig,
+} from "./workspace.ts";
 
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
 const ROOT_FIELDS = new Set(["version", "voice", "aliases"]);
@@ -23,6 +28,8 @@ const ALIAS_FIELDS = new Set([
   "voice",
   "rate",
   "pitch",
+  "directories",
+  "directory_access",
 ]);
 
 export interface StoredVoiceConfig {
@@ -40,6 +47,7 @@ export interface StoredAliasConfig {
   readonly voice?: string;
   readonly rate?: number;
   readonly pitch?: number;
+  readonly workspace?: WorkspaceConfig;
 }
 
 export interface ConfigDocumentV1 {
@@ -180,6 +188,51 @@ function parseVoice(value: unknown): StoredVoiceConfig {
   return Object.freeze(voice);
 }
 
+function parseDirectories(
+  name: string,
+  provider: ByokProviderId,
+  value: unknown,
+  directoryAccess: unknown,
+): WorkspaceConfig {
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || value.some((directory) => typeof directory !== "string")
+  ) {
+    throw new ConfigSchemaError(
+      `aliases.${name}.directories must be a nonempty list of strings`,
+    );
+  }
+  const [primaryDirectory, ...additionalDirectories] = value as string[];
+  if (directoryAccess !== "read-only" && directoryAccess !== "read-write") {
+    throw new ConfigSchemaError(
+      `aliases.${name}.directory_access must be "read-only" or "read-write"`,
+    );
+  }
+  const workspace = {
+    primaryDirectory,
+    additionalDirectories,
+    directoryAccess,
+  };
+  const capabilities = workspaceCapabilities(provider);
+  if (!capabilities.primaryDirectory || !capabilities.additionalDirectories) {
+    throw new ConfigSchemaError(`aliases.${name}.directories is unsupported for this provider`);
+  }
+  if (directoryAccess === "read-write" && !capabilities.readWrite) {
+    throw new ConfigSchemaError(
+      `aliases.${name}.directory_access is unsupported for this provider`,
+    );
+  }
+  if (!isWorkspaceConfig(workspace)) {
+    throw new ConfigSchemaError(`aliases.${name}.directories is invalid`);
+  }
+  return Object.freeze({
+    primaryDirectory: workspace.primaryDirectory,
+    additionalDirectories: Object.freeze([...workspace.additionalDirectories]),
+    directoryAccess: workspace.directoryAccess,
+  });
+}
+
 function parseAlias(name: string, value: unknown): StoredAliasConfig {
   if (!isRecord(value)) throw new ConfigSchemaError(`alias ${name} must be a TOML table`);
   rejectUnknownFields(value, ALIAS_FIELDS, `aliases.${name}`);
@@ -199,6 +252,7 @@ function parseAlias(name: string, value: unknown): StoredAliasConfig {
     voice?: string;
     rate?: number;
     pitch?: number;
+    workspace?: WorkspaceConfig;
   } = { provider: value.provider, model };
   if (Object.hasOwn(value, "instructions")) alias.instructions = validateInstructions(value.instructions);
   if (Object.hasOwn(value, "spoken_names")) {
@@ -212,6 +266,21 @@ function parseAlias(name: string, value: unknown): StoredAliasConfig {
   }
   if (Object.hasOwn(value, "pitch")) {
     alias.pitch = optionalPitch(value.pitch, `aliases.${name}.pitch`);
+  }
+  const hasDirectories = Object.hasOwn(value, "directories");
+  const hasDirectoryAccess = Object.hasOwn(value, "directory_access");
+  if (hasDirectoryAccess && !hasDirectories) {
+    throw new ConfigSchemaError(
+      `aliases.${name}.directory_access requires directories`,
+    );
+  }
+  if (hasDirectories) {
+    alias.workspace = parseDirectories(
+      name,
+      value.provider,
+      value.directories,
+      hasDirectoryAccess ? value.directory_access : "read-only",
+    );
   }
   return Object.freeze(alias);
 }
@@ -304,6 +373,13 @@ export function projectAliases(document: ConfigDocumentV1): Readonly<Record<stri
     if (stored.instructions !== undefined) {
       record.instructions = stored.instructions;
     }
+    if (stored.workspace !== undefined) {
+      record.workspace = Object.freeze({
+        primaryDirectory: stored.workspace.primaryDirectory,
+        additionalDirectories: Object.freeze([...stored.workspace.additionalDirectories]),
+        directoryAccess: stored.workspace.directoryAccess,
+      });
+    }
     aliases[name] = Object.freeze(record);
   }
   return Object.freeze(aliases);
@@ -342,6 +418,13 @@ export function serializeConfigDocument(document: ConfigDocumentV1): string {
       ...(stored.voice === undefined ? {} : { voice: stored.voice }),
       ...(stored.rate === undefined ? {} : { rate: stored.rate }),
       ...(stored.pitch === undefined ? {} : { pitch: stored.pitch }),
+      ...(stored.workspace === undefined ? {} : {
+        directories: [
+          stored.workspace.primaryDirectory,
+          ...stored.workspace.additionalDirectories,
+        ],
+        directory_access: stored.workspace.directoryAccess,
+      }),
     };
   }
   const canonical: Record<string, unknown> = { version: 1 };

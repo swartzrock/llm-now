@@ -13,7 +13,7 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   ConfigSchemaError,
   parseConfigDocument,
@@ -313,6 +313,80 @@ describe("configuration transactions", () => {
       },
     });
     expect(await readFile(paths.configPath, "utf8")).not.toContain("normalize me");
+  });
+
+  test("persists workspace changes in unified configuration", async () => {
+    const directory = await temporaryDirectory();
+    const paths = {
+      configPath: join(directory, "config.toml"),
+      legacyAliasPath: join(directory, "aliases.json"),
+      legacyVoicePath: join(directory, "voice-router.toml"),
+    };
+    const workspace = {
+      primaryDirectory: resolve(directory, "primary"),
+      additionalDirectories: [
+        resolve(directory, "additional"),
+        resolve(directory, "additional with spaces"),
+      ],
+      directoryAccess: "read-write" as const,
+    };
+
+    expect(await saveConfigAlias(paths, "daily", {
+      provider: "codex-cli",
+      model: null,
+      workspace,
+    })).toBe("saved");
+    expect((await loadConfig(paths.configPath))?.aliases.daily).toEqual({
+      provider: "codex-cli",
+      model: "default",
+      workspace,
+    });
+    expect(projectAliases((await loadConfig(paths.configPath))!)).toEqual({
+      daily: { provider: "codex-cli", model: null, workspace },
+    });
+    const saved = await readFile(paths.configPath, "utf8");
+    expect(saved).toContain("directories = [");
+    expect(saved).not.toContain("[aliases.daily.workspace]");
+
+    expect(await saveConfigAlias(paths, "daily", {
+      provider: "codex-cli",
+      model: null,
+    }, { confirmOverwrite: async () => true })).toBe("saved");
+    expect((await loadConfig(paths.configPath))?.aliases.daily?.workspace).toBeUndefined();
+  });
+
+  test("migrates a legacy v3 workspace into unified version 1", async () => {
+    const directory = await temporaryDirectory();
+    const paths = {
+      configPath: join(directory, "config.toml"),
+      legacyAliasPath: join(directory, "aliases.json"),
+      legacyVoicePath: join(directory, "voice-router.toml"),
+    };
+    const legacyWorkspace = {
+      primaryDirectory: resolve(directory, "primary"),
+      additionalDirectories: [resolve(directory, "additional")],
+    };
+    const workspace = {
+      ...legacyWorkspace,
+      directoryAccess: "read-only" as const,
+    };
+    const legacy = `${JSON.stringify({
+      version: 3,
+      aliases: {
+        review: { provider: "claude-cli", model: null, workspace: legacyWorkspace },
+      },
+    })}\n`;
+    await writeFile(paths.legacyAliasPath, legacy);
+
+    expect(await migrateConfig(paths)).toEqual({ kind: "migrated", staleProfiles: [] });
+    expect(await loadConfig(paths.configPath)).toEqual({
+      version: 1,
+      aliases: {
+        review: { provider: "claude-cli", model: "default", workspace },
+      },
+    });
+    expect(await readFile(paths.configPath, "utf8")).toContain('directory_access = "read-only"');
+    expect(await readFile(`${paths.legacyAliasPath}.pre-unified-v1.bak`, "utf8")).toBe(legacy);
   });
 
   test("decline performs no migration, backup, lock, or unified write", async () => {
@@ -678,6 +752,77 @@ describe("configuration transactions", () => {
 });
 
 describe("unified configuration schema", () => {
+  test("round-trips capability-checked one-or-more directory workspaces", () => {
+    const primaryDirectory = resolve("workspace", "primary");
+    const additionalDirectories = [
+      resolve("workspace", "additional"),
+      resolve("workspace", "additional with spaces"),
+    ];
+    const document = parseConfigDocument(`
+      version = 1
+      [aliases.review]
+      provider = "claude-cli"
+      model = "default"
+      directories = ${JSON.stringify([primaryDirectory, ...additionalDirectories])}
+      directory_access = "read-only"
+    `);
+
+    expect(document.aliases.review?.workspace).toEqual({
+      primaryDirectory,
+      additionalDirectories,
+      directoryAccess: "read-only",
+    });
+    expect(projectAliases(document).review?.workspace).toEqual({
+      primaryDirectory,
+      additionalDirectories,
+      directoryAccess: "read-only",
+    });
+    const serialized = serializeConfigDocument(document);
+    expect(serialized).not.toContain("[aliases.review.workspace]");
+    expect(serialized).toContain("directories = [");
+    expect(serialized).toContain('directory_access = "read-only"');
+    expect(serialized).not.toContain("primary_directory");
+    expect(serialized).not.toContain("additional_directories");
+    expect(serializeConfigDocument(parseConfigDocument(serialized))).toBe(serialized);
+
+    const primaryOnly = parseConfigDocument(`
+      version = 1
+      [aliases.review]
+      provider = "claude-cli"
+      model = "default"
+      directories = [${JSON.stringify(primaryDirectory)}]
+      directory_access = "read-only"
+    `);
+    expect(primaryOnly.aliases.review?.workspace).toEqual({
+      primaryDirectory,
+      additionalDirectories: [],
+      directoryAccess: "read-only",
+    });
+    expect(serializeConfigDocument(primaryOnly)).toContain(
+      `directories = [ ${JSON.stringify(primaryDirectory)} ]`,
+    );
+    expect(serializeConfigDocument(primaryOnly)).toContain('directory_access = "read-only"');
+  });
+
+  test("defaults omitted directory access to read-only", () => {
+    const primaryDirectory = resolve("workspace", "primary");
+    const document = parseConfigDocument(`
+      version = 1
+      [aliases.review]
+      provider = "codex-cli"
+      model = "default"
+      directories = [${JSON.stringify(primaryDirectory)}]
+    `);
+
+    expect(document.aliases.review?.workspace).toEqual({
+      primaryDirectory,
+      additionalDirectories: [],
+      directoryAccess: "read-only",
+    });
+    expect(projectAliases(document).review?.workspace?.directoryAccess).toBe("read-only");
+    expect(serializeConfigDocument(document)).toContain('directory_access = "read-only"');
+  });
+
   test("round-trips aliases canonically while retaining omission state", () => {
     const document = parseConfigDocument(`
       # removed by canonical rewrite
@@ -791,6 +936,28 @@ Keep this on two lines."""
     ];
 
     for (const text of invalidDocuments) {
+      expect(() => parseConfigDocument(text), text).toThrow(ConfigSchemaError);
+    }
+  });
+
+  test("rejects invalid, unsupported, and nested directory fields", () => {
+    const primaryDirectory = resolve("workspace", "primary");
+    const additionalDirectory = resolve("workspace", "additional");
+    const documents = [
+      `version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='read-only'`,
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=['relative']\ndirectory_access='read-only'",
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[]\ndirectory_access='read-only'",
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[1]\ndirectory_access='read-only'",
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='read-only'\nextra=true`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}, ${JSON.stringify(additionalDirectory)}, ${JSON.stringify(additionalDirectory)}]\ndirectory_access='read-only'`,
+      `version = 1\n[aliases.slug]\nprovider='claude-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='read-write'`,
+      "version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectory_access='read-only'",
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\ndirectories=[${JSON.stringify(primaryDirectory)}]\ndirectory_access='write'`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\nprimary_directory=${JSON.stringify(primaryDirectory)}\nadditional_directories=[]`,
+      `version = 1\n[aliases.slug]\nprovider='codex-cli'\nmodel='default'\n[aliases.slug.workspace]\ndirectories=[${JSON.stringify(primaryDirectory)}]`,
+    ];
+
+    for (const text of documents) {
       expect(() => parseConfigDocument(text), text).toThrow(ConfigSchemaError);
     }
   });

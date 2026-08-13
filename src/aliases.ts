@@ -3,6 +3,13 @@ import { chmod, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname, join, posix, win32 } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { PersistenceBlocker } from "./credentials.ts";
+import {
+  assertWorkspaceSupported,
+  isWorkspaceConfig,
+  sameWorkspace,
+  type WorkspaceConfig,
+  WorkspaceError,
+} from "./workspace.ts";
 
 const ALIAS_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const MAX_ALIAS_DIAGNOSTIC_VALUE_LENGTH = 128;
@@ -21,6 +28,7 @@ export interface AliasRecord {
   provider: ByokProviderId;
   model: string | null;
   instructions?: string;
+  workspace?: WorkspaceConfig;
 }
 
 export interface AliasDocumentV1 {
@@ -33,7 +41,12 @@ export interface AliasDocumentV2 {
   aliases: Record<string, AliasRecord>;
 }
 
-export type AliasDocument = AliasDocumentV1 | AliasDocumentV2;
+export interface AliasDocumentV3 {
+  version: 3;
+  aliases: Record<string, AliasRecord>;
+}
+
+export type AliasDocument = AliasDocumentV1 | AliasDocumentV2 | AliasDocumentV3;
 
 export interface AliasPathOptions {
   platform: NodeJS.Platform;
@@ -130,6 +143,20 @@ function validateVersion2AliasRecord(value: unknown): value is AliasRecord {
     && (value.instructions === undefined || isValidInstructions(value.instructions));
 }
 
+function validateVersion3AliasRecord(value: unknown): value is AliasRecord {
+  if (!isObject(value)) return false;
+  const keys = [
+    "model",
+    "provider",
+    ...(value.instructions === undefined ? [] : ["instructions"]),
+    ...(value.workspace === undefined ? [] : ["workspace"]),
+  ];
+  return hasExactlyKeys(value, keys)
+    && validateAliasTarget(value)
+    && (value.instructions === undefined || isValidInstructions(value.instructions))
+    && (value.workspace === undefined || isWorkspaceConfig(value.workspace));
+}
+
 function validateDocument(value: unknown): value is AliasDocument {
   if (!isObject(value) || !hasExactlyKeys(value, ["aliases", "version"])) return false;
   if (!isObject(value.aliases)) return false;
@@ -138,6 +165,8 @@ function validateDocument(value: unknown): value is AliasDocument {
     ? validateVersion1AliasRecord
     : value.version === 2
     ? validateVersion2AliasRecord
+    : value.version === 3
+    ? validateVersion3AliasRecord
     : null;
   if (validateRecord === null) return false;
 
@@ -169,6 +198,7 @@ function canonicalizeDocument(document: AliasDocument, path: string): AliasDocum
     });
 
   for (const { originalName, canonicalName, record } of entries) {
+    validateWorkspaceSupport(canonicalName, record);
     const current = seenAliases.get(canonicalName);
     if (current === undefined) {
       aliases[canonicalName] = record;
@@ -189,6 +219,20 @@ function canonicalizeDocument(document: AliasDocument, path: string): AliasDocum
   return { version: document.version, aliases };
 }
 
+function validateWorkspaceSupport(name: string, record: AliasRecord): void {
+  if (record.workspace === undefined) return;
+  try {
+    assertWorkspaceSupported(record.provider, record.workspace.directoryAccess);
+  } catch (error) {
+    if (error instanceof WorkspaceError) {
+      throw new AliasStoreError(`alias "${summarizeDiagnosticValue(name)}": ${error.message}`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+}
+
 function formatAliasTarget(record: AliasRecord): string {
   return summarizeDiagnosticValue(`${record.provider}/${record.model ?? "(default)"}`);
 }
@@ -203,6 +247,14 @@ function summarizeDiagnosticValue(value: string): string {
 export function parseAliasDocument(text: string, path: string): AliasDocument {
   try {
     const parsed: unknown = JSON.parse(text);
+    if (isObject(parsed) && parsed.version === 3 && isObject(parsed.aliases)) {
+      for (const record of Object.values(parsed.aliases)) {
+        if (!isObject(record) || !isObject(record.workspace)) continue;
+        if (hasExactlyKeys(record.workspace, ["additionalDirectories", "primaryDirectory"])) {
+          record.workspace.directoryAccess = "read-only";
+        }
+      }
+    }
     if (!validateDocument(parsed)) throw new Error("invalid alias document schema");
     return canonicalizeDocument(parsed, path);
   } catch (error) {
@@ -240,6 +292,10 @@ function validateSaveInput(name: string, record: AliasRecord): string {
   if (record.instructions !== undefined && !isValidInstructions(record.instructions)) {
     throw new AliasStoreError("invalid alias instructions");
   }
+  if (record.workspace !== undefined) {
+    if (!isWorkspaceConfig(record.workspace)) throw new AliasStoreError("invalid alias workspace");
+    validateWorkspaceSupport(canonicalName, record);
+  }
   return canonicalName;
 }
 
@@ -248,6 +304,13 @@ function storedAliasRecord(record: AliasRecord): AliasRecord {
     provider: record.provider,
     model: record.model,
     ...(record.instructions === undefined ? {} : { instructions: record.instructions }),
+    ...(record.workspace === undefined ? {} : {
+      workspace: {
+        primaryDirectory: record.workspace.primaryDirectory,
+        additionalDirectories: [...record.workspace.additionalDirectories],
+        directoryAccess: record.workspace.directoryAccess,
+      },
+    }),
   };
 }
 
@@ -363,7 +426,9 @@ export async function saveAlias(
           [canonicalName]: storedAliasRecord(record),
         };
         const next: AliasDocument = {
-          version: document.version === 2 || record.instructions !== undefined
+          version: document.version === 3 || record.workspace !== undefined
+            ? 3
+            : document.version === 2 || record.instructions !== undefined
             ? 2
             : 1,
           aliases: nextAliases,
@@ -392,5 +457,6 @@ export async function saveAlias(
 export function sameAliasRecord(left: AliasRecord, right: AliasRecord): boolean {
   return left.provider === right.provider
     && left.model === right.model
-    && left.instructions === right.instructions;
+    && left.instructions === right.instructions
+    && sameWorkspace(left.workspace, right.workspace);
 }
