@@ -65,10 +65,10 @@ directories = ["/absolute/project", "/absolute/shared", "/absolute/reference mat
 directory_access = "read-write"
 ```
 
-`directories` must contain at least one absolute, unique path. The first
-directory is the CLI working directory; remaining entries are additional
-directories in their listed order. `directory_access` may be `"read-only"` or
-`"read-write"`; omitting it defaults the workspace to read-only. Setting
+`directories` must contain at least one absolute, unique path. The first path is
+the CLI working directory. Remaining entries are additional directories, in
+their listed order. `directory_access` may be `"read-only"` or `"read-write"`;
+omitting it defaults the workspace to read-only. Setting
 `directory_access` without `directories` is invalid. Omit `directories` when
 the shortcut has no workspace.
 

@@ -134,34 +134,21 @@ configure aliases, and customize voice routing and speech.
 
 ### Workspace shortcuts
 
-A Codex CLI or Claude CLI shortcut can store one primary directory plus ordered
-additional directories. The primary directory becomes the CLI working
-directory, and each additional directory is forwarded separately. The shortcut
-remains globally callable: its workspace is execution context, not an availability rule.
+Add one or more absolute directories to a Codex CLI or Claude CLI alias:
 
-| Provider class | Workspace support | Access modes |
-| --- | --- | --- |
-| Codex CLI | Primary plus additional directories | `read-only`, `read-write` |
-| Claude CLI | Primary plus additional directories | `read-only` |
-| Ollama and LM Studio | Rejected | None |
-| Cloud API providers | Rejected | None |
+```toml
+[aliases.terra]
+provider = "codex-cli"
+model = "default"
+directories = ["/absolute/project", "/absolute/shared"]
+directory_access = "read-write"
+```
 
-Every workspace has an access mode; omitting `directory_access` defaults to
-read-only, while read-write must be explicit. Read-write Codex workspaces allow
-Codex to create, edit, rename, and delete files in every configured directory;
-the interactive grant is an explicit confirmation that defaults to No.
-Read-only Codex workspaces keep its read-only sandbox, while Claude receives
-only the `Read`, `Glob`, and `Grep` file tools. Workspace paths are machine-local
-plaintext in `config.toml` and may appear in child-process arguments or local
-audit tools. A CLI may send file content it reads to the selected Codex or
-Claude service under that service's policies. Store only directories whose
-contents may be disclosed to that service, and grant write access only where
-those file operations are acceptable.
-
-Moving, removing, denying access to, or canonically duplicating a configured
-directory makes the shortcut fail before prompting or launching the CLI. It
-never falls back to the caller's directory. Inventory shows only `read-only
-workspace +N` or `read-write workspace +N`; it does not print full paths.
+The first path is the working directory; the rest are additional directories.
+Omit `directory_access` for `read-only`; `read-write` lets Codex modify every
+listed directory, while Claude CLI supports read-only only. Paths are plaintext
+in `config.toml`. The workspace is execution context, not an availability rule,
+so the alias remains callable from any directory.
 
 ## Credentials
 
