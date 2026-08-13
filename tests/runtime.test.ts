@@ -547,6 +547,7 @@ describe("runtime gateway", () => {
     const requests: LocalCommandRequest[] = [];
     const gateway = createTestGateway({
       env: { PATH: `.${delimiter}${trusted}` },
+      workspaceLoginShellPathLoader: async () => "",
       workspaceRunner: {
         run: async (request) => {
           requests.push(request);
