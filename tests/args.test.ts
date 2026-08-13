@@ -46,7 +46,7 @@ Options:
   --voice-route        Parse “[wake word] <shortcut> <question>” from input
   --speak              Speak the response on macOS instead of using stdout
   --input <text>       Prompt or dictated input
-  --instruction <text> Override saved instructions for this request
+  --instruction <text> Replace shared alias guidance for this request
   --alias <name>       Select a saved shortcut
   --provider <id>      Select a provider
   --model <id|default> Select a model; default supports codex-cli and claude-cli

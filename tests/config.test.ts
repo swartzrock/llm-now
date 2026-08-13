@@ -291,7 +291,11 @@ describe("configuration transactions", () => {
       legacyAliasPath: join(directory, "aliases.json"),
       legacyVoicePath: join(directory, "voice-router.toml"),
     };
-    await writeFile(paths.configPath, `# normalize me\nversion = 1\n[voice]\nwake_words = []\nmin_similarity = 72\n[aliases.keep]\nprovider = "ollama"\nmodel = "old"\nspoken_names = []\nvoice = "Alex"\nrate = 210\npitch = 48\n[aliases.change]\nprovider = "ollama"\nmodel = "before"\nvoice = "Samantha"\n`);
+    const sharedInstructions = "\n  Shared café ☕ policy.  \n";
+    await writeFile(paths.configPath, `# normalize me\nversion = 1\nshared_instructions = ${JSON.stringify(sharedInstructions)}\n[voice]\nwake_words = []\nmin_similarity = 72\n[aliases.keep]\nprovider = "ollama"\nmodel = "old"\nspoken_names = []\nvoice = "Alex"\nrate = 210\npitch = 48\n[aliases.change]\nprovider = "ollama"\nmodel = "before"\nvoice = "Samantha"\n`);
+
+    expect(await saveConfigAlias(paths, "new", { provider: "ollama", model: "created" }))
+      .toBe("saved");
 
     expect(await saveConfigAlias(paths, "change", { provider: "ollama", model: "after" }, {
       confirmOverwrite: async () => true,
@@ -299,6 +303,7 @@ describe("configuration transactions", () => {
 
     expect(await loadConfig(paths.configPath)).toEqual({
       version: 1,
+      sharedInstructions,
       voice: { wakeWords: [], minSimilarity: 72 },
       aliases: {
         change: { provider: "ollama", model: "after", voice: "Samantha" },
@@ -310,6 +315,7 @@ describe("configuration transactions", () => {
           rate: 210,
           pitch: 48,
         },
+        new: { provider: "ollama", model: "created" },
       },
     });
     expect(await readFile(paths.configPath, "utf8")).not.toContain("normalize me");
@@ -752,6 +758,58 @@ describe("configuration transactions", () => {
 });
 
 describe("unified configuration schema", () => {
+  test("round-trips optional shared instructions exactly after version", () => {
+    for (const sharedInstructions of [
+      "Shared policy",
+      "\n  Use Unicode: café ☕.\nKeep exact boundary whitespace.  \n",
+    ]) {
+      const document = parseConfigDocument(`
+        version = 1
+        shared_instructions = ${JSON.stringify(sharedInstructions)}
+        [aliases]
+      `);
+
+      expect(document).toEqual({ version: 1, sharedInstructions, aliases: {} });
+      const serialized = serializeConfigDocument(document);
+      expect(serialized.indexOf("version = 1"))
+        .toBeLessThan(serialized.indexOf("shared_instructions ="));
+      expect(serialized.indexOf("shared_instructions ="))
+        .toBeLessThan(serialized.indexOf("[aliases]"));
+      expect(serializeConfigDocument(parseConfigDocument(serialized))).toBe(serialized);
+      expect(parseConfigDocument(serialized).sharedInstructions).toBe(sharedInstructions);
+    }
+
+    const omitted = parseConfigDocument("version = 1\n[aliases]\n");
+    expect(Object.hasOwn(omitted, "sharedInstructions")).toBeFalse();
+    expect(serializeConfigDocument(omitted)).not.toContain("shared_instructions");
+  });
+
+  test("rejects invalid shared instructions with value-free field diagnostics", () => {
+    for (const { value, expected, sentinel } of [
+      {
+        value: "   ",
+        expected: "shared_instructions must be a nonempty string",
+        sentinel: "",
+      },
+      {
+        value: "private-SHARED-SENTINEL\u0085value",
+        expected: "shared_instructions contain unsupported control characters",
+        sentinel: "SHARED-SENTINEL",
+      },
+    ]) {
+      let error: unknown;
+      try {
+        parseConfigDocument(`version = 1\nshared_instructions = ${JSON.stringify(value)}\n[aliases]\n`);
+      } catch (caught) {
+        error = caught;
+      }
+
+      expect(error).toBeInstanceOf(ConfigSchemaError);
+      expect(String(error)).toContain(expected);
+      if (sentinel.length > 0) expect(String(error)).not.toContain(sentinel);
+    }
+  });
+
   test("round-trips capability-checked one-or-more directory workspaces", () => {
     const primaryDirectory = resolve("workspace", "primary");
     const additionalDirectories = [

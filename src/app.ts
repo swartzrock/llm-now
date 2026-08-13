@@ -168,6 +168,15 @@ interface LauncherWork {
   selection: ResolvedSelection;
 }
 
+function composeInstructionLayers(
+  general: string | undefined,
+  local: string | undefined,
+): string | undefined {
+  if (general === undefined) return local;
+  if (local === undefined) return general;
+  return `${general}\n\n${local}`;
+}
+
 async function preflightAliasWorkspace(selection: AliasRecord): Promise<AliasRecord> {
   if (selection.workspace === undefined) return selection;
   return withWorkspace(
@@ -1962,9 +1971,20 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         }
       }
 
-      const effectiveInstructions = parsed.instruction ?? selection.selection.instructions;
+      const generalInstructions = selection.alias === undefined
+        ? parsed.instruction
+        : parsed.instruction ?? snapshot?.document?.sharedInstructions;
+      const aliasInstructions = selection.alias === undefined
+        ? undefined
+        : selection.selection.instructions;
+      const effectiveInstructions = composeInstructionLayers(
+        generalInstructions,
+        aliasInstructions,
+      );
       requestValues.push(prompt);
-      if (effectiveInstructions !== undefined) requestValues.push(effectiveInstructions);
+      for (const value of [generalInstructions, aliasInstructions, effectiveInstructions]) {
+        if (value !== undefined) requestValues.push(value);
+      }
       let speech: PreparedVoiceSpeech | undefined;
       if (parsed.speak) {
         const profile = selection.alias === undefined

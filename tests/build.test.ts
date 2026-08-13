@@ -127,19 +127,21 @@ describe("native release build", () => {
     ).text();
     const expectedInstructions =
       'Use "quoted" runtime smoke \\\\ transport.\\nKeep each answer concise.';
+    const expectedSharedInstructions = "Apply shared runtime smoke guidance.";
     const expectedOverrideInstructions =
       "  Replace saved smoke instructions.\\nUse the one-run override.  ";
 
     expect(releaseValidation).toContain('"config.toml"');
     expect(releaseValidation).toContain("serializeConfigDocument");
     expect(releaseValidation).toContain("additional with spaces");
-    expect(releaseValidation).toContain("fake:instruction-present:workspace-3");
-    expect(releaseValidation).toContain("fake:claude-instruction-present:workspace-3");
+    expect(releaseValidation).toContain("fake:instruction-shared-local:workspace-3");
+    expect(releaseValidation).toContain("fake:claude-instruction-shared-local:workspace-3");
     expect(releaseValidation).toContain(expectedInstructions);
     expect(fakeCli).toContain(expectedInstructions);
+    expect(releaseValidation).toContain(expectedSharedInstructions);
+    expect(fakeCli).toContain(expectedSharedInstructions);
     expect(releaseValidation).toContain(expectedOverrideInstructions);
     expect(fakeCli).toContain(expectedOverrideInstructions);
-    expect(releaseValidation).toContain("fake:instruction-present");
     expect(releaseValidation).toContain("fake:instruction-absent");
     expect(releaseValidation).toContain("fake:instruction-override");
     expect(fakeCli).toContain("fake:instruction-override");
@@ -258,7 +260,7 @@ describe("native release build", () => {
     expect(configuration).toContain('directory_access = "read-write"');
     expect(configuration).not.toContain("primary_directory");
     expect(configuration).not.toContain("additional_directories");
-    expect(manualTesting).toContain("fake:instruction-present:workspace-3");
+    expect(manualTesting).toContain("fake:instruction-shared-local:workspace-3");
     expect(demo).toContain("Primary workspace directory \\(press Enter to skip\\)");
     expect(releaseIntent).toMatch(/"llm-now": minor|### Minor Changes/);
     expect(releaseIntent).toContain("globally callable");

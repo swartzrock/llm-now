@@ -199,9 +199,15 @@ printf 'smoke' | "$BRANCH_BIN" daily >stdout.bin 2>stderr.txt
 
 Arguments, `--input`, piped stdin, and noninteractive execution must bypass the launcher deterministically. The three alias calls must each write only `fake:instruction-present`; the explicit call must write only `fake:instruction-absent`. Existing alias/direct terminology, diagnostics, exit codes, and redaction remain unchanged. Fail one fixture call deliberately and confirm the fixed diagnostic does not echo child-process arguments or saved instructions. Also run bare `"$BRANCH_BIN" >stdout.bin` with stderr attached to the PTY and complete one launcher action; menus and prompts must remain on stderr while only the model response reaches the redirected file.
 
-### SC-11: Request-scoped instruction isolation
+### SC-11: Shared and request-scoped instruction composition
 
-Keep the instructed `daily` shortcut from SC-02 and record `config.toml` byte-for-byte. The maintained fixture accepts this second, distinct multiline sentinel:
+Keep the instructed `daily` shortcut from SC-02. Manually add a distinct,
+non-secret multiline `shared_instructions` root value, then record
+`config.toml` byte-for-byte. A normal alias call must transmit the shared value,
+one inserted blank line, and the saved alias value in that order. An explicit
+or run-once call without `--instruction` must remain instruction-free.
+
+The maintained fixture also accepts this request-scoped sentinel:
 
 ```bash
 OVERRIDE=$'  Replace saved smoke instructions.\nUse the one-run override.  '
@@ -210,7 +216,21 @@ OVERRIDE=$'  Replace saved smoke instructions.\nUse the one-run override.  '
 "$BRANCH_BIN" --provider codex-cli --model default --instruction "$OVERRIDE" --input "smoke" >stdout.bin 2>stderr.txt
 ```
 
-Each call must exit `0`, leave stderr empty, and write only `fake:instruction-override`. This proves the exact leading/trailing spaces and line feed survive argv and remain separate from the `smoke` prompt. The two alias calls must replace the different saved sentinel for one request, not append to it. `config.toml` must remain byte-for-byte unchanged, and a later `daily` call without the option must again write `fake:instruction-present`. Also verify `--instruction=-brief` is accepted with a real provider; a separated dash-leading value is standard option syntax and is not accepted.
+Each call must exit `0` and leave stderr empty. The explicit call must write only
+`fake:instruction-override`. The alias calls must prove the exact command-line
+value replaced the configured shared layer while the saved alias value still
+followed after one inserted blank line. Exact leading/trailing spaces and line
+feeds must survive. `config.toml` must remain byte-for-byte unchanged, and a
+later `daily` call without the option must again use the configured shared plus
+saved alias layers. Also verify `--instruction=-brief` is accepted with a real
+provider; a separated dash-leading value is standard option syntax and is not
+accepted.
+
+For downgrade recovery, copy the shared value to a temporary note, remove only
+the `shared_instructions` root field, and run a pre-feature binary against the
+same temporary config. It must accept the remaining version 1 document and use
+the alias-local instructions unchanged. Restore the current binary and shared
+field after the check.
 
 Run representative parser failures with a blank-after-trimming value, a tab-bearing value, and a Unicode line-separator-bearing value. Each must exit `2`, leave stdout empty, emit a fixed `usage:` diagnostic without either the raw or JSON-serialized submitted value, and perform no prompt, alias, provider, or generation work. Separately confirm that `--instruction` alone does not supply a prompt, simultaneous `--input` and piped stdin remains invalid, and a selectorless noninteractive call remains nondeterministic.
 
@@ -790,13 +810,14 @@ The exact legacy JSON must remain available in its migration backup.
 
 ### MT-22B: Canonically rewrite without pinning defaults
 
-Manually edit valid `config.toml` to add comments, irregular spacing, two
-unsorted aliases, explicit empty `wake_words` and `spoken_names`, routing
-thresholds, instructions, and per-alias voice, rate, and pitch. Save one alias
-through llm-now. The result may remove every comment and normalize all spacing,
-but it must preserve every valid unrelated value, retain explicitly configured
-empty lists, sort aliases, and remain valid TOML. A second semantically
-unchanged rewrite must be byte-identical.
+Manually edit valid `config.toml` to add comments, irregular spacing,
+`shared_instructions`, two unsorted aliases, explicit empty `wake_words` and
+`spoken_names`, routing thresholds, alias instructions, and per-alias voice,
+rate, and pitch. Save one alias through llm-now. The result may remove every
+comment and normalize all spacing, but it must preserve every valid unrelated
+value including the exact shared text, retain explicitly configured empty
+lists, sort aliases, and remain valid TOML. A second semantically unchanged
+rewrite must be byte-identical.
 
 Delete each optional field separately and verify only that field resumes its
 fallback: `wake_words = ["hey"]`, minimum fuzzy phrase length `4`, minimum
@@ -893,11 +914,13 @@ Use only the maintained fake Codex fixture, its two non-secret multiline
 sentinels, and temporary workspace roots. The packaged smoke must invoke a
 workspace alias from outside its primary root, pass two additional roots in
 order (including a path with spaces), and receive
-`fake:instruction-present:workspace-3`; the otherwise identical explicit call must
-receive `fake:instruction-absent`. A second alias call supplies the distinct
-command-line sentinel and must receive `fake:instruction-override`, proving
-replacement rather than mere presence while `workspace-3` remains present. The
-`config.toml` file must remain unchanged.
+`fake:instruction-shared-local:workspace-3` for the configured
+shared-plus-local instruction; the otherwise identical explicit call must receive
+`fake:instruction-absent`. A second alias call supplies the distinct
+command-line sentinel and must receive
+`fake:instruction-override-local:workspace-3`, proving the shared layer was replaced
+while the local layer and `workspace-3` remained present. The `config.toml`
+file must remain unchanged.
 The fixture `PATH` must contain only the temporary fixture directory, and
 non-Windows runs must set `SHELL` to a nonexistent file, so no real CLI or LLM
 can be selected. The loopback fake Ollama check may still run, but no external
@@ -1282,7 +1305,8 @@ Keep the Bun test suite as the authority for behavior that is difficult or unrel
   instruction and workspace transitions;
 - legacy JSON v1-to-v2 instruction migration, sticky v3 workspace migration,
   and plaintext validation;
-- exact per-invocation instruction forwarding with absent instructions on explicit and run-once calls;
+- exact shared-plus-local and command-line-plus-local forwarding for aliases,
+  with configured instructions absent on explicit and run-once calls;
 - Homebrew exact/older/drift/newer/invalid classification, one-write concurrency, nullable response metadata, and credential-safe diagnostics in `tests/homebrew-reconcile.test.ts`;
 - fixed fake-CLI diagnostics that never echo instruction-bearing arguments;
 - concurrent alias writers and ownership-aware stale-lock recovery; and

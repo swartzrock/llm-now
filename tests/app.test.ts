@@ -13,6 +13,7 @@ import {
   type SaveAliasResult,
 } from "../src/aliases.ts";
 import { renderHelpText } from "../src/args.ts";
+import { serializeConfigDocument } from "../src/config-schema.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
 import {
   CONFIG_FAILED_NOTICE,
@@ -53,6 +54,27 @@ async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(process.cwd(), ".tmp-app-aliases-"));
   temporaryDirectories.push(directory);
   return directory;
+}
+
+function unifiedAliasConfig(options: {
+  sharedInstructions?: string;
+  aliasInstructions?: string;
+} = {}): string {
+  return serializeConfigDocument({
+    version: 1,
+    ...(options.sharedInstructions === undefined
+      ? {}
+      : { sharedInstructions: options.sharedInstructions }),
+    aliases: {
+      daily: {
+        provider: "ollama",
+        model: "qwen",
+        ...(options.aliasInstructions === undefined
+          ? {}
+          : { instructions: options.aliasInstructions }),
+      },
+    },
+  });
 }
 
 afterEach(async () => {
@@ -734,7 +756,7 @@ describe("voice boundary", () => {
         expect(prompt).toBe(
           "Answer concisely in plain text suitable for speech. Do not use Markdown or code fences unless the question requires code.\n\nintegrated question",
         );
-        expect(instructions).toBe("request instruction");
+        expect(instructions).toBe("request instruction\n\nsaved");
         return "integrated answer";
       },
     });
@@ -2940,6 +2962,35 @@ describe("one-shot application", () => {
     expect(inputMessages).toEqual(["Prompt for daily · OpenAI · gpt-5"]);
   });
 
+  test("composes configured shared and local instructions for a launcher shortcut", async () => {
+    const directory = await temporaryDirectory();
+    const configPath = join(directory, "config.toml");
+    await Bun.write(configPath, unifiedAliasConfig({
+      sharedInstructions: "launcher shared role",
+      aliasInstructions: "launcher local role",
+    }));
+    const app = dependencies({
+      args: [],
+      configPath,
+      stdin: input("", true),
+      stderrTty: true,
+      env: { NO_COLOR: "1" },
+      prompter: prompts({
+        choices: ["launcher:run-shortcut", "daily"],
+        names: ["hello"],
+      }),
+      runtime: runtime({
+        generate: async (_provider, _model, _prompt, _signal, instructions) => {
+          expect(instructions).toBe("launcher shared role\n\nlauncher local role");
+          return "shortcut response";
+        },
+      }),
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(app.runtime.calls.generate).toBe(1);
+  });
+
   test("cancels the shortcut picker or prompt without generating response bytes", async () => {
     const scenarios = [
       {
@@ -3092,6 +3143,74 @@ describe("one-shot application", () => {
           "◆ Ollama · qwen is already saved as alias daily",
         );
       }
+    }
+  });
+
+  test("keeps configured shared instructions inactive for explicit and fresh selections", async () => {
+    const directory = await temporaryDirectory();
+    const configPath = join(directory, "config.toml");
+    await Bun.write(configPath, unifiedAliasConfig({
+      sharedInstructions: "configured alias-only role",
+    }));
+
+    const scenarios: Array<{
+      name: string;
+      args: string[];
+      choices?: PromptValue[];
+      expected?: string;
+    }> = [
+      {
+        name: "explicit without CLI instructions",
+        args: ["--provider", "ollama", "--model", "qwen", "--input", "hello"],
+      },
+      {
+        name: "explicit with CLI instructions",
+        args: [
+          "--provider",
+          "ollama",
+          "--model",
+          "qwen",
+          "--input",
+          "hello",
+          "--instruction",
+          "one-shot role",
+        ],
+        expected: "one-shot role",
+      },
+      {
+        name: "fresh without CLI instructions",
+        args: [],
+        choices: ["launcher:run-once", "claude-cli", false],
+      },
+      {
+        name: "fresh with CLI instructions",
+        args: ["--input", "hello", "--instruction", "one-shot role"],
+        choices: [false, "claude-cli", false],
+        expected: "one-shot role",
+      },
+    ];
+    for (const scenario of scenarios) {
+      const interactive = scenario.choices !== undefined;
+      const app = dependencies({
+        args: scenario.args,
+        configPath,
+        stdin: input("", interactive),
+        stderrTty: interactive,
+        prompter: interactive
+          ? prompts({ choices: scenario.choices, names: ["hello"] })
+          : prompts(),
+        runtime: runtime({
+          providers: ["claude-cli"],
+          listModels: async () => [],
+          generate: async (_provider, _model, _prompt, _signal, instructions) => {
+            expect(instructions, scenario.name).toBe(scenario.expected);
+            return "response";
+          },
+        }),
+      });
+
+      expect(await runApplication(app.value), scenario.name).toBe(0);
+      expect(app.runtime.calls.generate, scenario.name).toBe(1);
     }
   });
 
@@ -3360,7 +3479,7 @@ describe("one-shot application", () => {
     expect(piped.runtime.calls.generate).toBe(1);
   });
 
-  test("applies a request instruction after selectorless interactive alias selection", async () => {
+  test("composes request and local instructions after selectorless alias selection", async () => {
     const seen: Array<{ message: string; options: PromptOption[] }> = [];
     let loads = 0;
     const app = dependencies({
@@ -3387,7 +3506,7 @@ describe("one-shot application", () => {
       runtime: runtime({
         generate: async (provider, model, _prompt, _signal, instructions) => {
           expect({ provider, model }).toEqual({ provider: "openai", model: "gpt-5" });
-          expect(instructions).toBe("interactive request role");
+          expect(instructions).toBe("interactive request role\n\ninteractive picker role");
           return "alias-result";
         },
       }),
@@ -3738,37 +3857,62 @@ describe("one-shot application", () => {
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
   });
 
-  test("positional and long-form aliases preserve default and override parity", async () => {
+  test("positional and long-form aliases compose every defined instruction layer exactly", async () => {
+    const directory = await temporaryDirectory();
+    const configPath = join(directory, "config.toml");
     for (const scenario of [
-      { instructionArgs: [] as string[], expected: "shared alias role" },
       {
-        instructionArgs: ["--instruction", "request alias role"],
-        expected: "request alias role",
+        name: "shared and local",
+        sharedInstructions: " shared role\n",
+        aliasInstructions: "\nlocal role ",
+        instructionArgs: [] as string[],
+        expected: " shared role\n\n\n\nlocal role ",
+      },
+      {
+        name: "CLI and local",
+        sharedInstructions: "inactive shared role",
+        aliasInstructions: "\nlocal role ",
+        instructionArgs: ["--instruction", " request role\n"],
+        expected: " request role\n\n\n\nlocal role ",
+      },
+      {
+        name: "shared only",
+        sharedInstructions: "shared only",
+        aliasInstructions: undefined,
+        instructionArgs: [] as string[],
+        expected: "shared only",
+      },
+      {
+        name: "local only",
+        sharedInstructions: undefined,
+        aliasInstructions: "local only",
+        instructionArgs: [] as string[],
+        expected: "local only",
+      },
+      {
+        name: "no layers",
+        sharedInstructions: undefined,
+        aliasInstructions: undefined,
+        instructionArgs: [] as string[],
+        expected: undefined,
       },
     ]) {
+      await Bun.write(configPath, unifiedAliasConfig(scenario));
       const results = [];
       for (const args of [
         ["Daily", "--input", "hello", ...scenario.instructionArgs],
         ["--input", "hello", "--alias", "Daily", ...scenario.instructionArgs],
       ]) {
-        const calls: string[] = [];
-        const resolved = Object.freeze({
-          provider: "claude-cli" as const,
-          model: null,
-          instructions: "shared alias role",
-        });
+        let observedInstructions: string | undefined;
         const app = dependencies({
           args,
+          configPath,
           runtime: runtime({
-            generate: async (provider, model, prompt, signal, instructions) => {
-              calls.push(`${provider}:${model}:${prompt}:${signal !== undefined}:${instructions}`);
+            generate: async (_provider, _model, _prompt, _signal, instructions) => {
+              observedInstructions = instructions;
               return "alias-result";
             },
           }),
-          resolveAlias: async (_path, name) => {
-            calls.push(`resolve:${name}`);
-            return resolved;
-          },
         });
 
         results.push({
@@ -3776,54 +3920,42 @@ describe("one-shot application", () => {
           stdout: app.stdout.text(),
           stderr: app.stderr.text(),
           runtimeCalls: app.runtime.calls,
-          calls,
-          resolved,
+          instructions: observedInstructions,
         });
       }
 
-      expect(results[0]).toEqual(results[1]);
-      expect(results[0]).toEqual({
+      expect(results[0], scenario.name).toEqual(results[1]);
+      expect(results[0], scenario.name).toEqual({
         exitCode: 0,
         stdout: "alias-result",
         stderr: "",
         runtimeCalls: { discover: 0, list: 0, generate: 1 },
-        calls: [`resolve:Daily`, `claude-cli:null:hello:true:${scenario.expected}`],
-        resolved: {
-          provider: "claude-cli",
-          model: null,
-          instructions: "shared alias role",
-        },
+        instructions: scenario.expected,
       });
     }
   });
 
-  test("does not persist a request instruction in the real alias store", async () => {
+  test("does not persist a request instruction in unified configuration", async () => {
     const directory = await temporaryDirectory();
-    const aliasPath = join(directory, "aliases.json");
-    const stored = JSON.stringify({
-      version: 2,
-      aliases: {
-        daily: {
-          provider: "ollama",
-          model: "qwen",
-          instructions: "saved alias role",
-        },
-      },
+    const configPath = join(directory, "config.toml");
+    const stored = unifiedAliasConfig({
+      sharedInstructions: "configured shared role",
+      aliasInstructions: "saved alias role",
     });
-    await Bun.write(aliasPath, stored);
+    await Bun.write(configPath, stored);
     const app = dependencies({
       args: ["daily", "--input", "hello", "--instruction", "request alias role"],
-      aliasPath,
+      configPath,
       runtime: runtime({
         generate: async (_provider, _model, _prompt, _signal, instructions) => {
-          expect(instructions).toBe("request alias role");
+          expect(instructions).toBe("request alias role\n\nsaved alias role");
           return "alias-result";
         },
       }),
     });
 
     expect(await runApplication(app.value)).toBe(0);
-    expect(await Bun.file(aliasPath).text()).toBe(stored);
+    expect(await Bun.file(configPath).text()).toBe(stored);
   });
 
   test("resolves positional and long-form aliases case-insensitively through the real store", async () => {
@@ -4269,6 +4401,69 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).toContain("[REDACTED]");
   });
 
+  test("redacts only active alias instruction sources and composed values from failures", async () => {
+    const directory = await temporaryDirectory();
+    const configPath = join(directory, "config.toml");
+    const shared = 'shared-source\nwith "quotes"';
+    const local = "local-source\\with-slash";
+    const composed = `${shared}\n\n${local}`;
+    await Bun.write(configPath, unifiedAliasConfig({
+      sharedInstructions: shared,
+      aliasInstructions: local,
+    }));
+    const composedSerialized = JSON.stringify(composed);
+    const composedEscaped = composedSerialized.slice(1, -1);
+    const cli = "active-cli-source";
+    const cliComposed = `${cli}\n\n${local}`;
+
+    for (const scenario of [
+      {
+        name: "shared source only",
+        args: ["daily", "--input", "hello"],
+        failure: `source=${shared}`,
+        hidden: [shared],
+      },
+      {
+        name: "local source only",
+        args: ["daily", "--input", "hello"],
+        failure: `source=${local}`,
+        hidden: [local],
+      },
+      {
+        name: "composed raw and escaped forms",
+        args: ["daily", "--input", "hello"],
+        failure: `raw=${composed} serialized=${composedSerialized} escaped=${composedEscaped}`,
+        hidden: [composed, composedSerialized, composedEscaped],
+      },
+      {
+        name: "inactive configured shared source",
+        args: ["daily", "--input", "hello", "--instruction", cli],
+        failure: `inactive=${shared} cli=${cli} local=${local} composed=${cliComposed}`,
+        hidden: [cli, local, cliComposed],
+        visible: shared,
+      },
+    ]) {
+      const app = dependencies({
+        args: scenario.args,
+        configPath,
+        runtime: runtime({
+          generate: async () => {
+            throw new RuntimeStageError("generation", "ollama", scenario.failure);
+          },
+        }),
+      });
+
+      expect(await runApplication(app.value), scenario.name).toBe(1);
+      expect(app.stderr.text(), scenario.name).toContain("[REDACTED]");
+      for (const value of scenario.hidden) {
+        expect(app.stderr.text(), scenario.name).not.toContain(value);
+      }
+      if (scenario.visible !== undefined) {
+        expect(app.stderr.text(), scenario.name).toContain(scenario.visible);
+      }
+    }
+  });
+
   test("propagates the generation timeout signal and names the stage", async () => {
     let aborted = false;
     const app = dependencies({
@@ -4541,6 +4736,11 @@ describe("one-shot application", () => {
 
   test("captures and immediately runs a multi-directory CLI workspace", async () => {
     const directory = await temporaryDirectory();
+    const configPath = join(directory, "config.toml");
+    await Bun.write(
+      configPath,
+      "version = 1\nshared_instructions = \"snapshot shared role\"\n[aliases]\n",
+    );
     const primary = join(directory, "api");
     const first = join(directory, "web");
     const second = join(directory, "shared lib");
@@ -4550,8 +4750,10 @@ describe("one-shot application", () => {
     const confirmInitialValues: Array<boolean | undefined> = [];
     let saved: AliasRecord | undefined;
     let generatedWorkspace: AliasRecord["workspace"];
+    let generatedInstructions: string | undefined;
     const app = dependencies({
       args: [],
+      configPath,
       cwd: directory,
       stdin: input("", true),
       stderrTty: true,
@@ -4559,7 +4761,8 @@ describe("one-shot application", () => {
       runtime: runtime({
         providers: ["codex-cli"],
         listModels: async () => [],
-        generate: async (_provider, _model, _prompt, _signal, _instructions, workspace) => {
+        generate: async (_provider, _model, _prompt, _signal, instructions, workspace) => {
+          generatedInstructions = instructions;
           generatedWorkspace = workspace;
           return "workspace response";
         },
@@ -4586,7 +4789,6 @@ describe("one-shot application", () => {
         confirmMessages,
         confirmInitialValues,
       }),
-      loadAliases: async () => ({ version: 1, aliases: {} }),
       saveAlias: async (_path, _name, selection) => {
         saved = selection;
         return "saved";
@@ -4600,6 +4802,9 @@ describe("one-shot application", () => {
       directoryAccess: "read-write",
     });
     expect(generatedWorkspace).toEqual(saved?.workspace);
+    expect(generatedInstructions).toBe(
+      "snapshot shared role\n\nReview all configured roots.",
+    );
     expect(inputMessages).toEqual([
       "Name this shortcut",
       "Primary workspace directory (press Enter to skip)",
@@ -4722,7 +4927,10 @@ describe("one-shot application", () => {
     });
 
     expect(await runApplication(app.value)).toBe(0);
-    expect(observed).toEqual({ instructions: "temporary role", workspace });
+    expect(observed).toEqual({
+      instructions: "temporary role\n\nsaved role",
+      workspace,
+    });
   });
 
   test("does not offer workspace capture for HTTP alias saves", async () => {

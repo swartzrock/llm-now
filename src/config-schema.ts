@@ -13,7 +13,7 @@ import {
 } from "./workspace.ts";
 
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
-const ROOT_FIELDS = new Set(["version", "voice", "aliases"]);
+const ROOT_FIELDS = new Set(["version", "shared_instructions", "voice", "aliases"]);
 const VOICE_FIELDS = new Set([
   "wake_words",
   "min_fuzzy_phrase_length",
@@ -52,6 +52,7 @@ export interface StoredAliasConfig {
 
 export interface ConfigDocumentV1 {
   readonly version: 1;
+  readonly sharedInstructions?: string;
   readonly voice?: StoredVoiceConfig;
   readonly aliases: Readonly<Record<string, StoredAliasConfig>>;
 }
@@ -151,10 +152,10 @@ function optionalPitch(value: unknown, field: string): number {
   return value;
 }
 
-function validateInstructions(value: unknown): string {
-  const instructions = requiredString(value, "instructions");
+function validateInstructions(value: unknown, field = "instructions"): string {
+  const instructions = requiredString(value, field);
   if (hasInvalidInstructionCharacters(instructions)) {
-    throw new ConfigSchemaError("instructions contain unsupported control characters");
+    throw new ConfigSchemaError(`${field} contain unsupported control characters`);
   }
   return instructions;
 }
@@ -355,10 +356,21 @@ export function parseConfigDocument(text: string, path = "config.toml"): ConfigD
     }
   }
 
-  const document: { version: 1; voice?: StoredVoiceConfig; aliases: Record<string, StoredAliasConfig> } = {
+  const document: {
+    version: 1;
+    sharedInstructions?: string;
+    voice?: StoredVoiceConfig;
+    aliases: Record<string, StoredAliasConfig>;
+  } = {
     version: 1,
     aliases: Object.freeze(aliases),
   };
+  if (Object.hasOwn(raw, "shared_instructions")) {
+    document.sharedInstructions = validateInstructions(
+      raw.shared_instructions,
+      "shared_instructions",
+    );
+  }
   if (Object.hasOwn(raw, "voice")) document.voice = parseVoice(raw.voice);
   return Object.freeze(document);
 }
@@ -428,6 +440,9 @@ export function serializeConfigDocument(document: ConfigDocumentV1): string {
     };
   }
   const canonical: Record<string, unknown> = { version: 1 };
+  if (document.sharedInstructions !== undefined) {
+    canonical.shared_instructions = document.sharedInstructions;
+  }
   if (document.voice !== undefined) {
     canonical.voice = {
       ...(document.voice.wakeWords === undefined ? {} : { wake_words: [...document.voice.wakeWords] }),

@@ -132,9 +132,10 @@ speech settings, privacy guidance, and troubleshooting, see
 
 ## Configuration
 
-Saved shortcuts and voice settings share one `config.toml`. Shortcut saves may
-rewrite it in a consistent order. Instructions are plaintext and credentials
-never belong in this file. See the
+Saved shortcuts, shared alias instructions, and voice settings use one
+`config.toml`. Shortcut saves may rewrite it in a consistent order while
+preserving valid settings. Instructions are plaintext and credentials never
+belong in this file. See the
 [configuration guide](docs/configuration.md) to find and edit the file,
 configure aliases, and customize voice routing and speech.
 
