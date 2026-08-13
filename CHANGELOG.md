@@ -1,5 +1,11 @@
 # llm-now
 
+## 2.5.1
+
+### Patch Changes
+
+- abf162a: Report the canonical alias on stderr before generation for accepted `--voice-route` requests without changing response stdout.
+
 ## 2.5.0
 
 ### Minor Changes
