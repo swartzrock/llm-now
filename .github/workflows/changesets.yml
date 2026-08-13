@@ -11,9 +11,6 @@ concurrency:
   group: changesets-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN }}
-  
 jobs:
   version:
     runs-on: ubuntu-latest
@@ -32,4 +29,4 @@ jobs:
           commit: "chore: release"
           title: "chore: release"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN }}
