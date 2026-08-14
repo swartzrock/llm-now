@@ -12,12 +12,6 @@ import type { LocalCommandRequest } from "@swartzrock/byok-runtime/node";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import {
-  LocalCommandRunner,
-  type LocalProcess,
-} from "@swartzrock/byok-runtime/node";
-import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
-import {
   createBunCredentialVault,
   createCredentialResolver,
   createSensitiveValueRegistry,
@@ -39,75 +33,6 @@ async function temporaryDirectory(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
-});
-
-test("local CLI cancellation force-kills and waits for close before rejecting", async () => {
-  const root = new AbortController();
-  const signals: NodeJS.Signals[] = [];
-  let closed = false;
-  let child!: LocalProcess & EventEmitter;
-  child = Object.assign(new EventEmitter(), {
-    stdin: new PassThrough(),
-    stdout: new PassThrough(),
-    stderr: new PassThrough(),
-    kill(signal: NodeJS.Signals = "SIGTERM") {
-      signals.push(signal);
-      if (signal === "SIGKILL") {
-        closed = true;
-        queueMicrotask(() => child.emit("close", 137));
-      }
-      return true;
-    },
-  }) as LocalProcess & EventEmitter;
-  const runner = new LocalCommandRunner(
-    () => child,
-    {},
-    { warn: () => undefined },
-    () => "",
-  );
-  const running = runner.run({
-    command: "/fake/codex",
-    stdin: "prompt",
-    signal: root.signal,
-    timeoutMs: 10_000,
-  });
-  root.abort();
-
-  await expect(running).rejects.toThrow("was cancelled");
-  expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
-  expect(closed).toBeTrue();
-});
-
-test("local CLI input failure terminates and waits for close before rejecting", async () => {
-  const signals: NodeJS.Signals[] = [];
-  const stdin = new PassThrough();
-  stdin.end = (() => {
-    throw new Error("broken pipe");
-  }) as typeof stdin.end;
-  let child!: LocalProcess & EventEmitter;
-  child = Object.assign(new EventEmitter(), {
-    stdin,
-    stdout: new PassThrough(),
-    stderr: new PassThrough(),
-    kill(signal: NodeJS.Signals = "SIGTERM") {
-      signals.push(signal);
-      queueMicrotask(() => child.emit("close", 1));
-      return true;
-    },
-  }) as LocalProcess & EventEmitter;
-  const runner = new LocalCommandRunner(
-    () => child,
-    {},
-    { warn: () => undefined },
-    () => "",
-  );
-
-  await expect(runner.run({
-    command: "/fake/codex",
-    stdin: "prompt",
-    timeoutMs: 10_000,
-  })).rejects.toThrow("failed to receive input: broken pipe");
-  expect(signals).toEqual(["SIGTERM"]);
 });
 
 function runtime(overrides: Partial<ByokProviderRuntime> & {

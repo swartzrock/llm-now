@@ -22,9 +22,6 @@
       },
     },
   },
-  "patchedDependencies": {
-    "@swartzrock/byok-runtime@2.4.0": "patches/@swartzrock%2Fbyok-runtime@2.4.0.patch",
-  },
   "packages": {
     "@3leaps/string-metrics-wasm": ["@3leaps/string-metrics-wasm@0.3.11", "", {}, "sha512-An4O6Dd0ZVSn9/xAPJhnLKfMjDvZ5Pa+YuhwnA0gzPRBtRlLkHvYDvi77p/xZORPOKDpm5CVR153NOa1XL/h/w=="],
 
