@@ -591,6 +591,9 @@ function applyAliasMutation(
 ): ConfigDocumentV1 {
   return canonicalDocument({
     version: 1,
+    ...(document.sharedInstructions === undefined
+      ? {}
+      : { sharedInstructions: document.sharedInstructions }),
     ...(document.voice === undefined ? {} : { voice: document.voice }),
     aliases: {
       ...document.aliases,

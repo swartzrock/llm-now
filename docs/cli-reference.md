@@ -140,12 +140,18 @@ llm-now --provider ollama --model llama3 --instruction "Use plain language" --in
 llm-now local --instruction=-brief --input "Summarize this"
 ```
 
-For a saved shortcut with stored instructions, the command-line value replaces
-the stored value for that request. Omitting the option keeps the stored value.
-The option never writes to `config.toml` or mutates the selected alias. If a
-fresh interactive selection later offers to save a shortcut, that save flow's
-instruction field starts independently and persists only what is entered
-there.
+Instruction precedence depends on what the request selects:
+
+| Selection | No `--instruction` | With `--instruction` |
+| --- | --- | --- |
+| Saved alias | configured `shared_instructions`, then alias-local `instructions` | command-line value, then alias-local `instructions` |
+| Explicit provider/model or fresh run once | no configured instruction | command-line value only |
+
+When both alias layers are present, `llm-now` inserts `\n\n` between their
+exact accepted values. The option never writes to `config.toml` or mutates the
+selected alias. If a fresh interactive selection later offers to save a
+shortcut, that save flow's instruction field starts independently and persists
+only what is entered there.
 
 Instruction text may use ordinary line breaks. Blank text, tabs, other
 unsupported control characters, and Unicode line or paragraph separators are
@@ -154,10 +160,11 @@ rejected.
 `--instruction` is not a secret-input mechanism. Its value may be visible in
 shell history and local process inspection, in child-process arguments for
 CLI-backed providers, under the selected provider's handling and retention
-policies, and in successful model output. Runtime failures redact the active
-command-line instruction from `llm-now` diagnostics in raw and serialized
-forms, but successful model output is intentionally not filtered. Do not pass
-secrets, credentials, or data you are not permitted to disclose.
+policies, and in successful model output. Runtime failures redact active
+shared, command-line, alias-local, and composed instruction values from
+`llm-now` diagnostics in raw and serialized forms, but successful model output
+is intentionally not filtered. Do not pass secrets, credentials, or data you
+are not permitted to disclose.
 
 ## List the alias inventory
 
@@ -206,8 +213,8 @@ printf 'hey local, summarize this' | llm-now --voice-route --speak
 question. It selects from saved shortcuts, then uses the ordinary generation
 and stdout contract unless `--speak` is also present. It cannot be combined
 with a positional alias, `--alias`, `--provider`, or `--model`.
-`--instruction` remains available and replaces the routed shortcut's stored
-instructions for that request.
+`--instruction` remains available and replaces the configured shared layer for
+that request; the routed shortcut's local instructions still follow.
 
 Routing checks canonical aliases, configured `spoken_names`, and fuzzy
 matching in that order. Every accepted route completes this one fixed,

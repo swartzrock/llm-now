@@ -1,7 +1,8 @@
 # Configuration
 
-`llm-now` keeps saved shortcuts and voice settings in one `config.toml` file.
-For installation and first use, see the [README](../README.md).
+`llm-now` keeps shared instructions, saved shortcuts, and voice settings in one
+`config.toml` file. For installation and first use, see the
+[README](../README.md).
 
 ## Edit `config.toml`
 
@@ -16,7 +17,38 @@ Open the printed path in a text editor, make your changes, and save it. The next
 save your first shortcut from the launcher.
 
 A later shortcut save may rewrite the entire file in a consistent order. Valid
-settings are preserved, but comments and custom formatting may be removed.
+settings, including `shared_instructions`, are preserved, but comments and
+custom formatting may be removed.
+
+## Configure instructions shared by aliases
+
+Add optional `shared_instructions` at the root when every saved alias should
+start with the same guidance:
+
+```toml
+version = 1
+shared_instructions = "Be concise and distinguish facts from assumptions."
+
+[aliases.local]
+provider = "ollama"
+model = "llama3.1:latest"
+instructions = "Use examples that fit a local development workflow."
+```
+
+For an alias request, shared guidance comes first, followed by a blank line and
+the alias's local `instructions`. If only one value exists, it is used exactly
+as written. `--instruction` replaces `shared_instructions` for one alias
+request, but the alias-local value still follows. Explicit provider/model and
+fresh run-once requests do not inherit `shared_instructions`; for those calls,
+`--instruction` is the complete one-shot instruction.
+
+Changing this root value affects every saved alias on its next invocation.
+Keep shared and local guidance compatible: ordering does not guarantee how a
+model resolves contradictory text.
+
+Older `llm-now` versions whose strict version 1 schema predates this setting
+reject a file containing `shared_instructions`. Before downgrading, preserve
+the text elsewhere, remove the root field, and then run the older binary.
 
 ## Configure saved shortcuts
 
@@ -48,9 +80,9 @@ Alias names are case-insensitive, may contain up to 64 ASCII letters, digits,
 `_`, and `-`, and must begin with a letter or digit. `llm-now` stores them in
 lowercase.
 
-Instructions are plaintext. `--instruction` replaces saved instructions for
-one request without changing the file. Never put credentials or secrets in
-`config.toml`; see the [credentials guide](credentials.md).
+Instructions are plaintext. `--instruction` never changes the file. Never put
+credentials or secrets in `config.toml`; see the
+[credentials guide](credentials.md).
 
 ### Configure a shortcut workspace
 

@@ -3,8 +3,15 @@
 const args = Bun.argv.slice(2);
 const expectedInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
 const expectedInstructionConfig = `developer_instructions=${JSON.stringify(expectedInstructions)}`;
+const expectedSharedInstructions = "Apply shared runtime smoke guidance.";
 const expectedOverrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
 const expectedOverrideConfig = `developer_instructions=${JSON.stringify(expectedOverrideInstructions)}`;
+const expectedSharedLocalConfig = `developer_instructions=${JSON.stringify(
+  `${expectedSharedInstructions}\n\n${expectedInstructions}`,
+)}`;
+const expectedOverrideLocalConfig = `developer_instructions=${JSON.stringify(
+  `${expectedOverrideInstructions}\n\n${expectedInstructions}`,
+)}`;
 const expectedWorkspacePrimary = process.env.LLM_NOW_FAKE_WORKSPACE_PRIMARY;
 const expectedWorkspaceAdditions = process.env.LLM_NOW_FAKE_WORKSPACE_ADDITIONS === undefined
   ? []
@@ -31,9 +38,13 @@ if (args[0] === "exec") {
   const instructionConfig = hasInstructionConfig ? args[instructionIndexes[0]!] : undefined;
   const instructionMarker = instructionConfig === expectedInstructionConfig
     ? "fake:instruction-present"
-    : instructionConfig === expectedOverrideConfig
-      ? "fake:instruction-override"
-      : undefined;
+    : instructionConfig === expectedSharedLocalConfig
+      ? "fake:instruction-shared-local"
+      : instructionConfig === expectedOverrideLocalConfig
+        ? "fake:instruction-override-local"
+        : instructionConfig === expectedOverrideConfig
+          ? "fake:instruction-override"
+          : undefined;
   const hasNoInstructions = configIndexes.length === 0 && instructionIndexes.length === 0;
   if (instructionMarker === undefined && !hasNoInstructions) {
     console.error("unexpected fake CLI instruction configuration");
@@ -73,9 +84,13 @@ if (args[0] === "-p") {
   const instruction = instructionIndex === -1 ? undefined : args[instructionIndex + 1];
   const instructionMarker = instruction === expectedInstructions
     ? "fake:claude-instruction-present"
-    : instruction === expectedOverrideInstructions
-      ? "fake:claude-instruction-override"
-      : undefined;
+    : instruction === `${expectedSharedInstructions}\n\n${expectedInstructions}`
+      ? "fake:claude-instruction-shared-local"
+      : instruction === `${expectedOverrideInstructions}\n\n${expectedInstructions}`
+        ? "fake:claude-instruction-override-local"
+        : instruction === expectedOverrideInstructions
+          ? "fake:claude-instruction-override"
+          : undefined;
   const toolsIndex = args.indexOf("--tools");
   if (instructionMarker === undefined || args[toolsIndex + 1] !== "Read,Glob,Grep") {
     console.error("unexpected fake Claude instruction or tool configuration");

@@ -1,7 +1,8 @@
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
-import { resolveConfigPaths, saveConfigAlias } from "../src/config";
+import { loadConfig, resolveConfigPaths, saveConfigAlias } from "../src/config";
+import { serializeConfigDocument } from "../src/config-schema";
 
 if (
   packageMetadata.dependencies["@3leaps/string-metrics-wasm"] !== "0.3.11"
@@ -28,6 +29,7 @@ const voiceRoutingSmoke = join(
 const voiceProcessSmoke = join(directory, "voice-process-smoke");
 const shortcutInput = join(directory, "shortcut-input.txt");
 const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
+const sharedInstructions = "Apply shared runtime smoke guidance.";
 const overrideInstructions = "  Replace saved smoke instructions.\nUse the one-run override.  ";
 
 try {
@@ -71,6 +73,12 @@ try {
       directoryAccess: "read-only",
     },
   });
+  const savedConfig = await loadConfig(configPaths.configPath);
+  if (savedConfig === null) throw new Error("compiled smoke config was not created");
+  await Bun.write(configPaths.configPath, serializeConfigDocument({
+    ...savedConfig,
+    sharedInstructions,
+  }));
   await Bun.write(shortcutInput, "daily, smoke");
 
   const builds: Array<[string, string]> = [
@@ -199,7 +207,7 @@ try {
       executable: spike,
       args: ["dAiLy", "--input", "smoke"],
       exitCode: 0,
-      stdout: "fake:instruction-present:workspace-3",
+      stdout: "fake:instruction-shared-local:workspace-3",
       stderr: "",
     },
     {
@@ -207,7 +215,7 @@ try {
       executable: spike,
       args: ["--voice-route", "--input", "dail, smoke"],
       exitCode: 0,
-      stdout: "fake:instruction-present:workspace-3",
+      stdout: "fake:instruction-shared-local:workspace-3",
       stderr: "Selecting alias 'daily'\n",
     },
     {
@@ -216,7 +224,7 @@ try {
       args: ["--voice-route"],
       stdin: Bun.file(shortcutInput),
       exitCode: 0,
-      stdout: "fake:instruction-present:workspace-3",
+      stdout: "fake:instruction-shared-local:workspace-3",
       stderr: "Selecting alias 'daily'\n",
     },
     ...(process.platform === "darwin" ? [voiceProcessCase] : [{
@@ -228,11 +236,11 @@ try {
       stderr: "voice: llm-now --speak currently supports macOS only.\n",
     }]),
     {
-      name: "fake CLI generation with alias instruction replacement",
+      name: "fake CLI generation with shared-layer replacement",
       executable: spike,
       args: ["dAiLy", "--input", "smoke", "--instruction", overrideInstructions],
       exitCode: 0,
-      stdout: "fake:instruction-override:workspace-3",
+      stdout: "fake:instruction-override-local:workspace-3",
       stderr: "",
     },
     {
@@ -240,7 +248,7 @@ try {
       executable: spike,
       args: ["review", "--input", "smoke"],
       exitCode: 0,
-      stdout: "fake:claude-instruction-present:workspace-3",
+      stdout: "fake:claude-instruction-shared-local:workspace-3",
       stderr: "",
     },
   ] as const;

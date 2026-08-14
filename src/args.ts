@@ -59,7 +59,7 @@ ${heading("Options:")}
   ${literal("--voice-route")}        Parse “[wake word] <shortcut> <question>” from input
   ${literal("--speak")}              Speak the response on macOS instead of using stdout
   ${literal("--input")} ${metadata("<text>")}       Prompt or dictated input
-  ${literal("--instruction")} ${metadata("<text>")} Override saved instructions for this request
+  ${literal("--instruction")} ${metadata("<text>")} Replace shared alias guidance for this request
   ${literal("--alias")} ${metadata("<name>")}       Select a saved shortcut
   ${literal("--provider")} ${metadata("<id>")}      Select a provider
   ${literal("--model")} ${metadata("<id|default>")} Select a model; default supports codex-cli and claude-cli

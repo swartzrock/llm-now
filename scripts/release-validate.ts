@@ -503,10 +503,12 @@ async function smoke(archivePath: string): Promise<void> {
       ...workspaceAdditions.map((path) => mkdir(path, { recursive: true })),
     ]);
     const smokeInstructions = 'Use "quoted" runtime smoke \\ transport.\nKeep each answer concise.';
+    const sharedInstructions = "Apply shared runtime smoke guidance.";
     await Bun.write(
       join(configHome, "llm-now", "config.toml"),
       serializeConfigDocument({
         version: 1,
+        sharedInstructions,
         aliases: {
           zeta: { provider: "openai", model: "gpt-5" },
           aliases: {
@@ -567,20 +569,20 @@ async function smoke(archivePath: string): Promise<void> {
         stderr: "",
       },
       { name: "explicit generation", args: ["--input", "smoke", "--provider", "codex-cli", "--model", "default"], code: 0, stdout: "fake:instruction-absent", stderrIncludes: "" },
-      { name: "saved alias workspace", args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:instruction-present:workspace-3", stderr: "" },
-      { name: "cross-platform fuzzy voice routing", args: ["--voice-route", "--input", "aliase, smoke"], code: 0, stdout: "fake:instruction-present:workspace-3", stderr: "Selecting alias 'aliases'\n" },
+      { name: "saved alias workspace", args: ["aliases", "--input", "smoke"], code: 0, stdout: "fake:instruction-shared-local:workspace-3", stderr: "" },
+      { name: "cross-platform fuzzy voice routing", args: ["--voice-route", "--input", "aliase, smoke"], code: 0, stdout: "fake:instruction-shared-local:workspace-3", stderr: "Selecting alias 'aliases'\n" },
       {
-        name: "alias instruction replacement",
+        name: "shared alias instruction replacement",
         args: ["aliases", "--input", "smoke", "--instruction", overrideInstructions],
         code: 0,
-        stdout: "fake:instruction-override:workspace-3",
+        stdout: "fake:instruction-override-local:workspace-3",
         stderr: "",
       },
       {
         name: "saved Claude alias workspace",
         args: ["review", "--input", "smoke"],
         code: 0,
-        stdout: "fake:claude-instruction-present:workspace-3",
+        stdout: "fake:claude-instruction-shared-local:workspace-3",
         stderr: "",
       },
     ] as const;
