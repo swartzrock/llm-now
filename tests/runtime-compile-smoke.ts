@@ -147,9 +147,9 @@ try {
       executable: spike,
       args: ["--help"],
       exitCode: 0,
-      stdoutIncludes: "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--speak]",
+      stdoutIncludes: "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--stream] [--speak]",
       stdoutLandmarks: [
-        "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--speak]\n  llm-now --provider <id> --model <id|default> [--input <text>]",
+        "Usage:\n  llm-now [<alias> | --alias <name>] [--input <text>]\n          [--instruction <text>] [--stream] [--speak]\n  llm-now --provider <id> --model <id|default> [--input <text>]",
         "Notes:\n  Run without arguments to open the interactive launcher.\n  Read input from --input, stdin, or a terminal prompt; choose one.",
         "A workspace fixes execution to one primary directory plus ordered additional directories.\n  Saved shortcuts remain global; a stored workspace does not restrict where you can call one.\n  Codex CLI and Claude CLI support workspaces; local HTTP servers and cloud APIs reject them.",
         "Options:\n  --aliases            List saved shortcuts\n  --config-path        Print the config.toml path\n  --migrate-config     Migrate legacy configuration to config.toml\n  --voice-route        Parse “[wake word] <shortcut> <question>” from input",

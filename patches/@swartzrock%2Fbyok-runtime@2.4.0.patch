@@ -1,8 +1,8 @@
 diff --git a/dist/node.js b/dist/node.js
-index a9f7ca28b985545219174a0eb8a21b72401d8e23..5c8d4723ae033e2a64d5e809c44a55d400cb72d3 100644
+index 2f263c7b838648ce61b57ed1c746e5d1fda4013e..8ac687a74b7777e16848afbf3fa3909db9891e24 100644
 --- a/dist/node.js
 +++ b/dist/node.js
-@@ -19,6 +19,7 @@ import {
+@@ -21,6 +21,7 @@ import {
  import { spawn } from "child_process";
  import { tmpdir } from "os";
  var DEFAULT_TIMEOUT_MS = 6e4;
@@ -10,7 +10,7 @@ index a9f7ca28b985545219174a0eb8a21b72401d8e23..5c8d4723ae033e2a64d5e809c44a55d4
  var STDERR_EXCERPT_CHARS = 400;
  var LOGIN_SHELL_PATH_TIMEOUT_MS = 3e3;
  var LOGIN_SHELL_PATH_MARKER = "__CUECRAFT_LOGIN_SHELL_PATH__";
-@@ -180,29 +181,47 @@ var LocalCommandRunner = class {
+@@ -182,29 +183,47 @@ var LocalCommandRunner = class {
        let stderr = "";
        let settled = false;
        let timeout = null;
@@ -66,7 +66,7 @@ index a9f7ca28b985545219174a0eb8a21b72401d8e23..5c8d4723ae033e2a64d5e809c44a55d4
          settle(() => {
            this.logger.warn("BYOK local CLI failed to start", {
              command: request.command,
-@@ -210,27 +229,34 @@ var LocalCommandRunner = class {
+@@ -212,27 +231,34 @@ var LocalCommandRunner = class {
              hasPath: Boolean(commandEnv.PATH)
            });
            reject(new ByokProviderError(errorMessageForSpawn(request.command, error)));

@@ -29,13 +29,13 @@
     "@3leaps/string-metrics-wasm": "0.3.11",
     "@clack/core": "1.4.3",
     "@clack/prompts": "1.7.0",
-    "@swartzrock/byok-runtime": "2.2.0",
+    "@swartzrock/byok-runtime": "2.4.0",
     "cross-spawn": "7.0.6",
     "picocolors": "1.1.1",
     "smol-toml": "1.7.1",
     "unicode-case-folding": "1.1.1"
   },
   "patchedDependencies": {
-    "@swartzrock/byok-runtime@2.2.0": "patches/@swartzrock%2Fbyok-runtime@2.2.0.patch"
+    "@swartzrock/byok-runtime@2.4.0": "patches/@swartzrock%2Fbyok-runtime@2.4.0.patch"
   }
 }
