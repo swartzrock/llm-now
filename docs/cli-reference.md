@@ -9,10 +9,10 @@ For installation and the shortest path to a first prompt, return to the
 
 ```text
 llm-now [<alias> | --alias <name>] [--input <text>]
-        [--instruction <text>] [--speak]
+        [--instruction <text>] [--stream] [--speak]
 llm-now --provider <id> --model <id|default> [--input <text>]
-        [--instruction <text>] [--speak]
-llm-now --voice-route [--input <text>] [--instruction <text>] [--speak]
+        [--instruction <text>] [--stream] [--speak]
+llm-now --voice-route [--input <text>] [--instruction <text>] [--stream] [--speak]
 llm-now --aliases
 llm-now --config-path
 llm-now --migrate-config
@@ -112,9 +112,10 @@ Prompt text comes from one source:
 - stdin; or
 - the terminal prompt shown for an interactive launcher or alias-only call.
 
-Except for a sole `--speak` in an interactive terminal, arguments, `--input`,
-piped input, and noninteractive execution bypass the launcher. That exception
-opens the launcher with speech enabled, including its shortcut-creation routes.
+Except for a sole `--speak` or `--stream` in an interactive terminal, arguments, `--input`,
+piped input, and noninteractive execution bypass the launcher. Those
+exceptions open the launcher with the requested output mode, including its
+shortcut-creation routes.
 A noninteractive call requires a positional alias, `--alias`, or both
 `--provider` and `--model`. It also requires one nonblank prompt from `--input`
 or stdin. Supplying nonempty stdin together with `--input` or supplying neither
@@ -281,6 +282,11 @@ option or positional value is a usage error.
 ## Output and diagnostics
 
 Successful generation writes the model response byte-for-byte to stdout.
+With `--stream`, llm-now writes and flushes each response chunk as it arrives;
+without it, llm-now keeps the existing behavior of writing the completed
+response once. `--stream` cannot be combined with `--speak`. If streaming
+generation fails or times out after emitting text, the completed chunks remain
+on stdout and the diagnostic is written to stderr.
 Interactive UI and diagnostics use stderr, so stdout remains safe to redirect
 or pipe. After an interactive response, stderr resets terminal styling and adds
 a clean visual boundary without changing stdout. With `--speak`, a successfully
@@ -291,8 +297,11 @@ generation work later fails, that completed selection remains the first stderr
 line and the existing sanitized diagnostic follows it. A later failure does not
 invalidate or repeat the earlier selection.
 
-If a generated response contains a registered credential, `llm-now` withholds
-it from stdout, emits a redacted diagnostic, and exits `1`. Diagnostics remove
+Without streaming, if a generated response contains a registered credential,
+`llm-now` withholds the entire response from stdout, emits a redacted diagnostic,
+and exits `1`. In streaming mode, llm-now stops before writing the chunk that
+would complete the credential; already-written chunks remain on stdout.
+Diagnostics remove
 terminal controls, normalize line endings, limit runtime detail, and redact
 recognized environment, stored, candidate, prompt, and instruction values as
 appropriate. Interactive color is suppressed by `NO_COLOR`, `TERM=dumb`, and

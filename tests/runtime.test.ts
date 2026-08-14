@@ -110,7 +110,12 @@ test("local CLI input failure terminates and waits for close before rejecting", 
   expect(signals).toEqual(["SIGTERM"]);
 });
 
-function runtime(overrides: Partial<ByokProviderRuntime> = {}): ByokProviderRuntime {
+function runtime(overrides: Partial<ByokProviderRuntime> & {
+  streamText?: (
+    input: { prompt: string; instructions?: string },
+    signal?: AbortSignal,
+  ) => { textStream: AsyncIterable<string> };
+} = {}): ByokProviderRuntime {
   return {
     id: "ollama",
     label: "Fake",
@@ -314,6 +319,58 @@ describe("runtime gateway", () => {
         signal: controller.signal,
       },
     ]);
+  });
+
+  test("uses streamText and handles each chunk before reading the next one", async () => {
+    const events: string[] = [];
+    let bufferedCalls = 0;
+    const controller = new AbortController();
+    const gateway = createTestGateway({
+      env: {},
+      createProvider: () => runtime({
+        generateText: async () => {
+          bufferedCalls += 1;
+          return { text: "unexpected" };
+        },
+        streamText: (input, signal) => {
+          expect(input).toEqual({
+            prompt: "stream prompt",
+            instructions: "Be concise.",
+          });
+          expect(signal).toBe(controller.signal);
+          return {
+            delivery: "native" as const,
+            textStream: {
+              async *[Symbol.asyncIterator]() {
+                events.push("yield:first");
+                yield "first";
+                events.push("yield:second");
+                yield " second";
+              },
+            },
+          };
+        },
+      }),
+    });
+
+    await expect(gateway.generate(
+      "ollama",
+      "qwen",
+      "stream prompt",
+      controller.signal,
+      "Be concise.",
+      undefined,
+      async (chunk) => {
+        events.push(`write:${chunk}`);
+      },
+    )).resolves.toBe("first second");
+    expect(events).toEqual([
+      "yield:first",
+      "write:first",
+      "yield:second",
+      "write: second",
+    ]);
+    expect(bufferedCalls).toBe(0);
   });
 
   test("rejects a pre-aborted generation before provider setup", async () => {

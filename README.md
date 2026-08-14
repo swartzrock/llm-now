@@ -93,16 +93,19 @@ llm-now local --input "Summarize the three most important points"
 | Run a saved shortcut | `llm-now local --input "Summarize this idea"` |
 | Pipe a prompt to a saved shortcut | <code>printf 'Explain this diff' &#124; llm-now local</code> |
 | Choose a provider and model explicitly | `llm-now --provider ollama --model llama3 --input "Hello"` |
+| Stream a response | `llm-now local --stream --input "Summarize this idea"` |
 | List the alias inventory | `llm-now --aliases` |
 | Print the configuration path | `llm-now --config-path` |
 | Route a dictated prompt | `llm-now --voice-route --input "hey local, summarize this"` |
 | Speak a response on macOS | `llm-now --alias local --speak --input "Summarize this"` |
 
-Except for a sole `--speak` in an interactive terminal, arguments, `--input`,
+Except for a sole `--speak` or `--stream` in an interactive terminal, arguments, `--input`,
 piped input, and noninteractive execution bypass the launcher. Noninteractive
 generation needs exactly one prompt source (`--input` or stdin) plus a saved
 shortcut or an explicit provider and model. Successful generation writes only
 the model response to stdout; interactive UI and diagnostics use stderr.
+With `--stream`, response chunks are written and flushed as they arrive. It
+cannot be combined with `--speak`.
 `--aliases` and `--config-path` are standalone commands.
 
 `llm-now --help` shows command syntax, option summaries, recognized API-key

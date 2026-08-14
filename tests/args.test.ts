@@ -23,10 +23,10 @@ const APPROVED_HELP_TEXT = `A tiny CLI for prompting models you already use.
 
 Usage:
   llm-now [<alias> | --alias <name>] [--input <text>]
-          [--instruction <text>] [--speak]
+          [--instruction <text>] [--stream] [--speak]
   llm-now --provider <id> --model <id|default> [--input <text>]
-          [--instruction <text>] [--speak]
-  llm-now --voice-route [--input <text>] [--instruction <text>] [--speak]
+          [--instruction <text>] [--stream] [--speak]
+  llm-now --voice-route [--input <text>] [--instruction <text>] [--stream] [--speak]
   llm-now --aliases
   llm-now --config-path
   llm-now --migrate-config
@@ -45,6 +45,7 @@ Options:
   --migrate-config     Migrate legacy configuration to config.toml
   --voice-route        Parse “[wake word] <shortcut> <question>” from input
   --speak              Speak the response on macOS instead of using stdout
+  --stream             Write response chunks to stdout as they arrive
   --input <text>       Prompt or dictated input
   --instruction <text> Replace shared alias guidance for this request
   --alias <name>       Select a saved shortcut
@@ -162,6 +163,18 @@ describe("arguments and input", () => {
     });
   });
 
+  test("parses streaming as a run modifier and rejects speech composition", () => {
+    expect(parseArguments(["daily", "--stream", "--input", "hello"])).toEqual({
+      kind: "run",
+      input: "hello",
+      stream: true,
+      selection: { kind: "alias", alias: "daily" },
+    });
+    expect(() => parseArguments(["daily", "--stream", "--speak"])).toThrow(
+      "--stream cannot be combined with --speak",
+    );
+  });
+
   test("composes speech with every ordinary selection surface", () => {
     expect(parseArguments(["daily", "--speak", "--input", "hello"])).toEqual({
       kind: "run",
@@ -214,7 +227,7 @@ describe("arguments and input", () => {
       expect((error as Error).message).toContain("Unknown option '--voice'");
     }
 
-    for (const alias of ["voice", "voice-route", "speak"]) {
+    for (const alias of ["voice", "voice-route", "speak", "stream"]) {
       expect(parseArguments([alias, "--input", "hello"])).toEqual({
         kind: "run",
         input: "hello",
@@ -490,7 +503,7 @@ describe("arguments and input", () => {
     expect(() => parseArguments(["--version", "--instruction", "temporary"])).toThrow(
       UsageError,
     );
-    for (const option of ["--voice-route", "--speak"]) {
+    for (const option of ["--voice-route", "--speak", "--stream"]) {
       expect(() => parseArguments(["--help", option])).toThrow(UsageError);
       expect(() => parseArguments(["--version", option])).toThrow(UsageError);
     }
@@ -508,6 +521,7 @@ describe("arguments and input", () => {
     );
     expect(() => parseArguments(["--aliases", "--voice-route"])).toThrow(UsageError);
     expect(() => parseArguments(["--aliases", "--speak"])).toThrow(UsageError);
+    expect(() => parseArguments(["--aliases", "--stream"])).toThrow(UsageError);
   });
 
   test("configuration maintenance flags are standalone and mutually exclusive", () => {
@@ -521,7 +535,7 @@ describe("arguments and input", () => {
       ["--migrate-config", "--provider", "ollama", "--model", "qwen"],
     ]) expect(() => parseArguments(args)).toThrow(UsageError);
     for (const mode of ["--config-path", "--migrate-config"]) {
-      for (const option of ["--voice-route", "--speak"]) {
+      for (const option of ["--voice-route", "--speak", "--stream"]) {
         expect(() => parseArguments([mode, option])).toThrow(UsageError);
       }
     }
@@ -583,6 +597,7 @@ describe("arguments and input", () => {
     expect(rendered).toContain(colors.bold(colors.cyanBright("llm-now")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--voice-route")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--speak")));
+    expect(rendered).toContain(colors.bold(colors.cyanBright("--stream")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--input")));
     expect(rendered).toContain(colors.bold(colors.cyanBright("--instruction")));
     expect(rendered).toContain(colors.cyan("<text>"));
