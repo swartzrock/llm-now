@@ -13,7 +13,8 @@ import {
 } from "./workspace.ts";
 
 const DEFAULT_MODEL_PROVIDERS = new Set<ByokProviderId>(["codex-cli", "claude-cli"]);
-const ROOT_FIELDS = new Set(["version", "shared_instructions", "voice", "aliases"]);
+const ROOT_FIELDS = new Set(["version", "shared_instructions", "default", "voice", "aliases"]);
+const DEFAULT_FIELDS = new Set(["alias"]);
 const VOICE_FIELDS = new Set([
   "wake_words",
   "min_fuzzy_phrase_length",
@@ -39,6 +40,10 @@ export interface StoredVoiceConfig {
   readonly minMargin?: number;
 }
 
+export interface StoredDefaultConfig {
+  readonly alias: string;
+}
+
 export interface StoredAliasConfig {
   readonly provider: ByokProviderId;
   readonly model: string;
@@ -53,6 +58,7 @@ export interface StoredAliasConfig {
 export interface ConfigDocumentV1 {
   readonly version: 1;
   readonly sharedInstructions?: string;
+  readonly default?: StoredDefaultConfig;
   readonly voice?: StoredVoiceConfig;
   readonly aliases: Readonly<Record<string, StoredAliasConfig>>;
 }
@@ -356,9 +362,25 @@ export function parseConfigDocument(text: string, path = "config.toml"): ConfigD
     }
   }
 
+  let defaultConfig: StoredDefaultConfig | undefined;
+  if (Object.hasOwn(raw, "default")) {
+    if (!isRecord(raw.default)) throw new ConfigSchemaError("default must be a TOML table");
+    rejectUnknownFields(raw.default, DEFAULT_FIELDS, "default");
+    const originalAlias = requiredString(raw.default.alias, "default.alias");
+    if (!isValidAliasName(originalAlias)) {
+      throw new ConfigSchemaError("default.alias must be a valid alias name");
+    }
+    const alias = originalAlias.toLowerCase();
+    if (!Object.hasOwn(aliases, alias)) {
+      throw new ConfigSchemaError("default.alias must reference a configured alias");
+    }
+    defaultConfig = Object.freeze({ alias });
+  }
+
   const document: {
     version: 1;
     sharedInstructions?: string;
+    default?: StoredDefaultConfig;
     voice?: StoredVoiceConfig;
     aliases: Record<string, StoredAliasConfig>;
   } = {
@@ -371,6 +393,7 @@ export function parseConfigDocument(text: string, path = "config.toml"): ConfigD
       "shared_instructions",
     );
   }
+  if (defaultConfig !== undefined) document.default = defaultConfig;
   if (Object.hasOwn(raw, "voice")) document.voice = parseVoice(raw.voice);
   return Object.freeze(document);
 }
@@ -409,6 +432,7 @@ export function projectVoiceConfig(document: ConfigDocumentV1): EffectiveVoiceCo
     profiles[name] = Object.freeze(profile);
   }
   return Object.freeze({
+    ...(document.default === undefined ? {} : { defaultAlias: document.default.alias }),
     wakeWords: Object.freeze([...(document.voice?.wakeWords ?? ["hey"])]),
     minFuzzyPhraseLength: document.voice?.minFuzzyPhraseLength ?? 4,
     minSimilarity: document.voice?.minSimilarity ?? 65,
@@ -442,6 +466,9 @@ export function serializeConfigDocument(document: ConfigDocumentV1): string {
   const canonical: Record<string, unknown> = { version: 1 };
   if (document.sharedInstructions !== undefined) {
     canonical.shared_instructions = document.sharedInstructions;
+  }
+  if (document.default !== undefined) {
+    canonical.default = { alias: document.default.alias };
   }
   if (document.voice !== undefined) {
     canonical.voice = {

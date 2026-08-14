@@ -26,6 +26,7 @@ export interface AliasProfile {
 }
 
 export interface VoiceConfig {
+  readonly defaultAlias?: string;
   readonly wakeWords: readonly string[];
   readonly minFuzzyPhraseLength: number;
   readonly minSimilarity: number;
@@ -33,7 +34,7 @@ export interface VoiceConfig {
   readonly profiles: Readonly<Record<string, AliasProfile>>;
 }
 
-export type AcceptedRouteReason = "canonical" | "configured" | "fuzzy";
+export type AcceptedRouteReason = "canonical" | "configured" | "fuzzy" | "default";
 export type RejectedRouteReason = "missing_request" | "missing_question" | "no_match" | "ambiguous";
 
 export interface AcceptedRoute {
@@ -80,8 +81,8 @@ interface FuzzyAliasMetadata {
 interface FuzzyCandidate {
   readonly score: number;
   readonly spanLength: number;
-  readonly question: string;
-  readonly questionOffset: number;
+  readonly question: string | null;
+  readonly questionOffset: number | null;
 }
 
 export function ratio(left: string, right: string): number {
@@ -214,6 +215,12 @@ export function routeTranscript(
   config: VoiceConfig,
 ): RouteResult {
   const activeAliases = validatedAliases(aliases);
+  if (
+    config.defaultAlias !== undefined
+    && !activeAliases.includes(config.defaultAlias)
+  ) {
+    throw new VoiceRouterError(`default alias is not configured: "${config.defaultAlias}"`);
+  }
   const tokens = tokenize(transcript);
   if (tokens.length === 0) return rejectedRoute("missing_request");
 
@@ -256,11 +263,24 @@ export function routeTranscript(
 
     const fuzzy = fuzzyMatch(transcript, tokens, start, canonicalByKey, config);
     if (fuzzy.accepted) return fuzzy;
+    if (fuzzy.reason === "missing_question") sawMissingQuestion = true;
     if (fuzzy.reason === "ambiguous") strongestRejection = fuzzy;
   }
 
   if (sawMissingQuestion) return rejectedRoute("missing_question");
-  return strongestRejection ?? rejectedRoute("no_match");
+  if (strongestRejection !== null) return strongestRejection;
+  if (config.defaultAlias !== undefined) {
+    const start = views[0] ?? 0;
+    const questionToken = tokens[start];
+    if (questionToken === undefined) return rejectedRoute("missing_question");
+    return acceptedRoute(
+      config.defaultAlias,
+      transcript.slice(questionToken.utf16Start),
+      questionToken.scalarStart,
+      "default",
+    );
+  }
+  return rejectedRoute("no_match");
 }
 
 export function validateSpeechAnswer(value: string): SpeechAnswerValidation {
@@ -517,9 +537,8 @@ function fuzzyMatch(
     candidateKey += token.key;
     const candidateLength = scalarLength(candidateKey);
     if (candidateLength > maximumCandidateLength) break;
-    if (end >= tokens.length || candidateLength < config.minFuzzyPhraseLength) continue;
+    if (candidateLength < config.minFuzzyPhraseLength) continue;
     const questionToken = tokens[end];
-    if (questionToken === undefined) continue;
     const candidateDigits = digitSequences(candidateKey);
 
     for (const alias of aliases) {
@@ -540,8 +559,8 @@ function fuzzyMatch(
         perAlias.set(alias.alias, {
           score,
           spanLength,
-          question: transcript.slice(questionToken.utf16Start),
-          questionOffset: questionToken.scalarStart,
+          question: questionToken === undefined ? null : transcript.slice(questionToken.utf16Start),
+          questionOffset: questionToken?.scalarStart ?? null,
         });
       }
     }
@@ -564,6 +583,9 @@ function fuzzyMatch(
     && (best.score === runnerUp.score || best.score - runnerUp.score < config.minMargin)
   ) {
     return rejectedRoute("ambiguous", best.score, runnerUp.score);
+  }
+  if (best.question === null || best.questionOffset === null) {
+    return rejectedRoute("missing_question", best.score, runnerUp?.score ?? null);
   }
   return acceptedRoute(
     best.alias,

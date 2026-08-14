@@ -218,6 +218,138 @@
       }
     },
     {
+      "id": "default_alias_after_wake_word",
+      "transcript": "Hey, summarize this exactly!",
+      "aliases": ["haiku", "terra"],
+      "config_toml": "version = 1\n\n[default]\nalias = \"haiku\"\n\n[aliases.haiku]\nprovider = \"codex-cli\"\nmodel = \"default\"\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\n",
+      "expected": {
+        "alias": "haiku",
+        "question": "summarize this exactly!",
+        "question_offset": 5,
+        "reason": "default",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "default_alias_without_wake_word",
+      "transcript": "Summarize this exactly!",
+      "aliases": ["haiku", "terra"],
+      "config_toml": "version = 1\n\n[default]\nalias = \"haiku\"\n\n[aliases.haiku]\nprovider = \"codex-cli\"\nmodel = \"default\"\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\n",
+      "expected": {
+        "alias": "haiku",
+        "question": "Summarize this exactly!",
+        "question_offset": 0,
+        "reason": "default",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "default_configured_name_precedence",
+      "transcript": "Op 47, explain this chord",
+      "aliases": ["haiku", "opus47"],
+      "config_toml": "version = 1\n\n[default]\nalias = \"haiku\"\n\n[aliases.haiku]\nprovider = \"codex-cli\"\nmodel = \"default\"\n\n[aliases.opus47]\nprovider = \"codex-cli\"\nmodel = \"default\"\nspoken_names = [\"op 47\"]\n",
+      "expected": {
+        "alias": "opus47",
+        "question": "explain this chord",
+        "question_offset": 7,
+        "reason": "configured",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "default_fuzzy_precedence",
+      "transcript": "terrax, question",
+      "aliases": ["haiku", "terra"],
+      "config_toml": "version = 1\n\n[default]\nalias = \"haiku\"\n\n[aliases.haiku]\nprovider = \"codex-cli\"\nmodel = \"default\"\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\n",
+      "expected": {
+        "alias": "terra",
+        "question": "question",
+        "question_offset": 8,
+        "reason": "fuzzy",
+        "similarity": 90.9090909090909,
+        "runner_up_similarity": 18.181818181818176
+      }
+    },
+    {
+      "id": "default_exact_alias_only",
+      "transcript": "terra",
+      "aliases": ["haiku", "terra"],
+      "config_toml": "version = 1\n\n[default]\nalias = \"haiku\"\n\n[aliases.haiku]\nprovider = \"codex-cli\"\nmodel = \"default\"\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\n",
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "missing_question",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "default_fuzzy_alias_only",
+      "transcript": "terrax",
+      "aliases": ["haiku", "terra"],
+      "config_toml": "version = 1\n\n[default]\nalias = \"haiku\"\n\n[aliases.haiku]\nprovider = \"codex-cli\"\nmodel = \"default\"\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\n",
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "missing_question",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "default_fuzzy_alias_only_after_wake_word",
+      "transcript": "Hey terrax",
+      "aliases": ["haiku", "terra"],
+      "config_toml": "version = 1\n\n[default]\nalias = \"haiku\"\n\n[aliases.haiku]\nprovider = \"codex-cli\"\nmodel = \"default\"\n\n[aliases.terra]\nprovider = \"codex-cli\"\nmodel = \"default\"\n",
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "missing_question",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
+      "id": "default_ambiguous_alias_only",
+      "transcript": "abcdefghijklmnopuuuu",
+      "aliases": ["abcdefghijklmnopqrst", "abcdefghijklmnvvvvvv"],
+      "config_toml": "version = 1\n\n[default]\nalias = \"abcdefghijklmnopqrst\"\n\n[aliases.abcdefghijklmnopqrst]\nprovider = \"codex-cli\"\nmodel = \"default\"\n\n[aliases.abcdefghijklmnvvvvvv]\nprovider = \"codex-cli\"\nmodel = \"default\"\n",
+      "expected": {
+        "alias": null,
+        "question": null,
+        "question_offset": null,
+        "reason": "ambiguous",
+        "similarity": 80,
+        "runner_up_similarity": 70
+      }
+    },
+    {
+      "id": "default_custom_wake_word",
+      "transcript": "Computer, summarize this",
+      "aliases": ["haiku"],
+      "config_toml": "version = 1\nshared_instructions = \"Keep it short.\"\n\n[default]\nalias = \"haiku\"\n\n[voice]\nwake_words = [\"computer\"]\n\n[aliases.haiku]\nprovider = \"codex-cli\"\nmodel = \"default\"\n",
+      "expected_config": {
+        "wake_words": ["computer"],
+        "min_fuzzy_phrase_length": 4,
+        "min_similarity": 65,
+        "min_margin": 15
+      },
+      "expected": {
+        "alias": "haiku",
+        "question": "summarize this",
+        "question_offset": 10,
+        "reason": "default",
+        "similarity": null,
+        "runner_up_similarity": null
+      }
+    },
+    {
       "id": "alias_only",
       "transcript": "terra",
       "aliases": ["terra"],

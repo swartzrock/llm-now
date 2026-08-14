@@ -217,8 +217,11 @@ with a positional alias, `--alias`, `--provider`, or `--model`.
 that request; the routed shortcut's local instructions still follow.
 
 Routing checks canonical aliases, configured `spoken_names`, and fuzzy
-matching in that order. Every accepted route completes this one fixed,
-human-readable stderr write before provider generation begins:
+matching in that order. If none matches and `default.alias` is configured, the
+default alias receives the original transcript after any leading wake word.
+Missing questions and ambiguous matches remain rejected. Every accepted route
+completes this one fixed, human-readable stderr write before provider generation
+begins:
 
 ```text
 Selecting alias '<canonical-alias>'
@@ -226,7 +229,7 @@ Selecting alias '<canonical-alias>'
 
 | Route result | stderr | Provider and stdout |
 | --- | --- | --- |
-| Accepted | One selection line; existing sanitized diagnostics may follow if later work fails | Generation starts after the write; stdout remains response-only, or answer-empty with `--speak` |
+| Accepted, including configured default fallback | One selection line; existing sanitized diagnostics may follow if later work fails | Generation starts after the write; stdout remains response-only, or answer-empty with `--speak` |
 | Rejected | No selection line; existing bounded rejection diagnostic | No provider call; stdout remains empty |
 
 The line includes its terminating newline. The value is always the normalized
@@ -235,9 +238,9 @@ accepted. The alias is the line's only variable data: it never includes the
 transcript, extracted question, prompt, provider, credential, response, or any
 other request content.
 
-A route-only mismatch exits `1`, leaves stdout empty, reports a bounded
-value-free reason on stderr, writes no selection line, and makes no provider or
-speech call. Blank or invalid-UTF-8 routed input is also a voice rejection and
+A route-only mismatch without a configured default exits `1`, leaves stdout
+empty, reports a bounded value-free reason on stderr, writes no selection line,
+and makes no provider or speech call. Blank or invalid-UTF-8 routed input is also a voice rejection and
 writes no selection line: route-only calls exit `1`, while `--speak` calls exit
 `0` when the stable retry notice is spoken successfully. Routing without speech
 works on every supported platform.

@@ -13,6 +13,7 @@ from llm_now_voice.cli import (
     ProcessCancelled,
     ProcessResult,
     ProcessTimedOut,
+    RouterConfig,
     SubprocessRunner,
     VoiceRouterError,
     compact_key,
@@ -37,11 +38,14 @@ PARITY_CORPUS = json.loads(
 def unified_config(
     *,
     aliases: tuple[str, ...] = ALIASES,
+    default_alias: str | None = None,
     voice_fields: tuple[str, ...] = (),
     profile_fields: dict[str, tuple[str, ...]] | None = None,
 ) -> bytes:
     profiles = profile_fields or {}
     lines = ["version = 1"]
+    if default_alias is not None:
+        lines.extend(("", "[default]", f'alias = "{default_alias}"'))
     if voice_fields:
         lines.extend(("", "[voice]", *voice_fields))
     for alias in sorted(set(aliases) | set(profiles)):
@@ -165,6 +169,7 @@ class ConfigTests(unittest.TestCase):
 
         config = parse_config(result.stdout, ("terra",))
 
+        self.assertEqual(config.default_alias, "terra")
         self.assertEqual(config.wake_words, ("hey", "computer"))
         self.assertEqual(config.min_fuzzy_phrase_length, 3)
         self.assertEqual(config.min_similarity, 72)
@@ -182,6 +187,19 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.min_similarity, 65)
         self.assertEqual(config.min_margin, 15)
         self.assertEqual(config.profiles, {})
+
+    def test_parses_and_validates_the_default_alias(self) -> None:
+        config = parse_config(unified_config(default_alias="terra"), ALIASES)
+
+        self.assertEqual(config.default_alias, "terra")
+        for default_alias in ("missing", "not valid!"):
+            with self.subTest(default_alias=default_alias), self.assertRaises(
+                VoiceRouterError
+            ):
+                parse_config(
+                    unified_config(default_alias=default_alias),
+                    ALIASES,
+                )
 
     def test_resolves_unified_path_and_ignores_relative_xdg_roots(self) -> None:
         home = Path("/Users/test")
@@ -429,6 +447,15 @@ class RoutingTests(unittest.TestCase):
 
         self.assertFalse(result.accepted)
         self.assertEqual(result.reason, "ambiguous")
+
+    def test_rejects_unconfigured_default_alias_at_routing_boundary(self) -> None:
+        config = RouterConfig(default_alias="missing")
+
+        with self.assertRaisesRegex(
+            VoiceRouterError,
+            'default alias is not configured: "missing"',
+        ):
+            route_transcript("summarize this", ALIASES, config)
 
     def test_weak_short_length_and_digit_mismatch_candidates_reject(self) -> None:
         cases = (
