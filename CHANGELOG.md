@@ -1,5 +1,12 @@
 # llm-now
 
+## 2.6.0
+
+### Minor Changes
+
+- aafab0e: Add `--stream` to write model response chunks to stdout as they arrive, and sanitize terminal controls before writing generated output in every mode.
+- 1bc212b: Add root `shared_instructions` for saved aliases, with request-scoped `--instruction` replacing only the shared layer.
+
 ## 2.5.1
 
 ### Patch Changes
