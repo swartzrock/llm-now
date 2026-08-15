@@ -9,15 +9,19 @@ import {
   type ByokProviderRuntime,
 } from "@swartzrock/byok-runtime";
 import type { LocalCommandRequest } from "@swartzrock/byok-runtime/node";
+import type { LlmNowCoreClient } from "../packages/core/src/client.ts";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import {
+  CredentialVaultError,
   createBunCredentialVault,
   createCredentialResolver,
   createSensitiveValueRegistry,
 } from "../packages/cli/src/credentials.ts";
 import {
   RuntimeStageError,
+  createCliExecutionResolver,
+  createCoreRuntimeGateway,
   createRuntimeGateway,
   type RuntimeGatewayDependencies,
 } from "../packages/cli/src/runtime.ts";
@@ -1136,5 +1140,170 @@ describe("runtime gateway", () => {
       expect(String(error)).toContain("[REDACTED]");
       expect(String(error)).toContain(ordinaryEnvironmentValue);
     }
+  });
+});
+
+describe("core runtime adapter", () => {
+  test("routes buffered operations through core while leaving streaming on the U5 seam", async () => {
+    const calls: string[] = [];
+    const coreClient: LlmNowCoreClient = {
+      discoverProviders: async () => {
+        calls.push("core-discover");
+        return { degraded: false, providers: [{
+          provider: "ollama",
+          family: "local",
+          available: true,
+        }] };
+      },
+      listModels: async ({ provider }) => {
+        calls.push(`core-list:${provider}`);
+        return { provider, models: [{ id: "core-model", label: "Core model" }] };
+      },
+      validateConnection: async ({ provider }) => {
+        calls.push(`core-validate:${provider}`);
+        return { provider, models: [] };
+      },
+      generateText: async ({ provider, model, prompt, instructions }) => {
+        calls.push(`core-generate:${prompt}:${instructions}`);
+        return { provider, model, text: "core-buffered" };
+      },
+    };
+    const gateway = createCoreRuntimeGateway({
+      env: {},
+      credentialResolver: { resolve: async () => ({ source: "missing" }) },
+      sensitive: createSensitiveValueRegistry(),
+      coreClient,
+      createProvider: () => runtime({
+        streamText: () => ({
+          delivery: "native",
+          textStream: (async function* () { yield "legacy-streamed"; })(),
+        }),
+      }),
+    });
+
+    expect(await gateway.discover()).toEqual(["ollama"]);
+    expect(await gateway.listModels("ollama")).toEqual([{ id: "core-model", label: "Core model" }]);
+    await gateway.validateCredential("openai", "candidate");
+    expect(await gateway.generate("ollama", "qwen", "buffered", undefined, "brief"))
+      .toBe("core-buffered");
+    const deltas: string[] = [];
+    expect(await gateway.generate(
+      "ollama",
+      "qwen",
+      "streamed",
+      undefined,
+      undefined,
+      undefined,
+      (delta) => { deltas.push(delta); },
+    )).toBe("legacy-streamed");
+    expect(deltas).toEqual(["legacy-streamed"]);
+    expect(calls).toEqual([
+      "core-discover",
+      "core-list:ollama",
+      "core-validate:openai",
+      "core-generate:buffered:brief",
+    ]);
+  });
+
+  test("keeps command discovery caches and approved child environments adapter-local", async () => {
+    const firstDirectory = await temporaryDirectory();
+    const secondDirectory = await temporaryDirectory();
+    const executable = process.platform === "win32" ? "codex.exe" : "codex";
+    const firstExecutable = join(firstDirectory, executable);
+    const secondExecutable = join(secondDirectory, executable);
+    await Promise.all([
+      writeFile(firstExecutable, "first"),
+      writeFile(secondExecutable, "second"),
+    ]);
+    if (process.platform !== "win32") {
+      await Promise.all([chmod(firstExecutable, 0o755), chmod(secondExecutable, 0o755)]);
+    }
+    let firstLoads = 0;
+    let secondLoads = 0;
+    const first = createCliExecutionResolver({
+      env: { PATH: "", OPENAI_API_KEY: "first-child-secret", FIRST: "yes" },
+      loginShellPathLoader: async () => {
+        firstLoads += 1;
+        return firstDirectory;
+      },
+    });
+    const second = createCliExecutionResolver({
+      env: { PATH: "", OPENAI_API_KEY: "second-child-secret", SECOND: "yes" },
+      loginShellPathLoader: async () => {
+        secondLoads += 1;
+        return secondDirectory;
+      },
+    });
+
+    const [firstDescriptor, secondDescriptor] = await Promise.all([
+      first.resolve("codex-cli"),
+      second.resolve("codex-cli"),
+    ]);
+    await first.resolve("codex-cli");
+    expect(firstDescriptor).toMatchObject({
+      mode: "direct",
+      executable: firstExecutable,
+      env: { PATH: "", OPENAI_API_KEY: "first-child-secret", FIRST: "yes" },
+      responseSensitiveValues: ["first-child-secret"],
+    });
+    expect(secondDescriptor).toMatchObject({
+      mode: "direct",
+      executable: secondExecutable,
+      env: { PATH: "", OPENAI_API_KEY: "second-child-secret", SECOND: "yes" },
+      responseSensitiveValues: ["second-child-secret"],
+    });
+    expect(firstLoads).toBe(1);
+    expect(secondLoads).toBe(1);
+  });
+
+  test("preserves static credential guidance and operation-local vault remediation", async () => {
+    const backendDetail = "core-adapter-vault-backend-detail";
+    let calls = 0;
+    const gateway = createCoreRuntimeGateway({
+      env: {},
+      credentialResolver: {
+        async resolve(provider) {
+          calls += 1;
+          if (calls === 1) {
+            throw new CredentialVaultError("get", provider, new Error(backendDetail));
+          }
+          return { source: "missing" };
+        },
+      },
+      sensitive: createSensitiveValueRegistry(),
+      createProvider: () => { throw new Error("provider construction must not run"); },
+    });
+
+    try {
+      await gateway.listModels("openai");
+      throw new Error("expected vault failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(RuntimeStageError);
+      expect((error as RuntimeStageError).cause).toBeInstanceOf(CredentialVaultError);
+      expect(String(error)).toContain("credential vault get (openai): unavailable");
+      expect(String(error)).not.toContain(backendDetail);
+    }
+
+    try {
+      await gateway.listModels("openai");
+      throw new Error("expected missing credential");
+    } catch (error) {
+      expect(error).toBeInstanceOf(RuntimeStageError);
+      expect((error as RuntimeStageError).cause).toBeUndefined();
+      expect(String(error)).toContain("missing credential; set OPENAI_API_KEY");
+      expect(String(error)).not.toContain(backendDetail);
+    }
+
+    const unavailable = createCoreRuntimeGateway({
+      env: {},
+      credentialResolver: {
+        resolve: async () => ({ source: "unavailable", reason: "target-disabled" }),
+      },
+      sensitive: createSensitiveValueRegistry(),
+      createProvider: () => { throw new Error("provider construction must not run"); },
+    });
+    await expect(unavailable.listModels("openai")).rejects.toThrow(
+      "native credential storage unavailable on this target; set OPENAI_API_KEY",
+    );
   });
 });

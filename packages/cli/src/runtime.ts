@@ -19,6 +19,14 @@ import {
   type LocalCommandResult,
   type LocalProcessSpawner,
 } from "@swartzrock/byok-runtime/node";
+import {
+  LlmNowError,
+  createLlmNowCore,
+  type CliExecutionDescriptor,
+  type CliExecutionResolver,
+  type LlmNowCoreClient,
+  type LlmNowOperation,
+} from "@swartzrock/llm-now-core";
 import { spawn } from "node:child_process";
 import crossSpawn from "cross-spawn";
 import { constants } from "node:fs";
@@ -26,6 +34,7 @@ import { access, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 import {
   CredentialVaultError,
+  adaptCredentialResolverForCore,
   createSensitiveValueRegistry,
   type CredentialResolver,
   type ResolvedCredential,
@@ -64,6 +73,12 @@ const CLOUD_PROVIDERS = Object.keys(
   BYOK_PROVIDER_API_KEY_ENV_VARS,
 ) as ByokCloudProviderId[];
 
+export interface CliExecutionResolverDependencies {
+  readonly env: ByokEnvironment;
+  readonly platform?: NodeJS.Platform;
+  readonly loginShellPathLoader?: LoginShellPathLoader;
+}
+
 function isCloudProvider(provider: ByokProviderId): provider is ByokCloudProviderId {
   return CLOUD_PROVIDERS.includes(provider as ByokCloudProviderId);
 }
@@ -78,6 +93,7 @@ export interface RuntimeGatewayDependencies {
   workspacePreflight?: WorkspacePreflight;
   credentialResolver: CredentialResolver;
   sensitive: SensitiveValueRegistry;
+  coreClient?: LlmNowCoreClient;
 }
 
 export interface RuntimeGateway {
@@ -258,8 +274,6 @@ function commandCandidates(command: "codex" | "claude", env: ByokEnvironment): s
 const LOGIN_SHELL_PATH_MARKER = "__LLM_NOW_LOGIN_SHELL_PATH__";
 const LOGIN_SHELL_PATH_TIMEOUT_MS = 3_000;
 const LOGIN_SHELL_PATH_MAX_CHARS = 65_536;
-let cachedLoginShellPath: string | undefined;
-let pendingLoginShellPath: Promise<string> | undefined;
 
 function parseLoginShellPath(stdout: string): string {
   const escapedMarker = LOGIN_SHELL_PATH_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -271,49 +285,55 @@ function parseLoginShellPath(stdout: string): string {
   return path;
 }
 
-function loadLoginShellPath(env: NodeJS.ProcessEnv): Promise<string> {
-  if (process.platform === "win32") return Promise.resolve("");
-  if (cachedLoginShellPath !== undefined) return Promise.resolve(cachedLoginShellPath);
-  if (pendingLoginShellPath !== undefined) return pendingLoginShellPath;
+function createLoginShellPathLoader(platform: NodeJS.Platform): LoginShellPathLoader {
+  let cachedLoginShellPath: string | undefined;
+  let pendingLoginShellPath: Promise<string> | undefined;
+  return (env: NodeJS.ProcessEnv): Promise<string> => {
+    if (platform === "win32") return Promise.resolve("");
+    if (cachedLoginShellPath !== undefined) return Promise.resolve(cachedLoginShellPath);
+    if (pendingLoginShellPath !== undefined) return pendingLoginShellPath;
 
-  pendingLoginShellPath = new Promise((resolve) => {
-    const configuredShell = env.SHELL?.trim();
-    const fallbackShell = process.platform === "darwin" ? "/bin/zsh" : "/bin/sh";
-    const shell = configuredShell !== undefined && isAbsolute(configuredShell)
-      ? configuredShell
-      : fallbackShell;
-    const child = spawn(
-      shell,
-      ["-l", "-c", `printf '\\n${LOGIN_SHELL_PATH_MARKER}%s${LOGIN_SHELL_PATH_MARKER}\\n' "$PATH"`],
-      { env, shell: false, stdio: ["ignore", "pipe", "ignore"] },
-    );
-    let stdout = "";
-    let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const settle = (path: string) => {
-      if (settled) return;
-      settled = true;
-      if (timer !== undefined) clearTimeout(timer);
-      if (path !== "") cachedLoginShellPath = path;
-      pendingLoginShellPath = undefined;
-      resolve(path);
-    };
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-      if (stdout.length > LOGIN_SHELL_PATH_MAX_CHARS) {
+    pendingLoginShellPath = new Promise((resolve) => {
+      const configuredShell = env.SHELL?.trim();
+      const fallbackShell = platform === "darwin" ? "/bin/zsh" : "/bin/sh";
+      const shell = configuredShell !== undefined && isAbsolute(configuredShell)
+        ? configuredShell
+        : fallbackShell;
+      const child = spawn(
+        shell,
+        ["-l", "-c", `printf '\\n${LOGIN_SHELL_PATH_MARKER}%s${LOGIN_SHELL_PATH_MARKER}\\n' "$PATH"`],
+        { env, shell: false, stdio: ["ignore", "pipe", "ignore"] },
+      );
+      let stdout = "";
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const settle = (path: string) => {
+        if (settled) return;
+        settled = true;
+        if (timer !== undefined) clearTimeout(timer);
+        if (path !== "") cachedLoginShellPath = path;
+        pendingLoginShellPath = undefined;
+        resolve(path);
+      };
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+        if (stdout.length > LOGIN_SHELL_PATH_MAX_CHARS) {
+          child.kill("SIGTERM");
+          settle("");
+        }
+      });
+      child.once("error", () => settle(""));
+      child.once("close", (code) => settle(code === 0 ? parseLoginShellPath(stdout) : ""));
+      timer = setTimeout(() => {
         child.kill("SIGTERM");
         settle("");
-      }
+      }, LOGIN_SHELL_PATH_TIMEOUT_MS);
     });
-    child.once("error", () => settle(""));
-    child.once("close", (code) => settle(code === 0 ? parseLoginShellPath(stdout) : ""));
-    timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      settle("");
-    }, LOGIN_SHELL_PATH_TIMEOUT_MS);
-  });
-  return pendingLoginShellPath;
+    return pendingLoginShellPath;
+  };
 }
+
+const loadLoginShellPath = createLoginShellPathLoader(process.platform);
 
 function mergePathValues(...paths: string[]): string {
   const seen = new Set<string>();
@@ -351,6 +371,72 @@ async function resolveWorkspaceCommand(
     }
   }
   throw new Error(`${command} was not found in an absolute PATH directory`);
+}
+
+function exactChildEnvironment(env: ByokEnvironment): Readonly<Record<string, string>> {
+  return Object.freeze(Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  ));
+}
+
+function recognizedCredentialValues(env: ByokEnvironment): readonly string[] {
+  return Object.freeze([...new Set(BYOK_API_KEY_ENV_VARS.flatMap((name) => {
+    const value = env[name];
+    return typeof value === "string" && value.length > 0 ? [value] : [];
+  }))]);
+}
+
+export function createCliExecutionResolver(
+  deps: CliExecutionResolverDependencies,
+): CliExecutionResolver {
+  const platform = deps.platform ?? process.platform;
+  const loginShellPathLoader = deps.loginShellPathLoader
+    ?? createLoginShellPathLoader(platform);
+  const descriptorCache = new Map<ByokProviderId, CliExecutionDescriptor>();
+  const env = exactChildEnvironment(deps.env);
+  const responseSensitiveValues = recognizedCredentialValues(deps.env);
+
+  const resolver: CliExecutionResolver = {
+    async resolve(provider, signal) {
+      const cached = descriptorCache.get(provider);
+      if (cached !== undefined) return cached;
+      signal?.throwIfAborted();
+      const command = provider === "codex-cli" ? "codex" : "claude";
+      const executable = await resolveWorkspaceCommand(
+        command,
+        deps.env,
+        loginShellPathLoader,
+      );
+      signal?.throwIfAborted();
+      let descriptor: CliExecutionDescriptor;
+      if (platform === "win32" && executable.toLowerCase().endsWith(".cmd")) {
+        const configuredProcessor = deps.env.ComSpec ?? deps.env.COMSPEC;
+        const systemRoot = deps.env.SystemRoot ?? deps.env.SYSTEMROOT;
+        const processor = configuredProcessor
+          ?? (systemRoot === undefined ? undefined : join(systemRoot, "System32", "cmd.exe"));
+        if (processor === undefined || !isAbsolute(processor)) return null;
+        descriptor = Object.freeze({
+          mode: "windows-command-shim",
+          commandProcessor: await realpath(processor),
+          shim: executable,
+          argsPrefix: Object.freeze([]),
+          env,
+          responseSensitiveValues,
+        });
+      } else {
+        descriptor = Object.freeze({
+          mode: "direct",
+          executable,
+          argsPrefix: Object.freeze([]),
+          env,
+          responseSensitiveValues,
+        });
+      }
+      descriptorCache.set(provider, descriptor);
+      return descriptor;
+    },
+  };
+  return Object.freeze(resolver);
 }
 
 function waitForAbort<T>(operation: () => Promise<T>, signal: AbortSignal | undefined): Promise<T> {
@@ -525,4 +611,163 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
       }
     },
   };
+}
+
+function coreStage(operation: LlmNowOperation): RuntimeStage {
+  if (operation === "discovery") return "discovery";
+  if (operation === "model-list" || operation === "validation") return "model-list";
+  return "generation";
+}
+
+interface CliCoreOperationContext {
+  credentialProvider?: ByokCloudProviderId;
+  credentialStatus?: "missing" | "unavailable";
+  vaultError?: CredentialVaultError;
+}
+
+function clearCoreOperationContext(context: CliCoreOperationContext): void {
+  context.credentialProvider = undefined;
+  context.credentialStatus = undefined;
+  context.vaultError = undefined;
+}
+
+function rethrowCoreError(
+  error: unknown,
+  fallbackStage: RuntimeStage,
+  provider: ByokProviderId | null,
+  context: CliCoreOperationContext,
+): never {
+  if (error instanceof LlmNowError) {
+    const stage = coreStage(error.operation);
+    const errorProvider = error.provider ?? provider;
+    if (context.vaultError !== undefined) {
+      throw new RuntimeStageError(
+        stage,
+        errorProvider,
+        context.vaultError.message,
+        context.vaultError,
+      );
+    }
+    if (
+      error.code === "CREDENTIAL_UNAVAILABLE"
+      && context.credentialProvider !== undefined
+      && context.credentialStatus !== undefined
+    ) {
+      const names = BYOK_PROVIDER_API_KEY_ENV_VARS[context.credentialProvider].join(" or ");
+      const message = context.credentialStatus === "missing"
+        ? `missing credential; set ${names}`
+        : `native credential storage unavailable on this target; set ${names}`;
+      throw new RuntimeStageError(stage, errorProvider, message);
+    }
+    throw new RuntimeStageError(
+      stage,
+      errorProvider,
+      error.message,
+    );
+  }
+  throw new RuntimeStageError(fallbackStage, provider, "The core operation failed safely.");
+}
+
+/**
+ * Phase-1 CLI adapter. Buffered operations use the core package now; the existing
+ * streaming path remains in the CLI until U5 moves callback lifecycle ownership.
+ */
+export function createCoreRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeGateway {
+  const legacy = createRuntimeGateway(deps);
+  const adaptedCredentialResolver = adaptCredentialResolverForCore(deps.credentialResolver);
+  const cliExecutionResolver = createCliExecutionResolver({
+    env: deps.env,
+    loginShellPathLoader: deps.workspaceLoginShellPathLoader,
+  });
+  const operationCore = (context: CliCoreOperationContext): LlmNowCoreClient =>
+    deps.coreClient ?? createLlmNowCore({
+      environment: deps.env,
+      credentialResolver: {
+        async resolve(provider, signal) {
+          try {
+            const resolution = await adaptedCredentialResolver.resolve(provider, signal);
+            if (resolution.status === "resolved") {
+              deps.sensitive.register(resolution.credential);
+            } else {
+              context.credentialProvider = provider;
+              context.credentialStatus = resolution.status;
+            }
+            return resolution;
+          } catch (error) {
+            if (error instanceof CredentialVaultError) context.vaultError = error;
+            throw error;
+          }
+        },
+      },
+      cliExecutionResolver,
+    });
+
+  const gateway: RuntimeGateway = {
+    async discover() {
+      const context: CliCoreOperationContext = {};
+      try {
+        const result = await operationCore(context).discoverProviders();
+        return result.providers
+          .filter(({ available }) => available)
+          .map(({ provider }) => provider);
+      } catch (error) {
+        rethrowCoreError(error, "discovery", null, context);
+      } finally {
+        clearCoreOperationContext(context);
+      }
+    },
+    async listModels(provider) {
+      const context: CliCoreOperationContext = {};
+      try {
+        return [...(await operationCore(context).listModels({ provider })).models];
+      } catch (error) {
+        rethrowCoreError(error, "model-list", provider, context);
+      } finally {
+        clearCoreOperationContext(context);
+      }
+    },
+    async validateCredential(provider, apiKey) {
+      const context: CliCoreOperationContext = {};
+      deps.sensitive.register(apiKey);
+      try {
+        return [...(await operationCore(context).validateConnection({
+          provider,
+          candidateCredential: apiKey,
+        })).models];
+      } catch (error) {
+        rethrowCoreError(error, "model-list", provider, context);
+      } finally {
+        clearCoreOperationContext(context);
+      }
+    },
+    async generate(provider, model, prompt, signal, instructions, workspace, onChunk) {
+      if (onChunk !== undefined) {
+        return legacy.generate(
+          provider,
+          model,
+          prompt,
+          signal,
+          instructions,
+          workspace,
+          onChunk,
+        );
+      }
+      const context: CliCoreOperationContext = {};
+      try {
+        return (await operationCore(context).generateText({
+          provider,
+          model,
+          prompt,
+          ...(instructions === undefined ? {} : { instructions }),
+          ...(workspace === undefined ? {} : { workspace }),
+          ...(signal === undefined ? {} : { signal }),
+        })).text;
+      } catch (error) {
+        rethrowCoreError(error, "generation", provider, context);
+      } finally {
+        clearCoreOperationContext(context);
+      }
+    },
+  };
+  return Object.freeze(gateway);
 }

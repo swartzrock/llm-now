@@ -7,7 +7,7 @@ import {
   createSensitiveValueRegistry,
   isNativeVaultEnabled,
 } from "./credentials.ts";
-import { createRuntimeGateway } from "./runtime.ts";
+import { createCoreRuntimeGateway } from "./runtime.ts";
 import { installVoiceCancellation } from "./voice.ts";
 
 const sensitive = createSensitiveValueRegistry();
@@ -34,7 +34,7 @@ process.exitCode = await runApplication({
   stdin,
   stdout: process.stdout,
   stderr: process.stderr,
-  runtime: createRuntimeGateway({ env: process.env, credentialResolver, sensitive }),
+  runtime: createCoreRuntimeGateway({ env: process.env, credentialResolver, sensitive }),
   prompter: createApplicationPrompter(process.stdin, process.stderr),
   env: process.env,
   platform: process.platform,

@@ -1,3 +1,8 @@
+export { createLlmNowCore } from "./client.ts";
+export type {
+  LlmNowCoreClient,
+  LlmNowCoreDependencies,
+} from "./client.ts";
 export { LlmNowError } from "./errors.ts";
 export type { LlmNowErrorCode, LlmNowOperation } from "./errors.ts";
 export type {
@@ -23,4 +28,19 @@ export type {
   EnvironmentSnapshot,
   ModelOption,
   ProviderId,
+  DirectoryAccess,
+  GenerateTextRequest,
+  GenerateTextResult,
+  ModelListRequest,
+  ModelListResult,
+  ProviderAvailability,
+  ProviderDiscoveryRequest,
+  ProviderDiscoveryResult,
+  ProviderFamily,
+  ProviderUnavailabilityReason,
+  ValidateConnectionRequest,
+  ValidationResult,
+  WorkspaceCapabilities,
+  WorkspaceRequest,
 } from "./types.ts";
+export { workspaceCapabilities } from "./workspace.ts";

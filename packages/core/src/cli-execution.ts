@@ -6,6 +6,7 @@ export interface DirectCliExecutionDescriptor {
   readonly executable: string;
   readonly argsPrefix: readonly string[];
   readonly env: Readonly<Record<string, string>>;
+  readonly responseSensitiveValues?: readonly string[];
 }
 
 export interface WindowsCommandShimExecutionDescriptor {
@@ -14,6 +15,7 @@ export interface WindowsCommandShimExecutionDescriptor {
   readonly shim: string;
   readonly argsPrefix: readonly string[];
   readonly env: Readonly<Record<string, string>>;
+  readonly responseSensitiveValues?: readonly string[];
 }
 
 export type CliExecutionDescriptor =
@@ -61,7 +63,10 @@ export function validateCliExecutionDescriptor(value: unknown): CliExecutionDesc
     const descriptor = value as Record<string, unknown>;
     const argsPrefix = immutableStrings(descriptor.argsPrefix);
     const env = exactEnvironment(descriptor.env);
-    if (argsPrefix === null || env === null) return null;
+    const responseSensitiveValues = descriptor.responseSensitiveValues === undefined
+      ? undefined
+      : immutableStrings(descriptor.responseSensitiveValues);
+    if (argsPrefix === null || env === null || responseSensitiveValues === null) return null;
 
     if (descriptor.mode === "direct") {
       if (
@@ -76,6 +81,7 @@ export function validateCliExecutionDescriptor(value: unknown): CliExecutionDesc
         executable: descriptor.executable,
         argsPrefix,
         env,
+        ...(responseSensitiveValues === undefined ? {} : { responseSensitiveValues }),
       });
     }
 
@@ -98,6 +104,7 @@ export function validateCliExecutionDescriptor(value: unknown): CliExecutionDesc
         shim: descriptor.shim,
         argsPrefix,
         env,
+        ...(responseSensitiveValues === undefined ? {} : { responseSensitiveValues }),
       });
     }
   } catch {

@@ -22,7 +22,10 @@ import {
   type VoiceProcessRequest,
   type VoiceProcessRunner,
 } from "../packages/cli/src/voice.ts";
-import { createRuntimeGateway } from "../packages/cli/src/runtime.ts";
+import {
+  createCoreRuntimeGateway,
+  createRuntimeGateway,
+} from "../packages/cli/src/runtime.ts";
 import { runApplication, type ApplicationPrompter } from "../packages/cli/src/app.ts";
 import {
   CredentialVaultError,
@@ -5623,7 +5626,7 @@ describe("API-key management", () => {
   test("preserves vault remediation through the production runtime boundary", async () => {
     const backendDetail = "runtime vault-backend-detail";
     const sensitive = createSensitiveValueRegistry();
-    const gateway = createRuntimeGateway({
+    const gateway = createCoreRuntimeGateway({
       env: {},
       credentialResolver: {
         resolve: async (provider) => {
