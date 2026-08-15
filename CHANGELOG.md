@@ -1,5 +1,11 @@
 # llm-now
 
+## 2.7.0
+
+### Minor Changes
+
+- c165509: Add `default.alias` as the fallback for unmatched `--voice-route` transcripts.
+
 ## 2.6.0
 
 ### Minor Changes
