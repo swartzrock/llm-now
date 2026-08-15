@@ -11,19 +11,19 @@ import {
   type AliasRecord,
   type AliasDocument,
   type SaveAliasResult,
-} from "../src/aliases.ts";
-import { renderHelpText } from "../src/args.ts";
-import { serializeConfigDocument } from "../src/config-schema.ts";
-import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
+} from "../packages/cli/src/aliases.ts";
+import { renderHelpText } from "../packages/cli/src/args.ts";
+import { serializeConfigDocument } from "../packages/cli/src/config-schema.ts";
+import { RuntimeStageError, type RuntimeGateway } from "../packages/cli/src/runtime.ts";
 import {
   CONFIG_FAILED_NOTICE,
   REQUEST_FAILED_NOTICE,
   type VoiceCancellation,
   type VoiceProcessRequest,
   type VoiceProcessRunner,
-} from "../src/voice.ts";
-import { createRuntimeGateway } from "../src/runtime.ts";
-import { runApplication, type ApplicationPrompter } from "../src/app.ts";
+} from "../packages/cli/src/voice.ts";
+import { createRuntimeGateway } from "../packages/cli/src/runtime.ts";
+import { runApplication, type ApplicationPrompter } from "../packages/cli/src/app.ts";
 import {
   CredentialVaultError,
   createCredentialResolver,
@@ -32,14 +32,14 @@ import {
   type CredentialResolver,
   type CredentialVault,
   type SensitiveValueRegistry,
-} from "../src/credentials.ts";
+} from "../packages/cli/src/credentials.ts";
 import {
   CLOUD_CREDENTIAL_PROVIDERS,
   stripTerminalSequences,
   type PromptOption,
   type TextPromptOptions,
   type PromptValue,
-} from "../src/prompts.ts";
+} from "../packages/cli/src/prompts.ts";
 
 const temporaryDirectories: string[] = [];
 const conflictingAliasDocument = JSON.stringify({

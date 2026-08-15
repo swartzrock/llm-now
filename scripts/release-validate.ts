@@ -1,12 +1,12 @@
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
-import packageMetadata from "../package.json" with { type: "json" };
+import packageMetadata from "../packages/cli/package.json" with { type: "json" };
 import {
   NATIVE_VAULT_BUN_VERSION,
   NATIVE_VAULT_COMPATIBILITY,
   type NativeVaultTarget,
-} from "../src/credentials.ts";
-import { serializeConfigDocument } from "../src/config-schema.ts";
+} from "../packages/cli/src/credentials.ts";
+import { serializeConfigDocument } from "../packages/cli/src/config-schema.ts";
 import {
   RELEASE_TARGETS,
   archiveName,
@@ -72,6 +72,7 @@ function assertComputationOnly(label: string, sources: readonly string[]): void 
 
 export async function validateVoiceDependencies() {
   const root = join(import.meta.dir, "..");
+  const cliModules = join(root, "packages", "cli", "node_modules");
   const lock = await Bun.file(join(root, "bun.lock")).text();
   const dependencies = packageMetadata.dependencies as Record<string, string>;
   for (const expected of Object.values(VOICE_PACKAGES)) {
@@ -82,7 +83,7 @@ export async function validateVoiceDependencies() {
     if (!lock.includes(lockEntry)) throw new Error(`${expected.name} lock integrity does not match the audited package`);
   }
 
-  const metricRoot = join(root, "node_modules", "@3leaps", "string-metrics-wasm");
+  const metricRoot = join(cliModules, "@3leaps", "string-metrics-wasm");
   const metricManifest = await Bun.file(join(metricRoot, "package.json")).json() as PackageManifest;
   if (
     metricManifest.name !== VOICE_PACKAGES.metric.name
@@ -140,7 +141,7 @@ export async function validateVoiceDependencies() {
   if (metricWasmFiles.length > 0) throw new Error("metric package contains a standalone WASM asset");
   if (!(await Bun.file(join(metricRoot, "LICENSE")).exists())) throw new Error("metric package license file is missing");
 
-  const caseFoldingRoot = join(root, "node_modules", "unicode-case-folding");
+  const caseFoldingRoot = join(cliModules, "unicode-case-folding");
   const caseFoldingManifest = await Bun.file(join(caseFoldingRoot, "package.json")).json() as PackageManifest;
   if (
     caseFoldingManifest.name !== VOICE_PACKAGES.caseFolding.name
@@ -173,7 +174,7 @@ export async function validateVoiceDependencies() {
     throw new Error(`${CONFIG_SERIALIZER_PACKAGE.name} lock integrity does not match the audited package`);
   }
 
-  const serializerRoot = join(root, "node_modules", CONFIG_SERIALIZER_PACKAGE.name);
+  const serializerRoot = join(cliModules, CONFIG_SERIALIZER_PACKAGE.name);
   const serializerManifest = await Bun.file(join(serializerRoot, "package.json")).json() as PackageManifest;
   if (
     serializerManifest.name !== CONFIG_SERIALIZER_PACKAGE.name

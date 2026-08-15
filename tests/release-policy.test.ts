@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { validateVoiceDependencies } from "../scripts/release-validate.ts";
-import { NATIVE_VAULT_COMPATIBILITY } from "../src/credentials.ts";
+import { NATIVE_VAULT_COMPATIBILITY } from "../packages/cli/src/credentials.ts";
 
 const releaseWorkflow = await Bun.file(
   new URL("../.github/workflows/release.yml", import.meta.url),
@@ -397,7 +397,7 @@ describe("release workflow policy", () => {
       releaseWorkflow.indexOf("\n  homebrew-sync:"),
     );
     expect(finalAssetsJob).toContain(
-      'bun scripts/release-notes.ts "$VERSION" "$RELEASE_SHA" CHANGELOG.md dist/RELEASE_NOTES.md',
+      'bun scripts/release-notes.ts "$VERSION" "$RELEASE_SHA" packages/cli/CHANGELOG.md dist/RELEASE_NOTES.md',
     );
     expect(finalAssetsJob).toContain("dist/RELEASE_NOTES.md");
     expect(publishJob).toContain('--notes-file dist/RELEASE_NOTES.md');

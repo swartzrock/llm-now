@@ -92,7 +92,7 @@ jobs:
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "release-sha must be a full lowercase commit SHA" >&2; exit 1; }
           git fetch origin main
           git merge-base --is-ancestor "$RELEASE_SHA" origin/main
-          VERSION="$(bun -p 'require("./package.json").version')"
+          VERSION="$(bun -p 'require("./packages/cli/package.json").version')"
           [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "package version must be stable X.Y.Z" >&2; exit 1; }
           echo "release-sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -381,7 +381,7 @@ jobs:
           pattern: native-windows-*
           path: .release-artifacts/windows
       - run: bun scripts/release-validate.ts assemble .release-artifacts dist
-      - run: bun scripts/release-notes.ts "$VERSION" "$RELEASE_SHA" CHANGELOG.md dist/RELEASE_NOTES.md
+      - run: bun scripts/release-notes.ts "$VERSION" "$RELEASE_SHA" packages/cli/CHANGELOG.md dist/RELEASE_NOTES.md
         env:
           VERSION: ${{ needs.validate-ref.outputs.version }}
           RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}

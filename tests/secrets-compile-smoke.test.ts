@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { NativeSecretAdapter } from "../src/credentials.ts";
+import type { NativeSecretAdapter } from "../packages/cli/src/credentials.ts";
 import { runNativeSecretLifecycle } from "./fixtures/secrets-compile-smoke.ts";
 
 function adapter(options: { failReplace?: boolean } = {}) {

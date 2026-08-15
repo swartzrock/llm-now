@@ -20,7 +20,7 @@ import {
   projectAliases,
   projectVoiceConfig,
   serializeConfigDocument,
-} from "../src/config-schema.ts";
+} from "../packages/cli/src/config-schema.ts";
 import {
   ConfigTransactionError,
   loadConfig,
@@ -28,7 +28,7 @@ import {
   migrateConfig,
   resolveConfigPaths,
   saveConfigAlias,
-} from "../src/config.ts";
+} from "../packages/cli/src/config.ts";
 
 const temporaryDirectories: string[] = [];
 

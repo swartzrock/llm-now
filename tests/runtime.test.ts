@@ -15,12 +15,12 @@ import {
   createBunCredentialVault,
   createCredentialResolver,
   createSensitiveValueRegistry,
-} from "../src/credentials.ts";
+} from "../packages/cli/src/credentials.ts";
 import {
   RuntimeStageError,
   createRuntimeGateway,
   type RuntimeGatewayDependencies,
-} from "../src/runtime.ts";
+} from "../packages/cli/src/runtime.ts";
 
 const providerIds: ByokProviderId[] = [...BYOK_PROVIDER_IDS];
 const temporaryDirectories: string[] = [];

@@ -1,8 +1,8 @@
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import packageMetadata from "../package.json" with { type: "json" };
-import { loadConfig, resolveConfigPaths, saveConfigAlias } from "../src/config";
-import { serializeConfigDocument } from "../src/config-schema";
+import packageMetadata from "../packages/cli/package.json" with { type: "json" };
+import { loadConfig, resolveConfigPaths, saveConfigAlias } from "../packages/cli/src/config";
+import { serializeConfigDocument } from "../packages/cli/src/config-schema";
 
 if (
   packageMetadata.dependencies["@3leaps/string-metrics-wasm"] !== "0.3.11"

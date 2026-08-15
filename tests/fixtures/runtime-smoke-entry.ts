@@ -8,9 +8,9 @@ import {
   migrateConfig,
   resolveConfigPaths,
   saveConfigAlias,
-} from "../../src/config.ts";
-import { serializeConfigDocument } from "../../src/config-schema.ts";
-import { routeTranscript } from "../../src/voice-routing.ts";
+} from "../../packages/cli/src/config.ts";
+import { serializeConfigDocument } from "../../packages/cli/src/config-schema.ts";
+import { routeTranscript } from "../../packages/cli/src/voice-routing.ts";
 
 const fakeCli = Bun.argv[2];
 const isolationRoot = Bun.argv[3];

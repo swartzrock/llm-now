@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { unzipSync } from "fflate";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import packageMetadata from "../package.json" with { type: "json" };
+import packageMetadata from "../packages/cli/package.json" with { type: "json" };
 import {
   RELEASE_TARGETS,
   archiveMtime,
@@ -14,7 +14,7 @@ import {
   NATIVE_VAULT_BUN_VERSION,
   NATIVE_VAULT_COMPATIBILITY,
   isNativeVaultEnabled,
-} from "../src/credentials.ts";
+} from "../packages/cli/src/credentials.ts";
 import {
   assembleReleaseAssets,
   assertNativeVaultGateTarget,
@@ -244,7 +244,7 @@ describe("native release build", () => {
     );
     const releaseIntent = await changeset.exists()
       ? await changeset.text()
-      : await Bun.file(new URL("../CHANGELOG.md", import.meta.url)).text();
+      : await Bun.file(new URL("../packages/cli/CHANGELOG.md", import.meta.url)).text();
 
     for (const document of [readme, configuration, manualTesting]) {
       expect(document).toContain("Codex CLI");

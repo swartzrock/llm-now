@@ -1,4 +1,4 @@
-import { createBunNativeSecretAdapter } from "../../src/credentials.ts";
+import { createBunNativeSecretAdapter } from "../../packages/cli/src/credentials.ts";
 import { runNativeSecretLifecycle } from "./secrets-compile-smoke.ts";
 
 try {

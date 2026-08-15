@@ -1,38 +1,31 @@
 {
-  "name": "llm-now",
-  "version": "2.7.0",
-  "module": "index.ts",
+  "name": "llm-now-workspace",
   "type": "module",
   "private": true,
-  "bin": {
-    "llm-now": "./index.ts"
-  },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "start": "bun index.ts",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
+    "test": "bun run core:build && bun test",
+    "typecheck": "bun run core:build && tsc --noEmit",
     "changeset": "changeset",
     "changeset:status": "changeset status --verbose",
     "changeset:version": "changeset version",
-    "runtime:smoke": "bun tests/runtime-compile-smoke.ts",
-    "check": "bun test && bun run typecheck && bun run runtime:smoke",
-    "build:native": "bun scripts/build.ts",
-    "release:validate": "bun scripts/release-validate.ts"
+    "runtime:smoke": "bun run core:build && bun tests/runtime-compile-smoke.ts",
+    "check": "bun run core:build && bun test && tsc --noEmit && bun tests/runtime-compile-smoke.ts",
+    "core:build": "bun scripts/build-core.ts",
+    "build:native": "bun run core:build && bun scripts/build.ts",
+    "release:validate": "bun run core:build && bun scripts/release-validate.ts"
   },
   "devDependencies": {
     "@changesets/cli": "2.31.0",
+    "@manypkg/get-packages": "1.1.3",
     "@types/bun": "1.3.14",
-    "fflate": "0.8.2",
-    "typescript": "5.9.3"
-  },
-  "dependencies": {
-    "@3leaps/string-metrics-wasm": "0.3.11",
-    "@clack/core": "1.4.3",
-    "@clack/prompts": "1.7.0",
+    "@types/node": "24.13.3",
     "@swartzrock/byok-runtime": "2.4.1",
-    "cross-spawn": "7.0.6",
+    "fflate": "0.8.2",
     "picocolors": "1.1.1",
-    "smol-toml": "1.7.1",
-    "unicode-case-folding": "1.1.1"
+    "typescript": "5.9.3"
   }
 }

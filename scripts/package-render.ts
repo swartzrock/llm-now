@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import packageMetadata from "../package.json" with { type: "json" };
+import packageMetadata from "../packages/cli/package.json" with { type: "json" };
 import { RELEASE_TARGETS, archiveName } from "./build.ts";
 
 export function parseChecksumManifest(text: string): Map<string, string> {

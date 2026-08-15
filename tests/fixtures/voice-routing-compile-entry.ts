@@ -1,4 +1,4 @@
-import { ratio } from "../../src/voice-routing.ts";
+import { ratio } from "../../packages/cli/src/voice-routing.ts";
 
 const first = ratio("deepseek32", "deepseek32");
 const repeated = ratio("tara", "terra");

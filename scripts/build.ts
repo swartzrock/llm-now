@@ -1,7 +1,7 @@
 import { chmod, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { unzipSync, zipSync } from "fflate";
-import packageMetadata from "../package.json" with { type: "json" };
+import packageMetadata from "../packages/cli/package.json" with { type: "json" };
 
 export interface ReleaseTarget {
   id: "macos-x64" | "macos-arm64" | "linux-x64" | "linux-arm64" | "windows-x64";

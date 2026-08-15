@@ -1,5 +1,5 @@
-import { saveAlias } from "../../src/aliases.ts";
-import { migrateConfig, saveConfigAlias } from "../../src/config.ts";
+import { saveAlias } from "../../packages/cli/src/aliases.ts";
+import { migrateConfig, saveConfigAlias } from "../../packages/cli/src/config.ts";
 
 const args = process.argv.slice(2);
 if (args[0] === "--migrate") {

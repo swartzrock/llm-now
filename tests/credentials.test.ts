@@ -14,7 +14,7 @@ import {
   nativeVaultName,
   withCredentialMutationLock,
   type NativeSecretStore,
-} from "../src/credentials.ts";
+} from "../packages/cli/src/credentials.ts";
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 

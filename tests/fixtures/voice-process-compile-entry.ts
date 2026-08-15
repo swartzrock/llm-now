@@ -1,4 +1,4 @@
-import { createBunVoiceProcessRunner } from "../../src/voice.ts";
+import { createBunVoiceProcessRunner } from "../../packages/cli/src/voice.ts";
 
 const runner = createBunVoiceProcessRunner();
 const outcome = await runner.run({
