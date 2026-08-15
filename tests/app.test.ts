@@ -192,6 +192,7 @@ function dependencies(options: {
   saveAlias?: (...args: Parameters<NonNullable<Parameters<typeof runApplication>[0]["saveAlias"]>>) => Promise<SaveAliasResult>;
   migrateConfig?: NonNullable<Parameters<typeof runApplication>[0]["migrateConfig"]>;
   generationTimeoutMs?: number;
+  generationCleanupTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault?: CredentialVault;
   credentialResolver?: CredentialResolver;
@@ -246,6 +247,7 @@ function dependencies(options: {
       saveAlias: options.saveAlias,
       migrateConfig: options.migrateConfig,
       generationTimeoutMs: options.generationTimeoutMs,
+      generationCleanupTimeoutMs: options.generationCleanupTimeoutMs,
       modelListTimeoutMs: options.modelListTimeoutMs,
       credentialVault,
       credentialResolver,
@@ -3903,7 +3905,7 @@ describe("one-shot application", () => {
     const buffered = runtime({
       generate: async (...args) => {
         expect(args[6]).toBeUndefined();
-        return "complete response";
+        return "first second";
       },
     });
     const defaultApp = dependencies({
@@ -3912,7 +3914,7 @@ describe("one-shot application", () => {
     });
 
     expect(await runApplication(defaultApp.value)).toBe(0);
-    expect(defaultApp.stdout.text()).toBe("complete response");
+    expect(defaultApp.stdout.text()).toBe(streamingApp.stdout.text());
   });
 
   test("sanitizes terminal cursor controls in buffered and streaming output", async () => {
@@ -4627,6 +4629,56 @@ describe("one-shot application", () => {
     expect(await runApplication(app.value)).toBe(1);
     expect(aborted).toBe(true);
     expect(app.stderr.text()).toContain("generation (ollama): timed out");
+  });
+
+  test("fully settles timed-out CLI work but bounds remote cleanup", async () => {
+    let releaseCli!: () => void;
+    let markCliStarted!: () => void;
+    const cliStarted = new Promise<void>((resolve) => {
+      markCliStarted = resolve;
+    });
+    const cli = dependencies({
+      args: ["--input", "hello", "--provider", "codex-cli", "--model", "default"],
+      generationTimeoutMs: 5,
+      runtime: runtime({
+        generate: async (_provider, _model, _prompt, signal) =>
+          await new Promise<string>((resolve) => {
+            releaseCli = () => resolve("late CLI response");
+            signal?.addEventListener("abort", () => undefined, { once: true });
+            markCliStarted();
+          }),
+      }),
+    });
+    let cliSettled = false;
+    const cliRun = runApplication(cli.value).then((exit) => {
+      cliSettled = true;
+      return exit;
+    });
+
+    await cliStarted;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(cliSettled).toBe(false);
+    releaseCli();
+    expect(await cliRun).toBe(1);
+    expect(cli.stderr.text()).toContain("generation (codex-cli): timed out");
+
+    const remote = dependencies({
+      args: ["--input", "hello", "--provider", "ollama", "--model", "qwen"],
+      generationTimeoutMs: 5,
+      generationCleanupTimeoutMs: 5,
+      runtime: runtime({
+        generate: () => new Promise<string>(() => undefined),
+      }),
+    });
+    const remoteExit = await Promise.race([
+      runApplication(remote.value),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("remote cleanup did not remain bounded")), 250);
+      }),
+    ]);
+
+    expect(remoteExit).toBe(1);
+    expect(remote.stderr.text()).toContain("generation (ollama): timed out");
   });
 
   test("does not put a synthetic timeout around discovery that may read the native vault", async () => {

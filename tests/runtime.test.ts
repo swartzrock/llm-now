@@ -298,6 +298,122 @@ describe("runtime gateway", () => {
     expect(bufferedCalls).toBe(0);
   });
 
+  test("keeps buffered and streamed final text byte-identical", async () => {
+    const expected = "first 🧪 second\nthird";
+    const chunks: string[] = [];
+    const gateway = createTestGateway({
+      env: {},
+      createProvider: () => runtime({
+        generateText: async () => ({ text: expected }),
+        streamText: () => ({
+          delivery: "native" as const,
+          textStream: {
+            async *[Symbol.asyncIterator]() {
+              yield "first 🧪";
+              yield " second";
+              yield "\nthird";
+            },
+          },
+        }),
+      }),
+    });
+
+    const buffered = await gateway.generate("ollama", "qwen", "prompt");
+    const streamed = await gateway.generate(
+      "ollama",
+      "qwen",
+      "prompt",
+      undefined,
+      undefined,
+      undefined,
+      (chunk) => {
+        chunks.push(chunk);
+      },
+    );
+
+    expect(buffered).toBe(expected);
+    expect(streamed).toBe(expected);
+    expect(chunks.join("")).toBe(expected);
+  });
+
+  test("finalizes streamed provider output when the delta handler rejects", async () => {
+    const events: string[] = [];
+    const gateway = createTestGateway({
+      env: {},
+      createProvider: () => runtime({
+        streamText: () => ({
+          delivery: "native" as const,
+          textStream: {
+            async *[Symbol.asyncIterator]() {
+              try {
+                events.push("yield:first");
+                yield "first";
+                events.push("yield:second");
+                yield " second";
+              } finally {
+                events.push("finalize");
+              }
+            },
+          },
+        }),
+      }),
+    });
+
+    await expect(gateway.generate(
+      "ollama",
+      "qwen",
+      "prompt",
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        events.push("handler");
+        throw new Error("delta handler failed");
+      },
+    )).rejects.toBeInstanceOf(RuntimeStageError);
+    expect(events).toEqual(["yield:first", "handler", "finalize"]);
+  });
+
+  test("finalizes streamed provider output after cancellation during delivery", async () => {
+    const controller = new AbortController();
+    const events: string[] = [];
+    const gateway = createTestGateway({
+      env: {},
+      createProvider: () => runtime({
+        streamText: (_input, signal) => ({
+          delivery: "native" as const,
+          textStream: {
+            async *[Symbol.asyncIterator]() {
+              try {
+                events.push("yield:first");
+                yield "first";
+                signal?.throwIfAborted();
+                events.push("yield:second");
+                yield " second";
+              } finally {
+                events.push("finalize");
+              }
+            },
+          },
+        }),
+      }),
+    });
+
+    await expect(gateway.generate(
+      "ollama",
+      "qwen",
+      "prompt",
+      controller.signal,
+      undefined,
+      undefined,
+      () => {
+        events.push("handler:first");
+        controller.abort(new Error("cancel during provider output"));
+      },
+    )).rejects.toBeInstanceOf(RuntimeStageError);
+    expect(events).toEqual(["yield:first", "handler:first", "finalize"]);
+  });
+
   test("rejects a pre-aborted generation before provider setup", async () => {
     let providerCalls = 0;
     const gateway = createTestGateway({
@@ -344,6 +460,40 @@ describe("runtime gateway", () => {
     ).rejects.toThrow("cancelled after setup");
     expect(providerCalls).toBe(1);
     expect(generationCalls).toBe(0);
+  });
+
+  test("keeps environment credentials isolated between runtime instances", async () => {
+    const configs: ByokProviderConfig[] = [];
+    const gateway = (apiKey: string) => {
+      const env = { OPENAI_API_KEY: apiKey };
+      return createTestGateway({
+        env,
+        credentialResolver: createCredentialResolver({
+          env,
+          vault: createBunCredentialVault({
+            get: async () => null,
+            set: async () => {},
+            delete: async () => false,
+          }),
+          vaultEnabled: false,
+        }),
+        createProvider: (config) => {
+          configs.push(config);
+          return runtime({ generateText: async () => ({ text: "generated" }) });
+        },
+      });
+    };
+    const first = gateway("first-environment-secret");
+    const second = gateway("second-environment-secret");
+
+    expect(await Promise.all([
+      first.generate("openai", "gpt-test", "prompt"),
+      second.generate("openai", "gpt-test", "prompt"),
+    ])).toEqual(["generated", "generated"]);
+    expect(configs).toEqual([
+      { provider: "openai", apiKey: "first-environment-secret", model: "gpt-test" },
+      { provider: "openai", apiKey: "second-environment-secret", model: "gpt-test" },
+    ]);
   });
 
   test("rejects unsupported workspaces before credentials or provider construction", async () => {
