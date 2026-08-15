@@ -104,7 +104,9 @@ piped input, and noninteractive execution bypass the launcher. Noninteractive
 generation needs exactly one prompt source (`--input` or stdin) plus a saved
 shortcut or an explicit provider and model. Successful generation writes only
 the model response to stdout; interactive UI and diagnostics use stderr.
-With `--stream`, response chunks are written and flushed as they arrive. It
+With `--stream`, response chunks are written and flushed as they arrive. Model
+responses are stripped of terminal escape sequences and unsafe control
+characters before stdout in both streaming and buffered modes. `--stream`
 cannot be combined with `--speak`.
 `--aliases` and `--config-path` are standalone commands.
 

@@ -1715,6 +1715,11 @@ function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
   stderr.write(`\u001b[0m${response.endsWith("\n") ? "\n" : "\n\n"}`);
 }
 
+function sanitizeGeneratedOutput(text: string): string {
+  return stripTerminalSequences(text)
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, "");
+}
+
 function writeOutput(output: TextOutput, text: string): Promise<void> {
   return new Promise((resolve, reject) => {
     output.write(text, (error) => error ? reject(error) : resolve());
@@ -2006,16 +2011,13 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       let streamedResponse = "";
       const writeStreamChunk = parsed.stream
         ? async (chunk: string) => {
-          const nextResponse = streamedResponse + chunk;
-          const terminalResponse = stripTerminalSequences(nextResponse);
-          if (
-            deps.sensitive.redact(nextResponse) !== nextResponse
-            || deps.sensitive.redact(terminalResponse) !== terminalResponse
-          ) {
+          const outputChunk = sanitizeGeneratedOutput(chunk);
+          const nextResponse = streamedResponse + outputChunk;
+          if (deps.sensitive.redact(nextResponse) !== nextResponse) {
             throw new Error("response stream stopped because it contained a registered credential");
           }
           streamedResponse = nextResponse;
-          await writeOutput(deps.stdout, chunk);
+          await writeOutput(deps.stdout, outputChunk);
         }
         : undefined;
       const generated = await generateWithTimeout(
@@ -2054,18 +2056,15 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         }
         if (spoken.kind === "failed") return 1;
       } else if (parsed.stream) {
-        if (interactive) writeInteractiveBoundary(deps.stderr, response);
+        if (interactive) writeInteractiveBoundary(deps.stderr, streamedResponse);
       } else {
-        const terminalResponse = stripTerminalSequences(response);
-        if (
-          deps.sensitive.redact(response) !== response
-          || deps.sensitive.redact(terminalResponse) !== terminalResponse
-        ) {
+        const outputResponse = sanitizeGeneratedOutput(response);
+        if (deps.sensitive.redact(outputResponse) !== outputResponse) {
           diagnostic("generation: response withheld because it contained a registered credential.");
           return 1;
         }
-        await writeOutput(deps.stdout, response);
-        if (interactive) writeInteractiveBoundary(deps.stderr, response);
+        await writeOutput(deps.stdout, outputResponse);
+        if (interactive) writeInteractiveBoundary(deps.stderr, outputResponse);
       }
 
       if (signal?.aborted) return cancelled();

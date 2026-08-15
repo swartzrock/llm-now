@@ -281,8 +281,10 @@ option or positional value is a usage error.
 
 ## Output and diagnostics
 
-Successful generation writes the model response byte-for-byte to stdout.
-With `--stream`, llm-now writes and flushes each response chunk as it arrives;
+Successful generation removes terminal escape sequences and unsafe control
+characters from the model response before writing it to stdout. Newlines and
+tabs are preserved. With `--stream`, llm-now sanitizes, writes, and flushes each
+response chunk as it arrives;
 without it, llm-now keeps the existing behavior of writing the completed
 response once. `--stream` cannot be combined with `--speak`. If streaming
 generation fails or times out after emitting text, the completed chunks remain
@@ -301,8 +303,8 @@ Without streaming, if a generated response contains a registered credential,
 `llm-now` withholds the entire response from stdout, emits a redacted diagnostic,
 and exits `1`. In streaming mode, llm-now stops before writing the chunk that
 would complete the credential; already-written chunks remain on stdout.
-Diagnostics remove
-terminal controls, normalize line endings, limit runtime detail, and redact
+Generated stdout and diagnostics remove terminal controls. Diagnostics also
+normalize line endings, limit runtime detail, and redact
 recognized environment, stored, candidate, prompt, and instruction values as
 appropriate. Interactive color is suppressed by `NO_COLOR`, `TERM=dumb`, and
 non-terminal output.
