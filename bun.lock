@@ -8,7 +8,7 @@
         "@3leaps/string-metrics-wasm": "0.3.11",
         "@clack/core": "1.4.3",
         "@clack/prompts": "1.7.0",
-        "@swartzrock/byok-runtime": "2.2.0",
+        "@swartzrock/byok-runtime": "2.4.1",
         "cross-spawn": "7.0.6",
         "picocolors": "1.1.1",
         "smol-toml": "1.7.1",
@@ -21,9 +21,6 @@
         "typescript": "5.9.3",
       },
     },
-  },
-  "patchedDependencies": {
-    "@swartzrock/byok-runtime@2.2.0": "patches/@swartzrock%2Fbyok-runtime@2.2.0.patch",
   },
   "packages": {
     "@3leaps/string-metrics-wasm": ["@3leaps/string-metrics-wasm@0.3.11", "", {}, "sha512-An4O6Dd0ZVSn9/xAPJhnLKfMjDvZ5Pa+YuhwnA0gzPRBtRlLkHvYDvi77p/xZORPOKDpm5CVR153NOa1XL/h/w=="],
@@ -80,7 +77,7 @@
 
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
 
-    "@swartzrock/byok-runtime": ["@swartzrock/byok-runtime@2.2.0", "", { "dependencies": { "ollama": "^0.6.3", "openai": "^6.45.0", "tslib": "2.6.2", "zod": "^3.25.76" } }, "sha512-cbKJ3R8KK3fJqZUL9bNV5z/qwKyp12z/+v3DbOKPswJ7CpG8iUA4HFmnJaHbrhmaG+F4Kot2en6RC9BAwGUjJw=="],
+    "@swartzrock/byok-runtime": ["@swartzrock/byok-runtime@2.4.1", "", { "dependencies": { "ollama": "^0.6.3", "openai": "^6.45.0", "tslib": "2.6.2", "zod": "^3.25.76" } }, "sha512-3WYTPY436u+XOBfv49FZFckR6W4OPuJKrvC2Sr7QlhAYRXm+FMZp2Fvu7uLSln4iSiLU5i1AXEXriUO1gyR/qw=="],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 

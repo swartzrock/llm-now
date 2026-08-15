@@ -156,7 +156,7 @@ describe("native release build", () => {
     expect(releaseValidation).toContain(
       "llm-now [<alias> | --alias <name>] [--input <text>]",
     );
-    expect(releaseValidation).toContain("[--instruction <text>] [--speak]");
+    expect(releaseValidation).toContain("[--instruction <text>] [--stream] [--speak]");
     expect(releaseValidation).not.toContain("llm-now --voice [--input <text>]");
     expect(releaseValidation).toContain("non-macOS speech guard before scorer initialization");
     expect(releaseValidation).toContain("voice: llm-now --speak currently supports macOS only.");

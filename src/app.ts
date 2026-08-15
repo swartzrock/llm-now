@@ -8,6 +8,7 @@ import {
 } from "@swartzrock/byok-runtime";
 import pc from "picocolors";
 import type { Readable, Writable } from "node:stream";
+import { stripVTControlCharacters } from "node:util";
 import {
   type AliasRecord,
   type SaveAliasResult,
@@ -940,6 +941,7 @@ async function generateWithTimeout(
   instructions?: string,
   workspace?: WorkspaceConfig,
   rootSignal?: AbortSignal,
+  onChunk?: (chunk: string) => void | Promise<void>,
 ): Promise<GenerationOutcome> {
   const timeoutMs = deps.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS;
   const controller = new AbortController();
@@ -963,6 +965,7 @@ async function generateWithTimeout(
       controller.signal,
       instructions,
       workspace,
+      onChunk,
     )).then<GenerationOutcome, GenerationOutcome>(
       (response) => ({ kind: "completed", response }),
       (error) => ({ kind: "failed", error }),
@@ -1713,6 +1716,11 @@ function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
   stderr.write(`\u001b[0m${response.endsWith("\n") ? "\n" : "\n\n"}`);
 }
 
+function sanitizeGeneratedOutput(text: string): string {
+  return stripVTControlCharacters(text)
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, "");
+}
+
 function writeOutput(output: TextOutput, text: string): Promise<void> {
   return new Promise((resolve, reject) => {
     output.write(text, (error) => error ? reject(error) : resolve());
@@ -1871,7 +1879,10 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         await writeVoiceRouteSelection(deps.stderr, route.alias);
       } else if (
         interactive
-        && (deps.args.length === 0 || (parsed.speak && deps.args.length === 1))
+        && (
+          deps.args.length === 0
+          || ((parsed.speak || parsed.stream) && deps.args.length === 1)
+        )
       ) {
         snapshot = await loadApplicationConfigSnapshot(deps, parsed.speak);
         if (signal?.aborted) return cancelled();
@@ -1998,6 +2009,18 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         prompt = `${VOICE_PROMPT}\n\n${prompt}`;
       }
 
+      let streamedResponse = "";
+      const writeStreamChunk = parsed.stream
+        ? async (chunk: string) => {
+          const outputChunk = sanitizeGeneratedOutput(chunk);
+          const nextResponse = streamedResponse + outputChunk;
+          if (deps.sensitive.redact(nextResponse) !== nextResponse) {
+            throw new Error("response stream stopped because it contained a registered credential");
+          }
+          streamedResponse = nextResponse;
+          await writeOutput(deps.stdout, outputChunk);
+        }
+        : undefined;
       const generated = await generateWithTimeout(
         deps,
         selection.selection.provider,
@@ -2006,6 +2029,7 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
         effectiveInstructions,
         selection.selection.workspace,
         signal,
+        writeStreamChunk,
       );
       if (generated.kind === "cancelled") return cancelled();
       if (generated.kind === "timed_out") {
@@ -2032,17 +2056,16 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           return voiceNoticeExit(speech, REQUEST_FAILED_NOTICE, 0, cancelled);
         }
         if (spoken.kind === "failed") return 1;
+      } else if (parsed.stream) {
+        if (interactive) writeInteractiveBoundary(deps.stderr, streamedResponse);
       } else {
-        const terminalResponse = stripTerminalSequences(response);
-        if (
-          deps.sensitive.redact(response) !== response
-          || deps.sensitive.redact(terminalResponse) !== terminalResponse
-        ) {
+        const outputResponse = sanitizeGeneratedOutput(response);
+        if (deps.sensitive.redact(outputResponse) !== outputResponse) {
           diagnostic("generation: response withheld because it contained a registered credential.");
           return 1;
         }
-        await writeOutput(deps.stdout, response);
-        if (interactive) writeInteractiveBoundary(deps.stderr, response);
+        await writeOutput(deps.stdout, outputResponse);
+        if (interactive) writeInteractiveBoundary(deps.stderr, outputResponse);
       }
 
       if (signal?.aborted) return cancelled();

@@ -94,7 +94,19 @@ export interface RuntimeGateway {
     signal?: AbortSignal,
     instructions?: string,
     workspace?: WorkspaceConfig,
+    onChunk?: (chunk: string) => void | Promise<void>,
   ): Promise<string>;
+}
+
+type StreamingProviderRuntime = ByokProviderRuntime & {
+  streamText(
+    input: { prompt: string; instructions?: string },
+    signal?: AbortSignal,
+  ): { textStream: AsyncIterable<string> };
+};
+
+function supportsStreaming(runtime: ByokProviderRuntime): runtime is StreamingProviderRuntime {
+  return typeof (runtime as Partial<StreamingProviderRuntime>).streamText === "function";
 }
 
 async function providerConfig(
@@ -450,7 +462,7 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
       }
     },
 
-    async generate(provider, model, prompt, signal, instructions, workspace) {
+    async generate(provider, model, prompt, signal, instructions, workspace, onChunk) {
       let verifiedWorkspace: WorkspaceConfig | undefined;
       try {
         signal?.throwIfAborted();
@@ -484,14 +496,23 @@ export function createRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeG
             ),
           );
         signal?.throwIfAborted();
-        const result = await providerRuntime.generateText(
-          {
-            prompt,
-            ...(instructions === undefined ? {} : { instructions }),
-          },
-          signal,
-        );
-        return result.text;
+        const input = {
+          prompt,
+          ...(instructions === undefined ? {} : { instructions }),
+        };
+        if (onChunk === undefined) {
+          return (await providerRuntime.generateText(input, signal)).text;
+        }
+        if (!supportsStreaming(providerRuntime)) {
+          throw new Error("installed @swartzrock/byok-runtime does not support text streaming");
+        }
+
+        let response = "";
+        for await (const chunk of providerRuntime.streamText(input, signal).textStream) {
+          response += chunk;
+          await onChunk(chunk);
+        }
+        return response;
       } catch (error) {
         throw runtimeStageError(
           "generation",

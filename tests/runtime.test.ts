@@ -12,12 +12,6 @@ import type { LocalCommandRequest } from "@swartzrock/byok-runtime/node";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import {
-  LocalCommandRunner,
-  type LocalProcess,
-} from "@swartzrock/byok-runtime/node";
-import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
-import {
   createBunCredentialVault,
   createCredentialResolver,
   createSensitiveValueRegistry,
@@ -41,76 +35,12 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
 });
 
-test("local CLI cancellation force-kills and waits for close before rejecting", async () => {
-  const root = new AbortController();
-  const signals: NodeJS.Signals[] = [];
-  let closed = false;
-  let child!: LocalProcess & EventEmitter;
-  child = Object.assign(new EventEmitter(), {
-    stdin: new PassThrough(),
-    stdout: new PassThrough(),
-    stderr: new PassThrough(),
-    kill(signal: NodeJS.Signals = "SIGTERM") {
-      signals.push(signal);
-      if (signal === "SIGKILL") {
-        closed = true;
-        queueMicrotask(() => child.emit("close", 137));
-      }
-      return true;
-    },
-  }) as LocalProcess & EventEmitter;
-  const runner = new LocalCommandRunner(
-    () => child,
-    {},
-    { warn: () => undefined },
-    () => "",
-  );
-  const running = runner.run({
-    command: "/fake/codex",
-    stdin: "prompt",
-    signal: root.signal,
-    timeoutMs: 10_000,
-  });
-  root.abort();
-
-  await expect(running).rejects.toThrow("was cancelled");
-  expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
-  expect(closed).toBeTrue();
-});
-
-test("local CLI input failure terminates and waits for close before rejecting", async () => {
-  const signals: NodeJS.Signals[] = [];
-  const stdin = new PassThrough();
-  stdin.end = (() => {
-    throw new Error("broken pipe");
-  }) as typeof stdin.end;
-  let child!: LocalProcess & EventEmitter;
-  child = Object.assign(new EventEmitter(), {
-    stdin,
-    stdout: new PassThrough(),
-    stderr: new PassThrough(),
-    kill(signal: NodeJS.Signals = "SIGTERM") {
-      signals.push(signal);
-      queueMicrotask(() => child.emit("close", 1));
-      return true;
-    },
-  }) as LocalProcess & EventEmitter;
-  const runner = new LocalCommandRunner(
-    () => child,
-    {},
-    { warn: () => undefined },
-    () => "",
-  );
-
-  await expect(runner.run({
-    command: "/fake/codex",
-    stdin: "prompt",
-    timeoutMs: 10_000,
-  })).rejects.toThrow("failed to receive input: broken pipe");
-  expect(signals).toEqual(["SIGTERM"]);
-});
-
-function runtime(overrides: Partial<ByokProviderRuntime> = {}): ByokProviderRuntime {
+function runtime(overrides: Partial<ByokProviderRuntime> & {
+  streamText?: (
+    input: { prompt: string; instructions?: string },
+    signal?: AbortSignal,
+  ) => { textStream: AsyncIterable<string> };
+} = {}): ByokProviderRuntime {
   return {
     id: "ollama",
     label: "Fake",
@@ -314,6 +244,58 @@ describe("runtime gateway", () => {
         signal: controller.signal,
       },
     ]);
+  });
+
+  test("uses streamText and handles each chunk before reading the next one", async () => {
+    const events: string[] = [];
+    let bufferedCalls = 0;
+    const controller = new AbortController();
+    const gateway = createTestGateway({
+      env: {},
+      createProvider: () => runtime({
+        generateText: async () => {
+          bufferedCalls += 1;
+          return { text: "unexpected" };
+        },
+        streamText: (input, signal) => {
+          expect(input).toEqual({
+            prompt: "stream prompt",
+            instructions: "Be concise.",
+          });
+          expect(signal).toBe(controller.signal);
+          return {
+            delivery: "native" as const,
+            textStream: {
+              async *[Symbol.asyncIterator]() {
+                events.push("yield:first");
+                yield "first";
+                events.push("yield:second");
+                yield " second";
+              },
+            },
+          };
+        },
+      }),
+    });
+
+    await expect(gateway.generate(
+      "ollama",
+      "qwen",
+      "stream prompt",
+      controller.signal,
+      "Be concise.",
+      undefined,
+      async (chunk) => {
+        events.push(`write:${chunk}`);
+      },
+    )).resolves.toBe("first second");
+    expect(events).toEqual([
+      "yield:first",
+      "write:first",
+      "yield:second",
+      "write: second",
+    ]);
+    expect(bufferedCalls).toBe(0);
   });
 
   test("rejects a pre-aborted generation before provider setup", async () => {

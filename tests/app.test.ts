@@ -3822,8 +3822,8 @@ describe("one-shot application", () => {
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
   });
 
-  test("composes interactive selection and writes the response byte-faithfully once", async () => {
-    const response = " exact\u001b[31m model output \n";
+  test("sanitizes terminal controls before writing an interactive response", async () => {
+    const response = " exact\u001b[31m model\b\toutput \r\n";
     const app = dependencies({
       args: ["--input", "poem"],
       stdin: input("", true),
@@ -3833,9 +3833,120 @@ describe("one-shot application", () => {
     });
 
     expect(await runApplication(app.value)).toBe(0);
-    expect(app.stdout.text()).toBe(response);
+    expect(app.stdout.text()).toBe(" exact model\toutput \n");
     expect(app.runtime.calls).toEqual({ discover: 1, list: 1, generate: 1 });
     expect(app.stderr.text()).toBe("\u001b[0m\n");
+  });
+
+  test("writes streaming chunks immediately and leaves the default path buffered", async () => {
+    let streamingApp!: ReturnType<typeof dependencies>;
+    const streamed = runtime({
+      generate: async (...args) => {
+        const onChunk = args[6];
+        expect(onChunk).toBeFunction();
+        await onChunk?.("first");
+        expect(streamingApp.stdout.text()).toBe("first");
+        await onChunk?.(" second");
+        expect(streamingApp.stdout.text()).toBe("first second");
+        return "first second";
+      },
+    });
+    streamingApp = dependencies({
+      args: [
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen",
+        "--input",
+        "hello",
+        "--stream",
+      ],
+      runtime: streamed,
+    });
+
+    expect(await runApplication(streamingApp.value)).toBe(0);
+    expect(streamingApp.stdout.text()).toBe("first second");
+
+    const buffered = runtime({
+      generate: async (...args) => {
+        expect(args[6]).toBeUndefined();
+        return "complete response";
+      },
+    });
+    const defaultApp = dependencies({
+      args: ["--provider", "ollama", "--model", "qwen", "--input", "hello"],
+      runtime: buffered,
+    });
+
+    expect(await runApplication(defaultApp.value)).toBe(0);
+    expect(defaultApp.stdout.text()).toBe("complete response");
+  });
+
+  test("sanitizes terminal cursor controls in buffered and streaming output", async () => {
+    const sensitive = createSensitiveValueRegistry(["sk-secret"]);
+    const buffered = dependencies({
+      args: ["--provider", "ollama", "--model", "qwen", "--input", "hello"],
+      runtime: runtime({ response: "sk-X\u001b[1Dsecret" }),
+      sensitive,
+    });
+
+    expect(await runApplication(buffered.value)).toBe(0);
+    expect(buffered.stdout.text()).toBe("sk-Xsecret");
+
+    const streamed = runtime({
+      generate: async (...args) => {
+        const onChunk = args[6];
+        await onChunk?.("sk-X");
+        await onChunk?.("\u001b[1Dsecret");
+        return "sk-X\u001b[1Dsecret";
+      },
+    });
+    const streaming = dependencies({
+      args: [
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen",
+        "--input",
+        "hello",
+        "--stream",
+      ],
+      runtime: streamed,
+      sensitive: createSensitiveValueRegistry(["sk-secret"]),
+    });
+
+    expect(await runApplication(streaming.value)).toBe(0);
+    expect(streaming.stdout.text()).toBe("sk-Xsecret");
+  });
+
+  test("stops before a streaming chunk completes a registered credential", async () => {
+    const sensitive = createSensitiveValueRegistry(["registered-secret"]);
+    const streamed = runtime({
+      generate: async (...args) => {
+        const onChunk = args[6];
+        await onChunk?.("safe prefix registered-\u001b[31m");
+        await onChunk?.("secret unsafe suffix");
+        return "unreachable";
+      },
+    });
+    const app = dependencies({
+      args: [
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen",
+        "--input",
+        "hello",
+        "--stream",
+      ],
+      runtime: streamed,
+      sensitive,
+    });
+
+    expect(await runApplication(app.value)).toBe(1);
+    expect(app.stdout.text()).toBe("safe prefix registered-");
+    expect(app.stderr.text()).toContain("response stream stopped");
+    expect(`${app.stdout.text()}${app.stderr.text()}`).not.toContain("registered-secret");
   });
 
   test("resolves an alias without discovery and keeps non-interactive stdout clean", async () => {

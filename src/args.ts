@@ -36,10 +36,10 @@ export function renderHelpText(
 
 ${heading("Usage:")}
   ${literal("llm-now")} [${metadata("<alias>")} | ${literal("--alias")} ${metadata("<name>")}] [${literal("--input")} ${metadata("<text>")}]
-          [${literal("--instruction")} ${metadata("<text>")}] [${literal("--speak")}]
+          [${literal("--instruction")} ${metadata("<text>")}] [${literal("--stream")}] [${literal("--speak")}]
   ${literal("llm-now")} ${literal("--provider")} ${metadata("<id>")} ${literal("--model")} ${metadata("<id|default>")} [${literal("--input")} ${metadata("<text>")}]
-          [${literal("--instruction")} ${metadata("<text>")}] [${literal("--speak")}]
-  ${literal("llm-now")} ${literal("--voice-route")} [${literal("--input")} ${metadata("<text>")}] [${literal("--instruction")} ${metadata("<text>")}] [${literal("--speak")}]
+          [${literal("--instruction")} ${metadata("<text>")}] [${literal("--stream")}] [${literal("--speak")}]
+  ${literal("llm-now")} ${literal("--voice-route")} [${literal("--input")} ${metadata("<text>")}] [${literal("--instruction")} ${metadata("<text>")}] [${literal("--stream")}] [${literal("--speak")}]
   ${literal("llm-now")} ${literal("--aliases")}
   ${literal("llm-now")} ${literal("--config-path")}
   ${literal("llm-now")} ${literal("--migrate-config")}
@@ -58,6 +58,7 @@ ${heading("Options:")}
   ${literal("--migrate-config")}     Migrate legacy configuration to config.toml
   ${literal("--voice-route")}        Parse “[wake word] <shortcut> <question>” from input
   ${literal("--speak")}              Speak the response on macOS instead of using stdout
+  ${literal("--stream")}             Write response chunks to stdout as they arrive
   ${literal("--input")} ${metadata("<text>")}       Prompt or dictated input
   ${literal("--instruction")} ${metadata("<text>")} Replace shared alias guidance for this request
   ${literal("--alias")} ${metadata("<name>")}       Select a saved shortcut
@@ -103,6 +104,7 @@ export type ParsedArguments =
     instruction?: string;
     voiceRoute?: boolean;
     speak?: boolean;
+    stream?: boolean;
     selection: Selection;
   };
 
@@ -136,6 +138,7 @@ export function parseArguments(args: string[]): ParsedArguments {
     "migrate-config"?: boolean;
     "voice-route"?: boolean;
     speak?: boolean;
+    stream?: boolean;
     help?: boolean;
     version?: boolean;
   };
@@ -156,6 +159,7 @@ export function parseArguments(args: string[]): ParsedArguments {
         "migrate-config": { type: "boolean" },
         "voice-route": { type: "boolean" },
         speak: { type: "boolean" },
+        stream: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean" },
       },
@@ -190,6 +194,10 @@ export function parseArguments(args: string[]): ParsedArguments {
   }
   const voiceRoute = values["voice-route"] === true;
   const speak = values.speak === true;
+  const stream = values.stream === true;
+  if (speak && stream) {
+    throw new UsageError("--stream cannot be combined with --speak.");
+  }
   if (
     voiceRoute
     && (
@@ -249,6 +257,7 @@ export function parseArguments(args: string[]): ParsedArguments {
     ...(instruction === undefined ? {} : { instruction }),
     ...(voiceRoute ? { voiceRoute: true } : {}),
     ...(speak ? { speak: true } : {}),
+    ...(stream ? { stream: true } : {}),
     selection,
   };
 }
