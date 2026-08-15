@@ -17,5 +17,10 @@
   },
   "scripts": {
     "build": "bun ../../scripts/build-core.ts"
+  },
+  "dependencies": {
+    "@3leaps/string-metrics-wasm": "0.3.11",
+    "@swartzrock/byok-runtime": "2.4.1",
+    "unicode-case-folding": "1.1.1"
   }
 }

@@ -1,4 +1,8 @@
-import { ratio as wasmRatio } from "@3leaps/string-metrics-wasm";
+import {
+  routeTranscript as routeCoreTranscript,
+  routingSimilarity,
+  type RouteRejectionReason as CoreRouteRejectionReason,
+} from "@swartzrock/llm-now-core";
 import { caseFold } from "unicode-case-folding";
 import { posix } from "node:path";
 
@@ -6,7 +10,6 @@ const ALIAS_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const MIN_FUZZY_LENGTH = 4;
 const MIN_FUZZY_SIMILARITY = 65;
 const MIN_FUZZY_MARGIN = 15;
-const WORD_CHARACTER = /[\p{Letter}\p{Number}\p{Mark}]/u;
 const COMPACT_CHARACTER = /[\p{Letter}\p{Number}]/u;
 const CONTROL_CHARACTER = /\p{Cc}/u;
 const VOICE_ROW = /^(.+?)\s+([A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)+)\s+#/;
@@ -63,30 +66,8 @@ export type SpeechAnswerValidation =
   | Readonly<{ valid: true }>
   | Readonly<{ valid: false; reason: "blank" | "unsafe" }>;
 
-interface Token {
-  readonly key: string;
-  readonly scalarStart: number;
-  readonly scalarEnd: number;
-  readonly utf16Start: number;
-  readonly utf16End: number;
-}
-
-interface FuzzyAliasMetadata {
-  readonly key: string;
-  readonly alias: string;
-  readonly maximumDifference: number;
-  readonly digits: readonly string[];
-}
-
-interface FuzzyCandidate {
-  readonly score: number;
-  readonly spanLength: number;
-  readonly question: string | null;
-  readonly questionOffset: number | null;
-}
-
 export function ratio(left: string, right: string): number {
-  return wasmRatio(left, right);
+  return routingSimilarity(left, right);
 }
 
 export function resolveVoiceConfigPath(home: string, xdgConfigHome?: string): string {
@@ -215,72 +196,48 @@ export function routeTranscript(
   config: VoiceConfig,
 ): RouteResult {
   const activeAliases = validatedAliases(aliases);
-  if (
-    config.defaultAlias !== undefined
-    && !activeAliases.includes(config.defaultAlias)
-  ) {
-    throw new VoiceRouterError(`default alias is not configured: "${config.defaultAlias}"`);
-  }
-  const tokens = tokenize(transcript);
-  if (tokens.length === 0) return rejectedRoute("missing_request");
-
-  const canonicalByKey = new Map<string, string>();
-  for (const alias of activeAliases) canonicalByKey.set(compactKey(alias), alias);
-
-  const spokenNameByKey = new Map<string, string>();
-  for (const alias of activeAliases) {
-    const profile = Object.hasOwn(config.profiles, alias) ? config.profiles[alias] : undefined;
-    if (profile === undefined) continue;
-    for (const spokenName of profile.spokenNames) {
-      spokenNameByKey.set(compactKey(spokenName), alias);
-    }
-  }
-
-  const views = transcriptViews(tokens, config.wakeWords);
-  let sawMissingQuestion = false;
-  let strongestRejection: RouteResult | null = null;
-
-  for (const start of views) {
-    const exact = longestStageMatch(transcript, tokens, start, canonicalByKey, "canonical");
-    if (exact !== null) {
-      if (exact.accepted) return exact;
-      sawMissingQuestion = true;
-      continue;
-    }
-
-    const configured = longestStageMatch(
+  try {
+    const result = routeCoreTranscript({
       transcript,
-      tokens,
-      start,
-      spokenNameByKey,
-      "configured",
-    );
-    if (configured !== null) {
-      if (configured.accepted) return configured;
-      sawMissingQuestion = true;
-      continue;
+      candidates: activeAliases.map((alias) => ({
+        id: alias,
+        canonicalName: alias,
+        alternateSpokenNames: Object.hasOwn(config.profiles, alias)
+          ? config.profiles[alias]?.spokenNames ?? []
+          : [],
+      })),
+      wakeWords: config.wakeWords,
+      minFuzzyPhraseLength: config.minFuzzyPhraseLength,
+      minSimilarity: config.minSimilarity,
+      minMargin: config.minMargin,
+      ...(config.defaultAlias === undefined
+        ? {}
+        : { defaultCandidateId: config.defaultAlias }),
+    });
+
+    if (!result.accepted) {
+      return Object.freeze({
+        accepted: false,
+        alias: null,
+        question: null,
+        questionOffset: null,
+        reason: result.reason as CoreRouteRejectionReason,
+        similarity: result.similarity,
+        runnerUpSimilarity: result.runnerUpSimilarity,
+      });
     }
-
-    const fuzzy = fuzzyMatch(transcript, tokens, start, canonicalByKey, config);
-    if (fuzzy.accepted) return fuzzy;
-    if (fuzzy.reason === "missing_question") sawMissingQuestion = true;
-    if (fuzzy.reason === "ambiguous") strongestRejection = fuzzy;
+    return Object.freeze({
+      accepted: true,
+      alias: result.candidateId,
+      question: result.question,
+      questionOffset: result.questionOffset,
+      reason: result.reason === "alternate" ? "configured" : result.reason,
+      similarity: result.similarity,
+      runnerUpSimilarity: result.runnerUpSimilarity,
+    });
+  } catch (error) {
+    throw new VoiceRouterError("invalid voice routing candidates", { cause: error });
   }
-
-  if (sawMissingQuestion) return rejectedRoute("missing_question");
-  if (strongestRejection !== null) return strongestRejection;
-  if (config.defaultAlias !== undefined) {
-    const start = views[0] ?? 0;
-    const questionToken = tokens[start];
-    if (questionToken === undefined) return rejectedRoute("missing_question");
-    return acceptedRoute(
-      config.defaultAlias,
-      transcript.slice(questionToken.utf16Start),
-      questionToken.scalarStart,
-      "default",
-    );
-  }
-  return rejectedRoute("no_match");
 }
 
 export function validateSpeechAnswer(value: string): SpeechAnswerValidation {
@@ -303,10 +260,6 @@ export function formatTrustedPitchCommand(value: number): string {
 
 function splitLines(value: string): string[] {
   return value.split(/\r\n|[\n\v\f\r\x1c-\x1e\x85\u2028\u2029]/u);
-}
-
-function scalarLength(value: string): number {
-  return [...value].length;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -400,234 +353,5 @@ function freezeConfig(
     minSimilarity: MIN_FUZZY_SIMILARITY,
     minMargin: MIN_FUZZY_MARGIN,
     profiles: Object.freeze(profiles),
-  });
-}
-
-function tokenize(value: string): readonly Token[] {
-  const tokens: Token[] = [];
-  let startScalar: number | null = null;
-  let startUtf16 = 0;
-  let scalarIndex = 0;
-  let utf16Index = 0;
-
-  const finish = (scalarEnd: number, utf16End: number): void => {
-    if (startScalar === null) return;
-    const key = compactKey(value.slice(startUtf16, utf16End));
-    if (key.length > 0) {
-      tokens.push(Object.freeze({
-        key,
-        scalarStart: startScalar,
-        scalarEnd,
-        utf16Start: startUtf16,
-        utf16End,
-      }));
-    }
-    startScalar = null;
-  };
-
-  for (const character of value) {
-    if (WORD_CHARACTER.test(character)) {
-      if (startScalar === null) {
-        startScalar = scalarIndex;
-        startUtf16 = utf16Index;
-      }
-    } else {
-      finish(scalarIndex, utf16Index);
-    }
-    scalarIndex += 1;
-    utf16Index += character.length;
-  }
-  finish(scalarIndex, utf16Index);
-  return tokens;
-}
-
-function phraseTokenKeys(phrase: string): readonly string[] {
-  return tokenize(phrase).map((token) => token.key);
-}
-
-function transcriptViews(tokens: readonly Token[], wakeWords: readonly string[]): readonly number[] {
-  const tokenKeys = tokens.map((token) => token.key);
-  const wakeLengths: number[] = [];
-  for (const phrase of wakeWords) {
-    const phraseKeys = phraseTokenKeys(phrase);
-    if (
-      phraseKeys.length > 0
-      && phraseKeys.every((key, index) => tokenKeys[index] === key)
-    ) {
-      wakeLengths.push(phraseKeys.length);
-    }
-  }
-  return wakeLengths.length > 0 ? [Math.max(...wakeLengths), 0] : [0];
-}
-
-function longestStageMatch(
-  transcript: string,
-  tokens: readonly Token[],
-  start: number,
-  aliasesByKey: ReadonlyMap<string, string>,
-  reason: "canonical" | "configured",
-): RouteResult | null {
-  let winner: { end: number; alias: string } | null = null;
-  let key = "";
-  let maximumKeyLength = 0;
-  for (const candidate of aliasesByKey.keys()) {
-    maximumKeyLength = Math.max(maximumKeyLength, scalarLength(candidate));
-  }
-
-  for (let end = start + 1; end <= tokens.length; end += 1) {
-    const token = tokens[end - 1];
-    if (token === undefined) break;
-    key += token.key;
-    if (scalarLength(key) > maximumKeyLength) break;
-    const alias = aliasesByKey.get(key);
-    if (alias !== undefined) winner = { end, alias };
-  }
-
-  if (winner === null) return null;
-  if (winner.end >= tokens.length) return rejectedRoute("missing_question");
-  const questionToken = tokens[winner.end];
-  if (questionToken === undefined) return rejectedRoute("missing_question");
-  return acceptedRoute(
-    winner.alias,
-    transcript.slice(questionToken.utf16Start),
-    questionToken.scalarStart,
-    reason,
-  );
-}
-
-function digitSequences(value: string): readonly string[] {
-  return [...value.matchAll(/\p{Decimal_Number}+/gu)].map((match) => match[0]);
-}
-
-function sameStrings(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function fuzzyMatch(
-  transcript: string,
-  tokens: readonly Token[],
-  start: number,
-  canonicalByKey: ReadonlyMap<string, string>,
-  config: VoiceConfig,
-): RouteResult {
-  const perAlias = new Map<string, FuzzyCandidate>();
-  const aliases: FuzzyAliasMetadata[] = [];
-  for (const [key, alias] of canonicalByKey) {
-    const length = scalarLength(key);
-    if (length < config.minFuzzyPhraseLength) continue;
-    aliases.push({
-      key,
-      alias,
-      maximumDifference: Math.max(1, Math.ceil(length * 0.2)),
-      digits: digitSequences(key),
-    });
-  }
-  const maximumCandidateLength = aliases.reduce(
-    (maximum, alias) => Math.max(
-      maximum,
-      scalarLength(alias.key) + alias.maximumDifference,
-    ),
-    0,
-  );
-
-  let candidateKey = "";
-  for (let end = start + 1; end <= tokens.length; end += 1) {
-    const token = tokens[end - 1];
-    if (token === undefined) break;
-    candidateKey += token.key;
-    const candidateLength = scalarLength(candidateKey);
-    if (candidateLength > maximumCandidateLength) break;
-    if (candidateLength < config.minFuzzyPhraseLength) continue;
-    const questionToken = tokens[end];
-    const candidateDigits = digitSequences(candidateKey);
-
-    for (const alias of aliases) {
-      if (Math.abs(candidateLength - scalarLength(alias.key)) > alias.maximumDifference) continue;
-      if (
-        (candidateDigits.length > 0 || alias.digits.length > 0)
-        && !sameStrings(candidateDigits, alias.digits)
-      ) continue;
-
-      const score = ratio(candidateKey, alias.key);
-      const spanLength = end - start;
-      const current = perAlias.get(alias.alias);
-      if (
-        current === undefined
-        || score > current.score
-        || (score === current.score && spanLength < current.spanLength)
-      ) {
-        perAlias.set(alias.alias, {
-          score,
-          spanLength,
-          question: questionToken === undefined ? null : transcript.slice(questionToken.utf16Start),
-          questionOffset: questionToken?.scalarStart ?? null,
-        });
-      }
-    }
-  }
-
-  const ranked = [...perAlias.entries()]
-    .map(([alias, candidate]) => ({ alias, ...candidate }))
-    .sort((left, right) => {
-      if (left.score !== right.score) return right.score - left.score;
-      return left.alias < right.alias ? -1 : left.alias > right.alias ? 1 : 0;
-    });
-  const best = ranked[0];
-  if (best === undefined) return rejectedRoute("no_match");
-  const runnerUp = ranked[1];
-  if (best.score < config.minSimilarity) {
-    return rejectedRoute("no_match", best.score, runnerUp?.score ?? null);
-  }
-  if (
-    runnerUp !== undefined
-    && (best.score === runnerUp.score || best.score - runnerUp.score < config.minMargin)
-  ) {
-    return rejectedRoute("ambiguous", best.score, runnerUp.score);
-  }
-  if (best.question === null || best.questionOffset === null) {
-    return rejectedRoute("missing_question", best.score, runnerUp?.score ?? null);
-  }
-  return acceptedRoute(
-    best.alias,
-    best.question,
-    best.questionOffset,
-    "fuzzy",
-    best.score,
-    runnerUp?.score ?? null,
-  );
-}
-
-function acceptedRoute(
-  alias: string,
-  question: string,
-  questionOffset: number,
-  reason: AcceptedRouteReason,
-  similarity: number | null = null,
-  runnerUpSimilarity: number | null = null,
-): AcceptedRoute {
-  return Object.freeze({
-    accepted: true,
-    alias,
-    question,
-    questionOffset,
-    reason,
-    similarity,
-    runnerUpSimilarity,
-  });
-}
-
-function rejectedRoute(
-  reason: RejectedRouteReason,
-  similarity: number | null = null,
-  runnerUpSimilarity: number | null = null,
-): RejectedRoute {
-  return Object.freeze({
-    accepted: false,
-    alias: null,
-    question: null,
-    questionOffset: null,
-    reason,
-    similarity,
-    runnerUpSimilarity,
   });
 }

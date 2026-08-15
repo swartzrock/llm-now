@@ -4,6 +4,7 @@ import {
   type ByokCloudProviderId,
   type ByokEnvironment,
 } from "@swartzrock/byok-runtime";
+import type { CredentialResolver as CoreCredentialResolver } from "@swartzrock/llm-now-core";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -392,6 +393,26 @@ export function createCredentialResolver(
       vaultValues.delete(provider);
     },
   };
+}
+
+export function adaptCredentialResolverForCore(
+  resolver: CredentialResolver,
+): CoreCredentialResolver {
+  const adapter: CoreCredentialResolver = {
+    async resolve(provider) {
+      const resolved = await resolver.resolve(provider);
+      switch (resolved.source) {
+        case "environment":
+        case "vault":
+          return Object.freeze({ status: "resolved", credential: resolved.apiKey });
+        case "missing":
+          return Object.freeze({ status: "missing" });
+        case "unavailable":
+          return Object.freeze({ status: "unavailable" });
+      }
+    },
+  };
+  return Object.freeze(adapter);
 }
 
 export interface NativeVaultTarget {

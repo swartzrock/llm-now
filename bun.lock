@@ -22,7 +22,6 @@
         "llm-now": "./src/index.ts",
       },
       "dependencies": {
-        "@3leaps/string-metrics-wasm": "0.3.11",
         "@clack/core": "1.4.3",
         "@clack/prompts": "1.7.0",
         "@swartzrock/byok-runtime": "2.4.1",
@@ -38,6 +37,11 @@
     "packages/core": {
       "name": "@swartzrock/llm-now-core",
       "version": "0.0.0",
+      "dependencies": {
+        "@3leaps/string-metrics-wasm": "0.3.11",
+        "@swartzrock/byok-runtime": "2.4.1",
+        "unicode-case-folding": "1.1.1",
+      },
     },
   },
   "packages": {

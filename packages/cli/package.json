@@ -10,7 +10,6 @@
     "start": "bun src/index.ts"
   },
   "dependencies": {
-    "@3leaps/string-metrics-wasm": "0.3.11",
     "@clack/core": "1.4.3",
     "@clack/prompts": "1.7.0",
     "@swartzrock/byok-runtime": "2.4.1",
