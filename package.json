@@ -15,7 +15,7 @@
     "runtime:smoke": "bun run core:build && bun tests/runtime-compile-smoke.ts",
     "check": "bun run core:build && bun test && tsc --noEmit && bun tests/runtime-compile-smoke.ts",
     "core:build": "bun scripts/build-core.ts",
-    "build:native": "bun run core:build && bun scripts/build.ts",
+    "build:native": "bun scripts/build.ts",
     "release:validate": "bun run core:build && bun scripts/release-validate.ts"
   },
   "devDependencies": {

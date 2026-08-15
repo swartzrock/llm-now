@@ -19,6 +19,7 @@ import {
   assembleReleaseAssets,
   assertNativeVaultGateTarget,
   runProcess,
+  validatePackageBoundaries,
   validateVoiceDependencies,
 } from "../scripts/release-validate.ts";
 
@@ -87,6 +88,52 @@ describe("native release build", () => {
       { id: "windows-x64", bunTarget: "bun-windows-x64-baseline", runner: "windows-2025", executable: "llm-now.exe" },
     ]);
     expect(RELEASE_TARGETS.map((target) => target.bunTarget).join(" ")).not.toContain("musl");
+  });
+
+  test("builds core before compiling the stable root entrypoint", async () => {
+    const buildScript = await Bun.file(new URL("../scripts/build.ts", import.meta.url)).text();
+    const repositoryPackage = await Bun.file(
+      new URL("../package.json", import.meta.url),
+    ).json() as { scripts?: Record<string, string> };
+    const main = buildScript.slice(buildScript.indexOf("async function main"));
+    const coreBuild = main.indexOf("buildCore()");
+    const nativeCompile = main.indexOf("buildTarget(target");
+
+    expect(buildScript).toContain('join(import.meta.dir, "build-core.ts")');
+    expect(coreBuild).toBeGreaterThan(-1);
+    expect(nativeCompile).toBeGreaterThan(coreBuild);
+    expect(repositoryPackage.scripts?.["build:native"]).toBe("bun scripts/build.ts");
+  });
+
+  test("bundles the local workspace core into the root wrapper", async () => {
+    const build = await Bun.build({
+      entrypoints: [new URL("../index.ts", import.meta.url).pathname],
+      target: "bun",
+      format: "esm",
+    });
+
+    expect(build.success).toBe(true);
+    expect(build.outputs).toHaveLength(1);
+    const bundled = await build.outputs[0]!.text();
+    expect(bundled).toContain("function createLlmNowCore");
+    expect(bundled).toContain("createCoreRuntimeGateway");
+  });
+
+  test("keeps runtime packages pinned to their source owners and core isolated", async () => {
+    expect(await validatePackageBoundaries()).toEqual({
+      byokRuntime: {
+        version: "2.4.1",
+        installedCopies: 1,
+        owners: ["repository-tests", "cli", "core"],
+      },
+      routing: {
+        metricOwner: "core",
+        metricInstalledCopies: 1,
+        caseFoldingOwners: ["cli-voice", "core-routing"],
+        caseFoldingInstalledCopies: 1,
+      },
+      coreStaticBoundary: "clean",
+    });
   });
 
   test("uses stable versioned archive names", () => {

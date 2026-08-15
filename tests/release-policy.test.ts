@@ -92,6 +92,29 @@ describe("release workflow policy", () => {
     expect(releaseWorkflow).toContain("untagged publication requires a release-shaped first-parent transition");
   });
 
+  test("derives native version, tag, and changelog only from the CLI workspace", async () => {
+    const buildScript = await Bun.file(new URL("../scripts/build.ts", import.meta.url)).text();
+    const releasePlan = await Bun.file(
+      new URL("../scripts/release-plan.ts", import.meta.url),
+    ).text();
+    const releaseValidation = await Bun.file(
+      new URL("../scripts/release-validate.ts", import.meta.url),
+    ).text();
+
+    for (const source of [buildScript, releasePlan, releaseValidation]) {
+      expect(source).toContain("packages/cli/package.json");
+      expect(source).not.toMatch(/from\s+["']\.\.\/package\.json["']/);
+    }
+    expect(releasePlan).toContain('const cliChangelogPath = "packages/cli/CHANGELOG.md"');
+    expect(releaseWorkflow).toContain(
+      `VERSION="$(bun -p 'require("./packages/cli/package.json").version')"`,
+    );
+    expect(releaseWorkflow).toContain(
+      'bun scripts/release-notes.ts "$VERSION" "$RELEASE_SHA" packages/cli/CHANGELOG.md dist/RELEASE_NOTES.md',
+    );
+    expect(releaseWorkflow).not.toMatch(/packages\/core\/(?:package\.json|CHANGELOG\.md).*\b(?:VERSION|TAG)\b/);
+  });
+
   test("classifies pushes inside the top-level release workflow", () => {
     expect(releaseCoordinatorExists).toBe(false);
     expect(releaseWorkflow).toContain(`on:

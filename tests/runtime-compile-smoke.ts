@@ -5,12 +5,18 @@ import corePackageMetadata from "../packages/core/package.json" with { type: "js
 import { loadConfig, resolveConfigPaths, saveConfigAlias } from "../packages/cli/src/config";
 import { serializeConfigDocument } from "../packages/cli/src/config-schema";
 
+const cliDependencies = packageMetadata.dependencies as Record<string, string | undefined>;
+const coreDependencies = corePackageMetadata.dependencies as Record<string, string | undefined>;
+
 if (
-  corePackageMetadata.dependencies["@3leaps/string-metrics-wasm"] !== "0.3.11"
-  || corePackageMetadata.dependencies["unicode-case-folding"] !== "1.1.1"
-  || packageMetadata.dependencies["unicode-case-folding"] !== "1.1.1"
+  coreDependencies["@3leaps/string-metrics-wasm"] !== "0.3.11"
+  || coreDependencies["@swartzrock/byok-runtime"] !== "2.4.1"
+  || coreDependencies["unicode-case-folding"] !== "1.1.1"
+  || cliDependencies["@3leaps/string-metrics-wasm"] !== undefined
+  || cliDependencies["@swartzrock/byok-runtime"] !== "2.4.1"
+  || cliDependencies["unicode-case-folding"] !== "1.1.1"
 ) {
-  throw new Error("voice routing dependencies must remain exactly pinned");
+  throw new Error("runtime dependencies must remain exactly pinned to their package owners");
 }
 
 const directory = await mkdtemp(join(process.cwd(), ".tmp-runtime-"));

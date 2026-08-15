@@ -51,6 +51,15 @@ describe("release transition classification", () => {
   test("returns normalized release outputs for a valid generated transition", () => {
     expect(classifyReleaseTransition(transition())).toEqual({ shouldRelease: true, releaseSha });
   });
+  test("keeps shared CLI and core transitions in the native CLI lane", () => {
+    expect(classifyReleaseTransition(transition({
+      changedFiles: [
+        ...transition().changedFiles,
+        { status: "M", path: "packages/core/package.json" },
+        { status: "M", path: "packages/core/CHANGELOG.md" },
+      ],
+    }))).toEqual({ shouldRelease: true, releaseSha });
+  });
   test("returns a clean no-op only when name and version are unchanged", () => {
     expect(classifyReleaseTransition(transition({
       afterPackage: { name: "llm-now", version: "0.1.0" },

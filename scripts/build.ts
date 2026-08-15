@@ -133,6 +133,16 @@ function argument(name: string, fallback?: string): string | undefined {
   return index === -1 ? fallback : Bun.argv[index + 1];
 }
 
+function buildCore(): void {
+  const result = Bun.spawnSync([process.execPath, join(import.meta.dir, "build-core.ts")], {
+    cwd: join(import.meta.dir, ".."),
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  if (result.exitCode !== 0) throw new Error("failed to build @swartzrock/llm-now-core");
+}
+
 async function main(): Promise<void> {
   const outdir = argument("--outdir", join(import.meta.dir, "../dist"))!;
   const targetId = argument("--target", "all")!;
@@ -141,6 +151,7 @@ async function main(): Promise<void> {
     : RELEASE_TARGETS.filter((target) => target.id === targetId);
   if (targets.length === 0) throw new Error(`unknown release target: ${targetId}`);
 
+  buildCore();
   await mkdir(outdir, { recursive: true });
   const mtime = archiveMtime();
   const names: string[] = [];

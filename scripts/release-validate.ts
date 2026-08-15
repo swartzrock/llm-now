@@ -34,6 +34,12 @@ const CONFIG_SERIALIZER_PACKAGE = {
   integrity: "sha512-PPlsspAZ4jbMBu5DMFhfUGDQLu/vrL4SyBROVS37x8ynnVmFIs1VPBz1Co8Xks3TvpIaZXmU85y4DrQ+UyVFoQ==",
 } as const;
 
+const BYOK_RUNTIME_PACKAGE = {
+  name: "@swartzrock/byok-runtime",
+  version: "2.4.1",
+  integrity: "sha512-3WYTPY436u+XOBfv49FZFckR6W4OPuJKrvC2Sr7QlhAYRXm+FMZp2Fvu7uLSln4iSiLU5i1AXEXriUO1gyR/qw==",
+} as const;
+
 type PackageManifest = {
   name?: string;
   version?: string;
@@ -69,6 +75,91 @@ function assertComputationOnly(label: string, sources: readonly string[]): void 
   for (const [capability, pattern] of forbidden) {
     if (pattern.test(joined)) throw new Error(`${label} active entrypoint accesses ${capability}`);
   }
+}
+
+export async function validatePackageBoundaries() {
+  const root = join(import.meta.dir, "..");
+  const rootPackage = await Bun.file(join(root, "package.json")).json() as PackageManifest & {
+    devDependencies?: Record<string, string>;
+  };
+  const cliDependencies = packageMetadata.dependencies as Record<string, string>;
+  const cliDevDependencies = packageMetadata.devDependencies as Record<string, string>;
+  const coreDependencies = corePackageMetadata.dependencies as Record<string, string>;
+  const lock = await Bun.file(join(root, "bun.lock")).text();
+
+  if (coreDependencies[BYOK_RUNTIME_PACKAGE.name] !== BYOK_RUNTIME_PACKAGE.version) {
+    throw new Error(`${BYOK_RUNTIME_PACKAGE.name} must be exactly pinned in core`);
+  }
+  if (cliDependencies[BYOK_RUNTIME_PACKAGE.name] !== BYOK_RUNTIME_PACKAGE.version) {
+    throw new Error(`${BYOK_RUNTIME_PACKAGE.name} must be exactly pinned in CLI`);
+  }
+  if (rootPackage.devDependencies?.[BYOK_RUNTIME_PACKAGE.name] !== BYOK_RUNTIME_PACKAGE.version) {
+    throw new Error(`${BYOK_RUNTIME_PACKAGE.name} must be exactly pinned for repository tests`);
+  }
+  if (cliDevDependencies[corePackageMetadata.name] !== "workspace:^") {
+    throw new Error("CLI must consume core through the build-time workspace edge");
+  }
+  if (cliDependencies[VOICE_PACKAGES.metric.name] !== undefined) {
+    throw new Error(`${VOICE_PACKAGES.metric.name} must be owned only by core`);
+  }
+  for (const expected of Object.values(VOICE_PACKAGES)) {
+    if (coreDependencies[expected.name] !== expected.version) {
+      throw new Error(`${expected.name} must be exactly pinned in core`);
+    }
+  }
+  if (cliDependencies[VOICE_PACKAGES.caseFolding.name] !== VOICE_PACKAGES.caseFolding.version) {
+    throw new Error(`${VOICE_PACKAGES.caseFolding.name} must be exactly pinned for CLI voice handling`);
+  }
+
+  const byokLockEntry = `"${BYOK_RUNTIME_PACKAGE.name}": ["${BYOK_RUNTIME_PACKAGE.name}@${BYOK_RUNTIME_PACKAGE.version}", "", { "dependencies": { "ollama": "^0.6.3", "openai": "^6.45.0", "tslib": "2.6.2", "zod": "^3.25.76" } }, "${BYOK_RUNTIME_PACKAGE.integrity}"]`;
+  if (!lock.includes(byokLockEntry)) {
+    throw new Error(`${BYOK_RUNTIME_PACKAGE.name} lock integrity does not match the audited package`);
+  }
+  const installedByokEntries = [...lock.matchAll(/^\s{4}"@swartzrock\/byok-runtime": \[/gm)];
+  if (installedByokEntries.length !== 1) {
+    throw new Error(`${BYOK_RUNTIME_PACKAGE.name} must resolve to exactly one installed package`);
+  }
+  const installedMetricEntries = [...lock.matchAll(/^\s{4}"@3leaps\/string-metrics-wasm": \[/gm)];
+  const installedCaseFoldingEntries = [...lock.matchAll(/^\s{4}"unicode-case-folding": \[/gm)];
+  if (installedMetricEntries.length !== 1 || installedCaseFoldingEntries.length !== 1) {
+    throw new Error("routing dependencies must each resolve to exactly one installed package");
+  }
+
+  const coreSourceRoot = join(root, "packages", "core", "src");
+  const coreSources: string[] = [];
+  for await (const path of new Bun.Glob("*.ts").scan({
+    cwd: coreSourceRoot,
+    absolute: true,
+    onlyFiles: true,
+  })) {
+    coreSources.push(await Bun.file(path).text());
+  }
+  const source = coreSources.join("\n");
+  const forbidden = [
+    ["Bun globals", /\bBun\b/],
+    ["persisted vault identity", /NATIVE_VAULT_SERVICE|["']llm-now["']/],
+    ["ambient environment", /\bprocess\.env\b|\b(?:HOME|XDG_[A-Z_]+)\b/],
+    ["configuration parsing", /\bTOML\b|\.toml\b|smol-toml/],
+    ["CLI imports", /(?:packages\/cli|\.\.\/cli(?:\/|["'])|from\s+["'][^"']*\/cli(?:\/|["']))/],
+  ] as const;
+  for (const [boundary, pattern] of forbidden) {
+    if (pattern.test(source)) throw new Error(`core production graph contains ${boundary}`);
+  }
+
+  return {
+    byokRuntime: {
+      version: BYOK_RUNTIME_PACKAGE.version,
+      installedCopies: installedByokEntries.length,
+      owners: ["repository-tests", "cli", "core"] as const,
+    },
+    routing: {
+      metricOwner: "core" as const,
+      metricInstalledCopies: installedMetricEntries.length,
+      caseFoldingOwners: ["cli-voice", "core-routing"] as const,
+      caseFoldingInstalledCopies: installedCaseFoldingEntries.length,
+    },
+    coreStaticBoundary: "clean" as const,
+  };
 }
 
 export async function validateVoiceDependencies() {
@@ -229,6 +320,7 @@ export async function validateVoiceDependencies() {
   }
 
   return {
+    packageBoundaries: await validatePackageBoundaries(),
     metric: {
       ...VOICE_PACKAGES.metric,
       license: metricManifest.license,
