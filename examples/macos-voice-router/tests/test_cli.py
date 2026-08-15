@@ -663,13 +663,17 @@ class OrchestrationTests(unittest.TestCase):
         self.assertNotIn(("llm-now", "--alias", "terra"), [call[0] for call in runner.calls])
 
     def test_rejected_input_speaks_retry_without_generation(self) -> None:
-        code, runner, _ = self.run_router(
+        code, runner, diagnostics = self.run_router(
             b"unknown, answer this",
             [completed(INVENTORY), completed()],
             config_data=unified_config(profile_fields={"haiku": ("pitch = 50",)}),
         )
 
         self.assertEqual(code, 0)
+        self.assertEqual(
+            diagnostics,
+            "request rejected: no_match; configure default.alias in config.toml to use a fallback\n",
+        )
         self.assertEqual([call[0] for call in runner.calls], [("llm-now", "--aliases"), ("/usr/bin/say",)])
         self.assertIn(b"try again", runner.calls[-1][1] or b"")
         self.assertNotIn(b"[[pbas", runner.calls[-1][1] or b"")

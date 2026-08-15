@@ -1024,7 +1024,9 @@ describe("voice boundary", () => {
     expect(app.runtime.calls.generate).toBe(0);
     expect(speechChecks).toBe(0);
     expect(app.stdout.text()).toBe("");
-    expect(app.stderr.text()).toBe("voice request rejected: no_match\n");
+    expect(app.stderr.text()).toBe(
+      "voice request rejected: no_match; configure default.alias in config.toml to use a fallback\n",
+    );
   });
 
   test("loads malformed configuration before blank or invalid-UTF-8 voice input can reach speech", async () => {

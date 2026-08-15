@@ -1860,6 +1860,13 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
           if (route.reason === "invalid_snapshot") {
             return rejectedRoute("voice configuration failed: invalid routing snapshot", CONFIG_FAILED_NOTICE, 1);
           }
+          if (route.reason === "no_match") {
+            return rejectedRoute(
+              "voice request rejected: no_match; configure default.alias in config.toml to use a fallback",
+              RETRY_NOTICE,
+              0,
+            );
+          }
           return rejectedRoute(`voice request rejected: ${route.reason}`, RETRY_NOTICE, 0);
         }
         prompt = route.question;

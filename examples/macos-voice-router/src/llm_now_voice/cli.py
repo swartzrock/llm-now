@@ -796,7 +796,10 @@ def run_voice_router(
 
         route = route_transcript(transcript, aliases, config)
         if not route.accepted:
-            _write_diagnostic(stderr, f"request rejected: {route.reason}")
+            message = f"request rejected: {route.reason}"
+            if route.reason == "no_match":
+                message += "; configure default.alias in config.toml to use a fallback"
+            _write_diagnostic(stderr, message)
             return 0 if _speak_notice(runner, say, RETRY_NOTICE, stderr) else 1
 
         alias = route.alias
