@@ -8,6 +8,7 @@ import {
 } from "@swartzrock/byok-runtime";
 import pc from "picocolors";
 import type { Readable, Writable } from "node:stream";
+import { stripVTControlCharacters } from "node:util";
 import {
   type AliasRecord,
   type SaveAliasResult,
@@ -1716,7 +1717,7 @@ function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
 }
 
 function sanitizeGeneratedOutput(text: string): string {
-  return stripTerminalSequences(text)
+  return stripVTControlCharacters(text)
     .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, "");
 }
 
