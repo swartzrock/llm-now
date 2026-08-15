@@ -55,12 +55,17 @@ describe("composable voice operations", () => {
   function routeSnapshot(
     aliases: AliasDocument["aliases"],
     config: string | null = null,
+    defaultAlias?: string,
   ): ConfigSnapshot {
+    const voice = {
+      ...parseVoiceConfig(config, Object.keys(aliases)),
+      ...(defaultAlias === undefined ? {} : { defaultAlias }),
+    };
     return Object.freeze({
       authority: "legacy" as const,
       document: null,
       aliases: Object.freeze({ ...aliases }),
-      voice: parseVoiceConfig(config, Object.keys(aliases)),
+      voice,
     });
   }
 
@@ -127,6 +132,48 @@ describe("composable voice operations", () => {
     expect(routeVoiceTranscript("abcdefghijklmnopqrst question", ambiguous)).toEqual({
       kind: "rejected",
       reason: "ambiguous",
+    });
+  });
+
+  test("uses the configured default only when no alias can be discovered", () => {
+    const aliases = {
+      haiku: { provider: "openai" as const, model: "gpt-test" },
+      terra: { provider: "openai" as const, model: "gpt-other" },
+    };
+    const snapshot = routeSnapshot(aliases, null, "haiku");
+
+    expect(routeVoiceTranscript("hey summarize this", snapshot)).toMatchObject({
+      kind: "routed",
+      alias: "haiku",
+      question: "summarize this",
+    });
+    expect(routeVoiceTranscript("summarize this", snapshot)).toMatchObject({
+      kind: "routed",
+      alias: "haiku",
+      question: "summarize this",
+    });
+    expect(routeVoiceTranscript("terra exact question", snapshot)).toMatchObject({
+      kind: "routed",
+      alias: "terra",
+      question: "exact question",
+    });
+    expect(routeVoiceTranscript("hey", snapshot)).toEqual({
+      kind: "rejected",
+      reason: "missing_question",
+    });
+
+    const ambiguous = routeSnapshot({
+      abcdefghijklmnopuuuu: { provider: "openai", model: "one" },
+      abcdefghijklmnvvvvvv: { provider: "openai", model: "two" },
+    }, null, "abcdefghijklmnopuuuu");
+    expect(routeVoiceTranscript("abcdefghijklmnopqrst question", ambiguous)).toEqual({
+      kind: "rejected",
+      reason: "ambiguous",
+    });
+
+    expect(routeVoiceTranscript("question", routeSnapshot(aliases, null, "missing"))).toEqual({
+      kind: "rejected",
+      reason: "invalid_snapshot",
     });
   });
 

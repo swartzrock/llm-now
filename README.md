@@ -125,6 +125,11 @@ On macOS, `--speak` sends the output to `/usr/bin/say`, with an optional voice c
 
 If you have access to dictation software, use `--voice-route` with a configured "wake word" () to have llm-now select a matching shortcut. For example, if you configured a wake word of "hey" and an alias named "haiku", use `llm-now --voice-route --input 'hey haiku, write a one-line love poem'` to route the prompt to the "haiku" alias.
 
+Set `[default] alias = "haiku"` in `config.toml` to route through `haiku` when
+no canonical, spoken-name, or fuzzy alias matches. The question is the original
+transcript after any leading wake word. Missing questions and ambiguous alias
+matches still fail closed.
+
 When routing accepts the request, llm-now writes exactly
 `Selecting alias 'haiku'\n` to stderr using the canonical alias, then begins
 provider generation. The generated response remains the only stdout content;

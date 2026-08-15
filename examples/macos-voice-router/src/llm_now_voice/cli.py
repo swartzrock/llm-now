@@ -178,6 +178,7 @@ class AliasProfile:
 
 @dataclass(frozen=True)
 class RouterConfig:
+    default_alias: str | None = None
     wake_words: tuple[str, ...] = ("hey",)
     min_fuzzy_phrase_length: int = MIN_FUZZY_LENGTH
     min_similarity: int = int(MIN_FUZZY_SIMILARITY)
@@ -275,11 +276,16 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
     except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise VoiceRouterError(f"invalid voice router configuration: {error}") from error
 
-    unknown_root_fields = sorted(set(document) - {"version", "voice", "aliases"})
+    unknown_root_fields = sorted(
+        set(document)
+        - {"version", "shared_instructions", "default", "voice", "aliases"}
+    )
     if unknown_root_fields:
         raise VoiceRouterError("unknown configuration field at root")
     if type(document.get("version")) is not int or document["version"] != 1:
         raise VoiceRouterError("unsupported configuration version")
+    if "shared_instructions" in document:
+        _validate_instructions(document["shared_instructions"])
 
     raw_voice = document.get("voice", {})
     if not isinstance(raw_voice, dict):
@@ -408,9 +414,27 @@ def parse_config(data: bytes | None, aliases: Iterable[str]) -> RouterConfig:
             pitch=pitch_value,
         )
 
+    raw_default = document.get("default")
+    default_alias: str | None = None
+    if raw_default is not None:
+        if not isinstance(raw_default, dict):
+            raise VoiceRouterError("default must be a TOML table")
+        if set(raw_default) != {"alias"}:
+            raise VoiceRouterError("unknown configuration field at default")
+        raw_default_alias = raw_default.get("alias")
+        if (
+            not isinstance(raw_default_alias, str)
+            or not STORED_ALIAS_PATTERN.fullmatch(raw_default_alias)
+        ):
+            raise VoiceRouterError("default.alias must be a valid alias name")
+        default_alias = raw_default_alias.lower()
+        if default_alias not in profiles or default_alias not in active_aliases:
+            raise VoiceRouterError("default.alias must reference a configured alias")
+
     _validate_active_spoken_names(profiles, tuple(profiles))
     _validate_active_spoken_names(profiles, active_aliases)
     return RouterConfig(
+        default_alias=default_alias,
         wake_words=wake_words,
         min_fuzzy_phrase_length=min_fuzzy_phrase_length,
         min_similarity=min_similarity,
@@ -425,6 +449,10 @@ def route_transcript(
     config: RouterConfig,
 ) -> RouteResult:
     active_aliases = _validated_aliases(aliases)
+    if config.default_alias is not None and config.default_alias not in active_aliases:
+        raise VoiceRouterError(
+            f'default alias is not configured: "{config.default_alias}"'
+        )
     tokens = _tokenize(transcript)
     if not tokens:
         return RouteResult(None, None, "missing_request")
@@ -462,12 +490,22 @@ def route_transcript(
         fuzzy = _fuzzy_match(transcript, tokens, start, canonical_by_key, config)
         if fuzzy.accepted:
             return fuzzy
+        if fuzzy.reason == "missing_question":
+            saw_missing_question = True
         if fuzzy.reason == "ambiguous":
             strongest_rejection = fuzzy
 
     if saw_missing_question:
         return RouteResult(None, None, "missing_question")
-    return strongest_rejection or RouteResult(None, None, "no_match")
+    if strongest_rejection is not None:
+        return strongest_rejection
+    if config.default_alias is not None:
+        start = views[0]
+        if start >= len(tokens):
+            return RouteResult(None, None, "missing_question")
+        question = transcript[tokens[start].start :]
+        return RouteResult(config.default_alias, question, "default")
+    return RouteResult(None, None, "no_match")
 
 
 def compact_key(value: str) -> str:
@@ -636,7 +674,7 @@ def _fuzzy_match(
     canonical_by_key: dict[str, str],
     config: RouterConfig,
 ) -> RouteResult:
-    per_alias: dict[str, tuple[float, int, str]] = {}
+    per_alias: dict[str, tuple[float, int, str | None]] = {}
     candidate_key = ""
     alias_metadata = tuple(
         (
@@ -657,9 +695,9 @@ def _fuzzy_match(
         candidate_key += tokens[end - 1].key
         if len(candidate_key) > maximum_candidate_length:
             break
-        if end >= len(tokens) or len(candidate_key) < config.min_fuzzy_phrase_length:
+        if len(candidate_key) < config.min_fuzzy_phrase_length:
             continue
-        question = transcript[tokens[end].start :]
+        question = transcript[tokens[end].start :] if end < len(tokens) else None
         candidate_digits = _digit_sequences(candidate_key)
 
         for alias_key, alias, max_difference, alias_digits in alias_metadata:
@@ -691,6 +729,8 @@ def _fuzzy_match(
         best_score == runner_up or best_score - runner_up < config.min_margin
     ):
         return RouteResult(None, None, "ambiguous", best_score, runner_up)
+    if best_question is None:
+        return RouteResult(None, None, "missing_question", best_score, runner_up)
     return RouteResult(best_alias, best_question, "fuzzy", best_score, runner_up)
 
 
@@ -756,7 +796,10 @@ def run_voice_router(
 
         route = route_transcript(transcript, aliases, config)
         if not route.accepted:
-            _write_diagnostic(stderr, f"request rejected: {route.reason}")
+            message = f"request rejected: {route.reason}"
+            if route.reason == "no_match":
+                message += "; configure default.alias in config.toml to use a fallback"
+            _write_diagnostic(stderr, message)
             return 0 if _speak_notice(runner, say, RETRY_NOTICE, stderr) else 1
 
         alias = route.alias

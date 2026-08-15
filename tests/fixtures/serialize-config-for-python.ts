@@ -5,6 +5,8 @@ import {
 
 const document: ConfigDocumentV1 = {
   version: 1,
+  sharedInstructions: "Shared guidance.",
+  default: { alias: "terra" },
   voice: {
     wakeWords: ["hey", "computer"],
     minFuzzyPhraseLength: 3,

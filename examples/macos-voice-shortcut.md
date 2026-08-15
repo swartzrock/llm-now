@@ -169,6 +169,9 @@ tables:
 ```toml
 version = 1
 
+[default]
+alias = "terra"
+
 [voice]
 wake_words = ["hey", "computer"]
 min_fuzzy_phrase_length = 4
@@ -196,8 +199,9 @@ pitch = 50
 ```
 
 `version = 1`, `[aliases]`, and each alias's `provider` and `model` are required.
-`model = "default"` is valid only for `codex-cli` and `claude-cli`. The example
-shows every global voice field and every per-alias speech or routing field;
+The optional `default.alias` must name an alias in the same file. `model =
+"default"` is valid only for `codex-cli` and `claude-cli`. The example shows
+every global voice field and every per-alias speech or routing field;
 `instructions` is the remaining optional alias field and contains the same
 plaintext reusable guidance described in the main README.
 
@@ -223,8 +227,10 @@ Omission applies independently to every optional voice field:
 Routing always checks the canonical alias, configured spoken names, and then
 fuzzy similarity in that order. Threshold changes do not disable the
 digit-equality, candidate-length, minimum-score, or runner-up-margin safety
-gates; ambiguous input remains rejected. Empty or duplicate normalized spoken
-names and spoken-name collisions between aliases are invalid.
+gates. When those stages produce no match, a configured `default.alias` receives
+the original transcript after any leading wake word. Ambiguous input and missing
+questions remain rejected. Empty or duplicate normalized spoken names and
+spoken-name collisions between aliases are invalid.
 
 `pitch` uses Apple's legacy unsigned, absolute baseline-pitch (`pbas`) scale; it
 is not a percentage or a relative adjustment. The router turns `pitch = 50`

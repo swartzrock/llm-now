@@ -594,6 +594,7 @@ function applyAliasMutation(
     ...(document.sharedInstructions === undefined
       ? {}
       : { sharedInstructions: document.sharedInstructions }),
+    ...(document.default === undefined ? {} : { default: document.default }),
     ...(document.voice === undefined ? {} : { voice: document.voice }),
     aliases: {
       ...document.aliases,

@@ -292,7 +292,7 @@ describe("configuration transactions", () => {
       legacyVoicePath: join(directory, "voice-router.toml"),
     };
     const sharedInstructions = "\n  Shared café ☕ policy.  \n";
-    await writeFile(paths.configPath, `# normalize me\nversion = 1\nshared_instructions = ${JSON.stringify(sharedInstructions)}\n[voice]\nwake_words = []\nmin_similarity = 72\n[aliases.keep]\nprovider = "ollama"\nmodel = "old"\nspoken_names = []\nvoice = "Alex"\nrate = 210\npitch = 48\n[aliases.change]\nprovider = "ollama"\nmodel = "before"\nvoice = "Samantha"\n`);
+    await writeFile(paths.configPath, `# normalize me\nversion = 1\nshared_instructions = ${JSON.stringify(sharedInstructions)}\n[default]\nalias = "keep"\n[voice]\nwake_words = []\nmin_similarity = 72\n[aliases.keep]\nprovider = "ollama"\nmodel = "old"\nspoken_names = []\nvoice = "Alex"\nrate = 210\npitch = 48\n[aliases.change]\nprovider = "ollama"\nmodel = "before"\nvoice = "Samantha"\n`);
 
     expect(await saveConfigAlias(paths, "new", { provider: "ollama", model: "created" }))
       .toBe("saved");
@@ -304,6 +304,7 @@ describe("configuration transactions", () => {
     expect(await loadConfig(paths.configPath)).toEqual({
       version: 1,
       sharedInstructions,
+      default: { alias: "keep" },
       voice: { wakeWords: [], minSimilarity: 72 },
       aliases: {
         change: { provider: "ollama", model: "after", voice: "Samantha" },
@@ -922,6 +923,24 @@ Keep this on two lines."""
     expect(Bun.TOML.parse(serialized)).toEqual(Bun.TOML.parse(serialized));
   });
 
+  test("round-trips a canonical default alias and projects it into voice routing", () => {
+    const document = parseConfigDocument(`
+      version = 1
+      [default]
+      alias = "Slug"
+      [aliases.Slug]
+      provider = "ollama"
+      model = "llama3"
+    `);
+
+    expect(document.default).toEqual({ alias: "slug" });
+    expect(projectVoiceConfig(document).defaultAlias).toBe("slug");
+    const serialized = serializeConfigDocument(document);
+    expect(serialized).toContain("[default]");
+    expect(serialized).toContain('alias = "slug"');
+    expect(serializeConfigDocument(parseConfigDocument(serialized))).toBe(serialized);
+  });
+
   test("applies per-field defaults without replacing explicit empty lists", () => {
     const document = parseConfigDocument(`
       version = 1
@@ -984,6 +1003,9 @@ Keep this on two lines."""
       "version = 1\n[voice]\nmin_similarity=101\n[aliases]",
       "version = 1\n[voice]\nmin_margin=-1\n[aliases]",
       "version = 1\n[voice]\nmin_similarity=65.0\n[aliases]",
+      "version = 1\n[default]\n[aliases]",
+      "version = 1\n[default]\nalias='missing'\n[aliases]",
+      "version = 1\n[default]\nalias='slug'\nextra=true\n[aliases.slug]\nprovider='ollama'\nmodel='x'",
       "version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\nrate=79",
       "version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\nrate=205.0",
       "version = 1\n[aliases.slug]\nprovider='ollama'\nmodel='x'\npitch=128",

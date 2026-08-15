@@ -30,7 +30,7 @@ interface RouteExpectation {
   alias: string | null;
   question: string | null;
   question_offset: number | null;
-  reason: "canonical" | "configured" | "fuzzy" | "missing_request" | "missing_question"
+  reason: "canonical" | "configured" | "fuzzy" | "default" | "missing_request" | "missing_question"
     | "no_match" | "ambiguous";
   similarity: number | null;
   runner_up_similarity: number | null;

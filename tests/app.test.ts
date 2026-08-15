@@ -820,6 +820,37 @@ describe("voice boundary", () => {
     }
   });
 
+  test("routes an unmatched transcript through the configured default alias", async () => {
+    const directory = await temporaryDirectory();
+    const configPath = join(directory, "config.toml");
+    await writeFile(configPath, `
+      version = 1
+      [default]
+      alias = "haiku"
+      [aliases.haiku]
+      provider = "ollama"
+      model = "qwen"
+    `);
+    const generated = runtime({
+      generate: async (_provider, _model, prompt) => {
+        expect(prompt).toBe("summarize this");
+        return "default answer";
+      },
+    });
+    const app = dependencies({
+      args: ["--voice-route", "--input", "hey summarize this"],
+      configPath,
+      aliasPath: join(directory, "aliases.json"),
+      voiceConfigPath: join(directory, "voice-router.toml"),
+      runtime: generated,
+    });
+
+    expect(await runApplication(app.value)).toBe(0);
+    expect(generated.calls.generate).toBe(1);
+    expect(app.stdout.text()).toBe("default answer");
+    expect(app.stderr.text()).toBe("Selecting alias 'haiku'\n");
+  });
+
   test("waits for the accepted-route stderr write before provider generation", async () => {
     const events: string[] = [];
     let queued: (() => void) | undefined;
@@ -993,7 +1024,9 @@ describe("voice boundary", () => {
     expect(app.runtime.calls.generate).toBe(0);
     expect(speechChecks).toBe(0);
     expect(app.stdout.text()).toBe("");
-    expect(app.stderr.text()).toBe("voice request rejected: no_match\n");
+    expect(app.stderr.text()).toBe(
+      "voice request rejected: no_match; configure default.alias in config.toml to use a fallback\n",
+    );
   });
 
   test("loads malformed configuration before blank or invalid-UTF-8 voice input can reach speech", async () => {

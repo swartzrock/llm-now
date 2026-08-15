@@ -123,6 +123,9 @@ Voice routing uses the same aliases. Add global routing settings under
 `[voice]` and speech settings directly to an alias:
 
 ```toml
+[default]
+alias = "local"
+
 [voice]
 wake_words = ["hey", "computer"]
 
@@ -140,6 +143,9 @@ do not create a second table with the same name.
 
 ### Common voice changes
 
+- **Choose a routing fallback:** set `[default] alias = "local"` to use an
+  existing alias when no canonical, spoken-name, or fuzzy alias matches. The
+  fallback receives the original transcript after any leading wake word.
 - **Recognize alternate names:** add `spoken_names` when dictation produces a
   natural name or alternate pronunciation. For example, `"local model"`
   selects the `local` alias.
@@ -159,9 +165,10 @@ do not create a second table with the same name.
 | `pitch` | System setting | Number from `1` to `127` |
 
 Voice routing checks the alias name first, then `spoken_names`, then fuzzy
-matches. Ambiguous or weak matches are rejected instead of guessing. Routing
-works across supported platforms; `--speak` applies the speech settings on
-macOS.
+matches. A configured `default.alias` is used only after those stages produce
+no match; ambiguous matches and missing questions remain rejected instead of
+guessing. `default.alias` must name an alias in the same file. Routing works
+across supported platforms; `--speak` applies the speech settings on macOS.
 
 For setup, installed voice lookup, privacy, and troubleshooting, see
 [Talk to an llm-now alias from a macOS shortcut](../examples/macos-voice-shortcut.md).
@@ -170,8 +177,8 @@ For setup, installed voice lookup, privacy, and troubleshooting, see
 
 - The file requires `version = 1` and an aliases table; an empty `[aliases]` is
   valid.
-- Unknown fields, invalid values, and conflicting alias or spoken names are
-  rejected.
+- Unknown fields, invalid values, missing default targets, and conflicting
+  alias or spoken names are rejected.
 - `spoken_names` must be unique and cannot duplicate another alias or spoken
   name after normalization.
 - Generated files omit optional values. Removing an override restores the
