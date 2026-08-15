@@ -636,6 +636,7 @@ function rethrowCoreError(
   fallbackStage: RuntimeStage,
   provider: ByokProviderId | null,
   context: CliCoreOperationContext,
+  responseMode?: "buffered" | "streaming",
 ): never {
   if (error instanceof LlmNowError) {
     const stage = coreStage(error.operation);
@@ -659,6 +660,18 @@ function rethrowCoreError(
         : `native credential storage unavailable on this target; set ${names}`;
       throw new RuntimeStageError(stage, errorProvider, message);
     }
+    if (error.code === "UNSAFE_RESPONSE") {
+      if (responseMode === "buffered") {
+        throw new Error("generation: response withheld because it contained a registered credential.");
+      }
+      if (responseMode === "streaming") {
+        throw new RuntimeStageError(
+          "generation",
+          errorProvider,
+          "response stream stopped because it contained a registered credential",
+        );
+      }
+    }
     throw new RuntimeStageError(
       stage,
       errorProvider,
@@ -668,12 +681,7 @@ function rethrowCoreError(
   throw new RuntimeStageError(fallbackStage, provider, "The core operation failed safely.");
 }
 
-/**
- * Phase-1 CLI adapter. Buffered operations use the core package now; the existing
- * streaming path remains in the CLI until U5 moves callback lifecycle ownership.
- */
 export function createCoreRuntimeGateway(deps: RuntimeGatewayDependencies): RuntimeGateway {
-  const legacy = createRuntimeGateway(deps);
   const adaptedCredentialResolver = adaptCredentialResolverForCore(deps.credentialResolver);
   const cliExecutionResolver = createCliExecutionResolver({
     env: deps.env,
@@ -741,29 +749,28 @@ export function createCoreRuntimeGateway(deps: RuntimeGatewayDependencies): Runt
       }
     },
     async generate(provider, model, prompt, signal, instructions, workspace, onChunk) {
-      if (onChunk !== undefined) {
-        return legacy.generate(
-          provider,
-          model,
-          prompt,
-          signal,
-          instructions,
-          workspace,
-          onChunk,
-        );
-      }
       const context: CliCoreOperationContext = {};
       try {
-        return (await operationCore(context).generateText({
+        const request = {
           provider,
           model,
           prompt,
           ...(instructions === undefined ? {} : { instructions }),
           ...(workspace === undefined ? {} : { workspace }),
           ...(signal === undefined ? {} : { signal }),
-        })).text;
+          responseSensitiveValues: recognizedCredentialValues(deps.env),
+        };
+        return onChunk === undefined
+          ? (await operationCore(context).generateText(request)).text
+          : (await operationCore(context).streamText(request, onChunk)).text;
       } catch (error) {
-        rethrowCoreError(error, "generation", provider, context);
+        rethrowCoreError(
+          error,
+          "generation",
+          provider,
+          context,
+          onChunk === undefined ? "buffered" : "streaming",
+        );
       } finally {
         clearCoreOperationContext(context);
       }

@@ -19,6 +19,7 @@ import { spawn } from "node:child_process";
 import type { CliExecutionDescriptor, CliExecutionResolver } from "./cli-execution.ts";
 import { validateCliExecutionDescriptor } from "./cli-execution.ts";
 import { LlmNowError } from "./errors.ts";
+import { raceWithCancellation } from "./streaming.ts";
 import type {
   CliProviderId,
   CloudProviderId,
@@ -59,6 +60,7 @@ export interface CoreInternalDependencies {
   ) => Promise<readonly ByokProviderId[]>;
   readonly createProvider: (config: ByokProviderConfig) => ByokProviderRuntime;
   readonly spawnProcess?: LocalProcessSpawner;
+  readonly settlementTimeoutMs?: number;
 }
 
 export const DEFAULT_CORE_INTERNALS: CoreInternalDependencies = Object.freeze({
@@ -125,26 +127,55 @@ export class ApprovedExecutionRunner implements CommandRunner {
       let stderr = "";
       let settled = false;
       let aborted = false;
+      let interruption: unknown;
+      let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       const signal = request.signal;
-      const cleanup = () => signal?.removeEventListener("abort", abort);
+      const cleanup = () => {
+        signal?.removeEventListener("abort", abort);
+        if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
+        if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
+      };
       const finish = (operation: () => void) => {
         if (settled) return;
         settled = true;
         cleanup();
         operation();
       };
-      const abort = () => {
+      const interrupt = (error: unknown) => {
+        if (settled || aborted) return;
         aborted = true;
+        interruption = error;
         child.kill("SIGTERM");
+        forceKillTimer = setTimeout(() => {
+          if (!settled) child.kill("SIGKILL");
+        }, 250);
       };
+      const abort = () => interrupt(signal?.reason);
       signal?.addEventListener("abort", abort, { once: true });
       child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
       child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-      child.once("error", (error) => finish(() => reject(aborted ? signal?.reason : error)));
+      child.stdin.once("error", (error) => interrupt(error));
+      child.once("error", (error) => {
+        if (!aborted) finish(() => reject(error));
+      });
       child.once("close", (code) => finish(() => aborted
-        ? reject(signal?.reason)
+        ? reject(interruption)
         : resolve({ stdout, stderr, exitCode: code ?? 1 })));
-      child.stdin.end(request.stdin);
+      if (request.timeoutMs !== undefined) {
+        timeoutTimer = setTimeout(
+          () => interrupt(new Error("approved CLI execution timed out")),
+          request.timeoutMs,
+        );
+      }
+      if (signal?.aborted) abort();
+      if (!aborted) {
+        try {
+          child.stdin.end(request.stdin);
+        } catch (error) {
+          interrupt(error);
+        }
+      }
     });
   }
 }
@@ -189,13 +220,16 @@ export async function resolveCliExecution(
   resolver: CliExecutionResolver | undefined,
   provider: CliProviderId,
   signal: AbortSignal | undefined,
-  operation: "model-list" | "validation" | "generation",
+  operation: "model-list" | "validation" | "generation" | "streaming",
 ): Promise<CliExecutionDescriptor> {
   if (resolver === undefined) throw new LlmNowError("EXECUTION_UNAVAILABLE", operation, provider);
   let resolved: unknown;
   try {
     signal?.throwIfAborted();
-    resolved = await resolver.resolve(provider, signal);
+    const resolving = Promise.resolve().then(() => resolver.resolve(provider, signal));
+    resolved = signal === undefined
+      ? await resolving
+      : await raceWithCancellation(resolving, signal);
     signal?.throwIfAborted();
   } catch {
     if (signal?.aborted) throw new LlmNowError("ABORTED", operation, provider);

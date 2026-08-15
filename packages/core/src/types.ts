@@ -74,6 +74,14 @@ export interface GenerateTextResult {
   readonly text: string;
 }
 
+export type TextStreamDelivery = "native" | "buffered";
+
+export type TextDeltaHandler = (delta: string) => void | Promise<void>;
+
+export interface StreamTextResult extends GenerateTextResult {
+  readonly delivery: TextStreamDelivery;
+}
+
 export type DirectoryAccess = "read-only" | "read-write";
 
 export interface WorkspaceRequest {

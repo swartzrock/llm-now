@@ -10,6 +10,7 @@ import {
 } from "@swartzrock/byok-runtime";
 import type { LocalCommandRequest } from "@swartzrock/byok-runtime/node";
 import type { LlmNowCoreClient } from "../packages/core/src/client.ts";
+import { LlmNowError } from "../packages/core/dist/index.js";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import {
@@ -1144,8 +1145,9 @@ describe("runtime gateway", () => {
 });
 
 describe("core runtime adapter", () => {
-  test("routes buffered operations through core while leaving streaming on the U5 seam", async () => {
+  test("routes buffered and streaming operations through core", async () => {
     const calls: string[] = [];
+    const responseSecrets: string[][] = [];
     const coreClient: LlmNowCoreClient = {
       discoverProviders: async () => {
         calls.push("core-discover");
@@ -1163,22 +1165,24 @@ describe("core runtime adapter", () => {
         calls.push(`core-validate:${provider}`);
         return { provider, models: [] };
       },
-      generateText: async ({ provider, model, prompt, instructions }) => {
+      generateText: async ({ provider, model, prompt, instructions, responseSensitiveValues }) => {
         calls.push(`core-generate:${prompt}:${instructions}`);
+        responseSecrets.push([...(responseSensitiveValues ?? [])]);
         return { provider, model, text: "core-buffered" };
+      },
+      streamText: async ({ provider, model, prompt, responseSensitiveValues }, onTextDelta) => {
+        calls.push(`core-stream:${prompt}`);
+        responseSecrets.push([...(responseSensitiveValues ?? [])]);
+        await onTextDelta("core-streamed");
+        return { provider, model, delivery: "native", text: "core-streamed" };
       },
     };
     const gateway = createCoreRuntimeGateway({
-      env: {},
+      env: { OPENAI_API_KEY: "adapter-response-secret" },
       credentialResolver: { resolve: async () => ({ source: "missing" }) },
       sensitive: createSensitiveValueRegistry(),
       coreClient,
-      createProvider: () => runtime({
-        streamText: () => ({
-          delivery: "native",
-          textStream: (async function* () { yield "legacy-streamed"; })(),
-        }),
-      }),
+      createProvider: () => { throw new Error("injected core owns provider calls"); },
     });
 
     expect(await gateway.discover()).toEqual(["ollama"]);
@@ -1195,14 +1199,54 @@ describe("core runtime adapter", () => {
       undefined,
       undefined,
       (delta) => { deltas.push(delta); },
-    )).toBe("legacy-streamed");
-    expect(deltas).toEqual(["legacy-streamed"]);
+    )).toBe("core-streamed");
+    expect(deltas).toEqual(["core-streamed"]);
     expect(calls).toEqual([
       "core-discover",
       "core-list:ollama",
       "core-validate:openai",
       "core-generate:buffered:brief",
+      "core-stream:streamed",
     ]);
+    expect(responseSecrets).toEqual([
+      ["adapter-response-secret"],
+      ["adapter-response-secret"],
+    ]);
+  });
+
+  test("preserves buffered and streaming unsafe-response diagnostics", async () => {
+    const base: LlmNowCoreClient = {
+      discoverProviders: async () => ({ degraded: false, providers: [] }),
+      listModels: async ({ provider }) => ({ provider, models: [] }),
+      validateConnection: async ({ provider }) => ({ provider, models: [] }),
+      generateText: async () => {
+        throw new LlmNowError("UNSAFE_RESPONSE", "generation", "ollama");
+      },
+      streamText: async () => {
+        throw new LlmNowError("UNSAFE_RESPONSE", "streaming", "ollama");
+      },
+    };
+    const gateway = createCoreRuntimeGateway({
+      env: {},
+      credentialResolver: { resolve: async () => ({ source: "missing" }) },
+      sensitive: createSensitiveValueRegistry(),
+      coreClient: base,
+    });
+
+    await expect(gateway.generate("ollama", "qwen", "buffered")).rejects.toThrow(
+      "generation: response withheld because it contained a registered credential.",
+    );
+    await expect(gateway.generate(
+      "ollama",
+      "qwen",
+      "streamed",
+      undefined,
+      undefined,
+      undefined,
+      () => undefined,
+    )).rejects.toThrow(
+      "generation (ollama): response stream stopped because it contained a registered credential",
+    );
   });
 
   test("keeps command discovery caches and approved child environments adapter-local", async () => {

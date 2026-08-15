@@ -172,6 +172,35 @@ describe("approved CLI execution", () => {
     expect(settled).toBeTrue();
   });
 
+  test("ignores an aborted child error, escalates termination, and still waits for close", async () => {
+    const kills: Array<NodeJS.Signals | undefined> = [];
+    const process = fakeProcess();
+    process.child.kill = ((signal?: NodeJS.Signals) => {
+      kills.push(signal);
+      return true;
+    });
+    const controller = new AbortController();
+    const runner = new ApprovedExecutionRunner({
+      mode: "direct",
+      executable: "/approved/bin/codex",
+      argsPrefix: [],
+      env: {},
+    }, (() => {
+      controller.abort();
+      return process.child;
+    }) as LocalProcessSpawner);
+    let settled = false;
+    const running = runner.run({ command: "ignored", signal: controller.signal })
+      .finally(() => { settled = true; });
+    process.events.emit("error", new Error("error before close"));
+    await Bun.sleep(275);
+    expect(kills).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(settled).toBeFalse();
+    process.events.emit("close", null);
+    await expect(running).rejects.toBeDefined();
+    expect(settled).toBeTrue();
+  });
+
   test("uses one fixed Windows command-shim argument shape", () => {
     expect(windowsCommandShimArguments("C:\\Tools\\codex.cmd", [
       "exec",

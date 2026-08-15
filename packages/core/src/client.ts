@@ -20,6 +20,13 @@ import {
   type CoreInternalDependencies,
 } from "./providers.ts";
 import { createRequestSafety } from "./safety.ts";
+import {
+  awaitDeltaHandler,
+  createLinkedAbortController,
+  finalizeIterator,
+  raceWithCancellation,
+  settleOperation,
+} from "./streaming.ts";
 import type {
   EnvironmentSnapshot,
   GenerateTextRequest,
@@ -30,6 +37,8 @@ import type {
   ProviderDiscoveryRequest,
   ProviderDiscoveryResult,
   ProviderId,
+  StreamTextResult,
+  TextDeltaHandler,
   ValidateConnectionRequest,
   ValidationResult,
   WorkspaceRequest,
@@ -49,9 +58,13 @@ export interface LlmNowCoreClient {
   listModels(request: ModelListRequest): Promise<ModelListResult>;
   validateConnection(request: ValidateConnectionRequest): Promise<ValidationResult>;
   generateText(request: GenerateTextRequest): Promise<GenerateTextResult>;
+  streamText(
+    request: GenerateTextRequest,
+    onTextDelta: TextDeltaHandler,
+  ): Promise<StreamTextResult>;
 }
 
-type CoreOperation = "discovery" | "model-list" | "validation" | "generation";
+type CoreOperation = "discovery" | "model-list" | "validation" | "generation" | "streaming";
 
 function invalidRequest(operation: CoreOperation, provider?: ProviderId): LlmNowError {
   return new LlmNowError("INVALID_REQUEST", operation, provider);
@@ -105,7 +118,10 @@ async function resolveCredential(
   if (!isCloudProvider(provider)) throw invalidRequest(operation, provider);
   try {
     signal?.throwIfAborted();
-    const resolution = await resolver.resolve(provider, signal);
+    const resolving = Promise.resolve().then(() => resolver.resolve(provider, signal));
+    const resolution = signal === undefined
+      ? await resolving
+      : await raceWithCancellation(resolving, signal);
     signal?.throwIfAborted();
     if (
       resolution.status === "resolved"
@@ -130,24 +146,29 @@ function requireResolvedCredential(
   throw new LlmNowError("CREDENTIAL_UNAVAILABLE", operation, provider);
 }
 
-function cloudConfig(provider: ProviderId, credential: string, model: string): ByokProviderConfig {
-  if (!isCloudProvider(provider)) throw invalidRequest("generation", provider);
+function cloudConfig(
+  provider: ProviderId,
+  credential: string,
+  model: string,
+  operation: CoreOperation,
+): ByokProviderConfig {
+  if (!isCloudProvider(provider)) throw invalidRequest(operation, provider);
   return { provider, apiKey: credential, model };
 }
 
-function localConfig(provider: ProviderId, model: string): ByokProviderConfig {
+function localConfig(provider: ProviderId, model: string, operation: CoreOperation): ByokProviderConfig {
   if (provider !== "ollama" && provider !== "lm-studio") {
-    throw invalidRequest("generation", provider);
+    throw invalidRequest(operation, provider);
   }
   return { provider, model };
 }
 
-function validateGenerationRequest(request: GenerateTextRequest): ProviderId {
-  requestObject(request, "generation");
-  const provider = validProvider(request.provider, "generation");
-  if (!nonblank(request.prompt)) throw invalidRequest("generation", provider);
+function validateGenerationRequest(request: GenerateTextRequest, operation: "generation" | "streaming"): ProviderId {
+  requestObject(request, operation);
+  const provider = validProvider(request.provider, operation);
+  if (!nonblank(request.prompt)) throw invalidRequest(operation, provider);
   if (request.instructions !== undefined && typeof request.instructions !== "string") {
-    throw invalidRequest("generation", provider);
+    throw invalidRequest(operation, provider);
   }
   if (
     (request.model !== null && !nonblank(request.model))
@@ -155,7 +176,7 @@ function validateGenerationRequest(request: GenerateTextRequest): ProviderId {
     || (request.responseSensitiveValues !== undefined
       && (!Array.isArray(request.responseSensitiveValues)
         || request.responseSensitiveValues.some((value) => typeof value !== "string")))
-  ) throw invalidRequest("generation", provider);
+  ) throw invalidRequest(operation, provider);
   return provider;
 }
 
@@ -168,7 +189,7 @@ async function runtimeForOperation(
   internals: CoreInternalDependencies,
   provider: ProviderId,
   model: string | null,
-  operation: "model-list" | "validation" | "generation",
+  operation: "model-list" | "validation" | "generation" | "streaming",
   signal?: AbortSignal,
   workspace?: WorkspaceRequest,
   candidateCredential?: string,
@@ -192,12 +213,12 @@ async function runtimeForOperation(
       provider,
     );
     return {
-      runtime: internals.createProvider(cloudConfig(provider, credential, model ?? "")),
+      runtime: internals.createProvider(cloudConfig(provider, credential, model ?? "", operation)),
       responseSensitiveValues: [credential],
     };
   }
   return {
-    runtime: internals.createProvider(localConfig(provider, model ?? "")),
+    runtime: internals.createProvider(localConfig(provider, model ?? "", operation)),
     responseSensitiveValues: [],
   };
 }
@@ -348,11 +369,15 @@ export function createLlmNowCoreWithInternals(
 
     async generateText(request: GenerateTextRequest) {
       let provider: ProviderId | undefined;
-      let signal: AbortSignal | undefined;
+      let linked: ReturnType<typeof createLinkedAbortController> | undefined;
+      let providerWork: PromiseLike<unknown> | undefined;
+      let failed = true;
       const safety = createRequestSafety();
       try {
-        provider = validateGenerationRequest(request);
-        signal = requestSignal(request.signal, "generation", provider);
+        provider = validateGenerationRequest(request, "generation");
+        const parentSignal = requestSignal(request.signal, "generation", provider);
+        linked = createLinkedAbortController(parentSignal);
+        const signal = linked.controller.signal;
         for (const value of request.responseSensitiveValues ?? []) {
           safety.registerResponseSensitive(value);
         }
@@ -363,7 +388,7 @@ export function createLlmNowCoreWithInternals(
         signal?.throwIfAborted();
         const workspace = request.workspace === undefined
           ? undefined
-          : await preflightWorkspace(provider, request.workspace);
+          : await raceWithCancellation(preflightWorkspace(provider, request.workspace), signal);
         signal?.throwIfAborted();
         const { runtime, responseSensitiveValues } = await runtimeForOperation(
           deps,
@@ -375,22 +400,153 @@ export function createLlmNowCoreWithInternals(
           workspace,
         );
         for (const value of responseSensitiveValues) safety.registerResponseSensitive(value);
-        signal?.throwIfAborted();
-        const output = await runtime.generateText({
+        signal.throwIfAborted();
+        const generation = Promise.resolve().then(() => runtime.generateText({
           prompt: request.prompt,
           ...(request.instructions === undefined ? {} : { instructions: request.instructions }),
-        }, signal);
-        signal?.throwIfAborted();
+        }, signal));
+        providerWork = generation;
+        const output = await raceWithCancellation(generation, signal);
+        signal.throwIfAborted();
         const checked = safety.checkBufferedResponse(output.text);
         if (!checked.safe) throw new LlmNowError("UNSAFE_RESPONSE", "generation", provider);
+        failed = false;
         return Object.freeze({
           provider,
           model: request.model,
           text: checked.text,
         });
       } catch (error) {
-        throw safeFailure(error, "generation", "GENERATION_FAILED", provider, signal);
+        const failure = safeFailure(
+          error,
+          "generation",
+          "GENERATION_FAILED",
+          provider,
+          linked?.controller.signal,
+        );
+        linked?.controller.abort();
+        throw failure;
       } finally {
+        if (failed && providerWork !== undefined) {
+          await settleOperation(
+            providerWork,
+            provider !== undefined && isCliProvider(provider) ? "full" : "bounded",
+            internals.settlementTimeoutMs,
+          );
+        }
+        linked?.dispose();
+        safety.clear();
+      }
+    },
+
+    async streamText(request: GenerateTextRequest, onTextDelta: TextDeltaHandler) {
+      let provider: ProviderId | undefined;
+      let linked: ReturnType<typeof createLinkedAbortController> | undefined;
+      let pendingProviderWork: PromiseLike<unknown> | undefined;
+      let iterator: AsyncIterator<string> | undefined;
+      let failed = true;
+      const safety = createRequestSafety();
+      try {
+        provider = validateGenerationRequest(request, "streaming");
+        if (typeof onTextDelta !== "function") throw invalidRequest("streaming", provider);
+        const parentSignal = requestSignal(request.signal, "streaming", provider);
+        linked = createLinkedAbortController(parentSignal);
+        const signal = linked.controller.signal;
+        for (const value of request.responseSensitiveValues ?? []) {
+          safety.registerResponseSensitive(value);
+        }
+        safety.registerDiagnosticSensitive(request.prompt);
+        if (request.instructions !== undefined) {
+          safety.registerDiagnosticSensitive(request.instructions);
+        }
+        signal.throwIfAborted();
+        const workspace = request.workspace === undefined
+          ? undefined
+          : await raceWithCancellation(preflightWorkspace(provider, request.workspace), signal);
+        signal.throwIfAborted();
+        const { runtime, responseSensitiveValues } = await runtimeForOperation(
+          deps,
+          internals,
+          provider,
+          request.model,
+          "streaming",
+          signal,
+          workspace,
+        );
+        for (const value of responseSensitiveValues) safety.registerResponseSensitive(value);
+        signal.throwIfAborted();
+        const input = {
+          prompt: request.prompt,
+          ...(request.instructions === undefined ? {} : { instructions: request.instructions }),
+        };
+
+        if (runtime.streamText === undefined) {
+          const generation = Promise.resolve().then(() => runtime.generateText(input, signal));
+          pendingProviderWork = generation;
+          const output = await raceWithCancellation(generation, signal);
+          pendingProviderWork = undefined;
+          const checked = safety.checkBufferedResponse(output.text);
+          if (!checked.safe) throw new LlmNowError("UNSAFE_RESPONSE", "streaming", provider);
+          await awaitDeltaHandler(onTextDelta, checked.text, signal, provider);
+          failed = false;
+          return Object.freeze({
+            provider,
+            model: request.model,
+            delivery: "buffered" as const,
+            text: checked.text,
+          });
+        }
+
+        const stream = runtime.streamText(input, signal);
+        if (
+          (stream.delivery !== "native" && stream.delivery !== "buffered")
+          || typeof stream.textStream?.[Symbol.asyncIterator] !== "function"
+        ) throw new Error("invalid provider stream");
+        iterator = stream.textStream[Symbol.asyncIterator]();
+        let rawText = "";
+        while (true) {
+          const next = Promise.resolve().then(() => iterator!.next());
+          pendingProviderWork = next;
+          const step = await raceWithCancellation(next, signal);
+          pendingProviderWork = undefined;
+          if (step.done) break;
+          if (typeof step.value !== "string") throw new Error("invalid provider delta");
+          rawText += step.value;
+          const checked = safety.checkStreamingDelta(step.value);
+          if (!checked.safe) throw new LlmNowError("UNSAFE_RESPONSE", "streaming", provider);
+          await awaitDeltaHandler(onTextDelta, checked.delta, signal, provider);
+        }
+        const final = safety.checkBufferedResponse(rawText);
+        if (!final.safe) throw new LlmNowError("UNSAFE_RESPONSE", "streaming", provider);
+        failed = false;
+        return Object.freeze({
+          provider,
+          model: request.model,
+          delivery: stream.delivery,
+          text: final.text,
+        });
+      } catch (error) {
+        const failure = safeFailure(
+          error,
+          "streaming",
+          "GENERATION_FAILED",
+          provider,
+          linked?.controller.signal,
+        );
+        linked?.controller.abort();
+        throw failure;
+      } finally {
+        if (failed) {
+          linked?.controller.abort();
+          const cleanup = finalizeIterator(iterator)?.then(
+            () => undefined,
+            () => undefined,
+          );
+          const mode = provider !== undefined && isCliProvider(provider) ? "full" : "bounded";
+          await settleOperation(pendingProviderWork, mode, internals.settlementTimeoutMs);
+          await settleOperation(cleanup, mode, internals.settlementTimeoutMs);
+        }
+        linked?.dispose();
         safety.clear();
       }
     },

@@ -195,7 +195,6 @@ function dependencies(options: {
   saveAlias?: (...args: Parameters<NonNullable<Parameters<typeof runApplication>[0]["saveAlias"]>>) => Promise<SaveAliasResult>;
   migrateConfig?: NonNullable<Parameters<typeof runApplication>[0]["migrateConfig"]>;
   generationTimeoutMs?: number;
-  generationCleanupTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault?: CredentialVault;
   credentialResolver?: CredentialResolver;
@@ -250,7 +249,6 @@ function dependencies(options: {
       saveAlias: options.saveAlias,
       migrateConfig: options.migrateConfig,
       generationTimeoutMs: options.generationTimeoutMs,
-      generationCleanupTimeoutMs: options.generationCleanupTimeoutMs,
       modelListTimeoutMs: options.modelListTimeoutMs,
       credentialVault,
       credentialResolver,
@@ -2294,7 +2292,7 @@ describe("one-shot application", () => {
     expect(app.runtime.calls.generate).toBe(0);
   });
 
-  test("withholds an entire generated response containing a registered sensitive value", async () => {
+  test("preserves a buffered safety rejection from the runtime boundary", async () => {
     const sensitive = createSensitiveValueRegistry(["u2-output-secret"]);
     let saves = 0;
     const app = dependencies({
@@ -2303,7 +2301,13 @@ describe("one-shot application", () => {
       stderrTty: true,
       env: { NO_COLOR: "1" },
       sensitive,
-      runtime: runtime({ response: "prefix u2-output-secret suffix" }),
+      runtime: runtime({
+        generate: async () => {
+          throw new Error(
+            "generation: response withheld because it contained a registered credential.",
+          );
+        },
+      }),
       prompter: prompts({
         choices: [
           "launcher:create-shortcut",
@@ -2327,12 +2331,18 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).not.toContain("u2-output-secret");
   });
 
-  test("withholds a registered sensitive value split by terminal control sequences", async () => {
+  test("preserves a control-split safety rejection from the runtime boundary", async () => {
     const sensitive = createSensitiveValueRegistry(["u2-output-secret"]);
     const app = dependencies({
       args: ["--provider", "ollama", "--model", "qwen", "--input", "hello"],
       sensitive,
-      runtime: runtime({ response: "prefix u2-output-\u001b[31msecret suffix" }),
+      runtime: runtime({
+        generate: async () => {
+          throw new Error(
+            "generation: response withheld because it contained a registered credential.",
+          );
+        },
+      }),
     });
 
     expect(await runApplication(app.value)).toBe(1);
@@ -3860,8 +3870,8 @@ describe("one-shot application", () => {
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
   });
 
-  test("sanitizes terminal controls before writing an interactive response", async () => {
-    const response = " exact\u001b[31m model\b\toutput \r\n";
+  test("writes terminal-safe interactive bytes returned by the runtime boundary", async () => {
+    const response = " exact model\toutput \n";
     const app = dependencies({
       args: ["--input", "poem"],
       stdin: input("", true),
@@ -3920,11 +3930,11 @@ describe("one-shot application", () => {
     expect(defaultApp.stdout.text()).toBe(streamingApp.stdout.text());
   });
 
-  test("sanitizes terminal cursor controls in buffered and streaming output", async () => {
+  test("writes terminal-safe buffered and streaming output from the runtime boundary", async () => {
     const sensitive = createSensitiveValueRegistry(["sk-secret"]);
     const buffered = dependencies({
       args: ["--provider", "ollama", "--model", "qwen", "--input", "hello"],
-      runtime: runtime({ response: "sk-X\u001b[1Dsecret" }),
+      runtime: runtime({ response: "sk-Xsecret" }),
       sensitive,
     });
 
@@ -3935,8 +3945,8 @@ describe("one-shot application", () => {
       generate: async (...args) => {
         const onChunk = args[6];
         await onChunk?.("sk-X");
-        await onChunk?.("\u001b[1Dsecret");
-        return "sk-X\u001b[1Dsecret";
+        await onChunk?.("secret");
+        return "sk-Xsecret";
       },
     });
     const streaming = dependencies({
@@ -3957,14 +3967,17 @@ describe("one-shot application", () => {
     expect(streaming.stdout.text()).toBe("sk-Xsecret");
   });
 
-  test("stops before a streaming chunk completes a registered credential", async () => {
+  test("preserves safe streamed prefixes when the runtime withholds a completing chunk", async () => {
     const sensitive = createSensitiveValueRegistry(["registered-secret"]);
     const streamed = runtime({
       generate: async (...args) => {
         const onChunk = args[6];
-        await onChunk?.("safe prefix registered-\u001b[31m");
-        await onChunk?.("secret unsafe suffix");
-        return "unreachable";
+        await onChunk?.("safe prefix registered-");
+        throw new RuntimeStageError(
+          "generation",
+          "ollama",
+          "response stream stopped because it contained a registered credential",
+        );
       },
     });
     const app = dependencies({
@@ -4668,9 +4681,13 @@ describe("one-shot application", () => {
     const remote = dependencies({
       args: ["--input", "hello", "--provider", "ollama", "--model", "qwen"],
       generationTimeoutMs: 5,
-      generationCleanupTimeoutMs: 5,
       runtime: runtime({
-        generate: () => new Promise<string>(() => undefined),
+        generate: (_provider, _model, _prompt, signal) =>
+          new Promise<string>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              setTimeout(() => reject(new Error("remote cleanup complete")), 5);
+            }, { once: true });
+          }),
       }),
     });
     const remoteExit = await Promise.race([
