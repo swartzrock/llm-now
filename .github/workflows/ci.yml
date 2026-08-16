@@ -27,7 +27,7 @@ jobs:
         with:
           version: "0.11.16"
       - run: bun install --frozen-lockfile
-      - run: bun scripts/release-validate.ts packages
+      - run: bun run release:validate
       - run: bun run check
       - run: uv run --project examples/macos-voice-router --locked python -m unittest discover -s examples/macos-voice-router/tests
 

@@ -194,7 +194,7 @@ describe("release workflow policy", () => {
     );
     expect(sourceJob).toContain('python-version: "3.11"');
     expect(sourceJob).toContain('version: "0.11.16"');
-    expect(sourceJob).toContain("run: bun scripts/release-validate.ts packages");
+    expect(sourceJob).toContain("run: bun run release:validate");
     expect(sourceJob).toContain("run: bun run check");
     expect(sourceJob).toContain(
       "run: uv run --project examples/macos-voice-router --locked python -m unittest discover -s examples/macos-voice-router/tests",
