@@ -1,5 +1,11 @@
 # @swartzrock/llm-now-core
 
+## 0.1.1
+
+### Patch Changes
+
+- e682b07: Distribute the private core package through versioned GitHub Releases.
+
 ## 0.1.0
 
 ### Minor Changes
