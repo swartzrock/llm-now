@@ -5,13 +5,13 @@ const repositoryPackage = await Bun.file(
 ).json() as { scripts?: Record<string, string> };
 const corePackage = await Bun.file(
   new URL("../packages/core/package.json", import.meta.url),
-).json() as Record<string, unknown>;
+).json() as Record<string, unknown> & { version: string };
 
 describe("public core package", () => {
   test("declares the minimal public ESM boundary", async () => {
     expect(corePackage).toMatchObject({
       name: "@swartzrock/llm-now-core",
-      version: "0.0.0",
+      version: corePackage.version,
       type: "module",
       sideEffects: false,
       license: "MIT",
@@ -70,7 +70,7 @@ describe("public core package", () => {
     expect(output).toBeDefined();
     expect(JSON.parse(output!)).toMatchObject({
       package: "@swartzrock/llm-now-core",
-      version: "0.0.0",
+      version: corePackage.version,
       node: "passed",
       bun: "passed",
       nodeNext: "passed",

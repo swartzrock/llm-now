@@ -3,11 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   classifyReleaseTransition,
+  classifyCoreReleaseTransition,
   compareStableVersions,
   parseStableVersion,
   planRelease,
+  planCoreRelease,
   writeGithubOutput,
   type ReleaseTransitionInput,
+  type CoreReleaseTransitionInput,
 } from "../scripts/release-plan.ts";
 
 const releaseSha = "b".repeat(40);
@@ -33,6 +36,25 @@ function transition(overrides: Partial<ReleaseTransitionInput> = {}): ReleaseTra
       { status: "D", path: ".changeset/safe-release.md" },
     ],
     changelog: "# llm-now\n\n## 0.1.1\n\n- Add the release train.\n",
+    ...overrides,
+  };
+}
+
+function coreTransition(
+  overrides: Partial<CoreReleaseTransitionInput> = {},
+): CoreReleaseTransitionInput {
+  return {
+    beforePackage: { name: "@swartzrock/llm-now-core", version: "0.0.0" },
+    afterPackage: { name: "@swartzrock/llm-now-core", version: "0.1.0", private: false },
+    beforeCliPackage: { name: "llm-now", version: "2.7.0", private: true },
+    afterCliPackage: { name: "llm-now", version: "2.7.0", private: true },
+    beforeSha: "a".repeat(40), afterSha: releaseSha, firstParentSha: "a".repeat(40),
+    changedFiles: [
+      { status: "M", path: "packages/core/package.json" },
+      { status: "M", path: "packages/core/CHANGELOG.md" },
+      { status: "D", path: ".changeset/initial-core.md" },
+    ],
+    changelog: "# @swartzrock/llm-now-core\n\n## 0.1.0\n\n- Publish the core.\n",
     ...overrides,
   };
 }
@@ -223,5 +245,86 @@ describe("release transition classification", () => {
     expect(await Bun.file(outputPath).text()).toBe(
       `sentinel=kept\nshould-release=true\nrelease-sha=${releaseSha}\n`,
     );
+  });
+});
+
+describe("core release transition classification", () => {
+  test("accepts only a public, first-parent, Changesets-generated core transition", () => {
+    expect(classifyCoreReleaseTransition(coreTransition())).toEqual({
+      shouldRelease: true,
+      releaseSha,
+      packageName: "@swartzrock/llm-now-core",
+      version: "0.1.0",
+    });
+    expect(() => classifyCoreReleaseTransition(coreTransition({
+      firstParentSha: "c".repeat(40),
+    }))).toThrow("first parent");
+    expect(() => classifyCoreReleaseTransition(coreTransition({
+      afterPackage: { name: "@swartzrock/llm-now-core", version: "0.1.0", private: true },
+    }))).toThrow("must be public");
+    expect(() => classifyCoreReleaseTransition(coreTransition({
+      changedFiles: coreTransition().changedFiles.filter((file) => !file.path.endsWith("CHANGELOG.md")),
+    }))).toThrow("packages/core/CHANGELOG.md");
+    expect(() => classifyCoreReleaseTransition(coreTransition({
+      changedFiles: coreTransition().changedFiles.filter((file) => file.status !== "D"),
+    }))).toThrow("consumed Changeset");
+  });
+
+  test("allows a shared transition when both lanes are explicitly versioned", () => {
+    expect(classifyCoreReleaseTransition(coreTransition({
+      afterCliPackage: { name: "llm-now", version: "2.7.1", private: true },
+    }))).toMatchObject({ shouldRelease: true, version: "0.1.0" });
+  });
+
+  test("returns no-op for orchestration-only and CLI-only transitions", () => {
+    expect(classifyCoreReleaseTransition(coreTransition({
+      afterPackage: { name: "@swartzrock/llm-now-core", version: "0.0.0", private: false },
+      changedFiles: [{ status: "M", path: "README.md" }], changelog: "",
+    }))).toEqual({
+      shouldRelease: false,
+      releaseSha,
+      packageName: "@swartzrock/llm-now-core",
+      version: "0.0.0",
+    });
+  });
+
+  test("writes package identity outputs for the artifact job", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-core-release-output-"));
+    temporaryDirectories.push(directory);
+    const outputPath = join(directory, "github-output");
+    await writeGithubOutput(classifyCoreReleaseTransition(coreTransition()), outputPath);
+    expect(await Bun.file(outputPath).text()).toBe([
+      "should-release=true",
+      `release-sha=${releaseSha}`,
+      "package-name=@swartzrock/llm-now-core",
+      "version=0.1.0",
+      "",
+    ].join("\n"));
+  });
+
+  test("plans a real core-only generated release and leaves native release planning idle", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-core-release-plan-"));
+    temporaryDirectories.push(directory);
+    git(directory, "init", "--initial-branch=main");
+    git(directory, "config", "user.email", "release@example.invalid");
+    git(directory, "config", "user.name", "Release Test");
+    await Bun.write(join(directory, "packages/cli/package.json"), '{"name":"llm-now","version":"2.7.0","private":true}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"0.0.0"}\n');
+    await Bun.write(join(directory, ".changeset/initial-core.md"), '---\n"@swartzrock/llm-now-core": minor\n---\n\nPublish core.\n');
+    git(directory, "add", ".");
+    git(directory, "commit", "-m", "feature intent");
+    const beforeSha = git(directory, "rev-parse", "HEAD");
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"0.1.0"}\n');
+    await Bun.write(join(directory, "packages/core/CHANGELOG.md"), '# @swartzrock/llm-now-core\n\n## 0.1.0\n\n- Publish core.\n');
+    await rm(join(directory, ".changeset/initial-core.md"));
+    git(directory, "add", "-A");
+    git(directory, "commit", "-m", "chore: release");
+    const afterSha = git(directory, "rev-parse", "HEAD");
+    expect(planCoreRelease(beforeSha, afterSha, directory)).toMatchObject({
+      shouldRelease: true, packageName: "@swartzrock/llm-now-core", version: "0.1.0",
+    });
+    expect(planRelease(beforeSha, afterSha, directory)).toEqual({
+      shouldRelease: false, releaseSha: afterSha,
+    });
   });
 });

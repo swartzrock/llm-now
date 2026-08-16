@@ -1,0 +1,208 @@
+name: Publish core
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-core-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      should-release: ${{ steps.plan.outputs.should-release }}
+      release-sha: ${{ steps.plan.outputs.release-sha }}
+      package-name: ${{ steps.plan.outputs.package-name }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - id: plan
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          before_sha="$BEFORE_SHA"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            before_sha="$(git rev-parse "$RELEASE_SHA^1")"
+          fi
+          bun scripts/release-plan.ts core "$before_sha" "$RELEASE_SHA"
+
+  artifact:
+    needs: classify
+    if: needs.classify.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+          ref: ${{ needs.classify.outputs.release-sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Revalidate the exact release transition
+        env:
+          RELEASE_SHA: ${{ needs.classify.outputs.release-sha }}
+        run: |
+          set -euo pipefail
+          parent_sha="$(git rev-parse "$RELEASE_SHA^1")"
+          bun scripts/release-plan.ts core "$parent_sha" "$RELEASE_SHA" /tmp/core-release-plan
+      - run: bun run core:build
+      - name: Build and verify the one publish candidate
+        run: bun scripts/verify-core-package.ts dist/core-package
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: llm-now-core-${{ needs.classify.outputs.release-sha }}
+          path: |
+            dist/core-package/*.tgz
+            dist/core-package/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [classify, artifact]
+    if: needs.classify.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    environment: npm-core-publish
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: llm-now-core-${{ needs.classify.outputs.release-sha }}
+          path: dist/core-package
+      - name: Re-verify the recorded artifact digest
+        working-directory: dist/core-package
+        run: sha256sum -c SHA256SUMS
+      - name: Inspect preserved artifact and registry state
+        id: registry
+        env:
+          EXPECTED_PACKAGE: ${{ needs.classify.outputs.package-name }}
+          EXPECTED_VERSION: ${{ needs.classify.outputs.version }}
+        run: |
+          set -euo pipefail
+          mapfile -t tarballs < <(find dist/core-package -maxdepth 1 -type f -name '*.tgz' -print)
+          test "${#tarballs[@]}" -eq 1
+          tarball="${tarballs[0]}"
+          manifest="$(tar -xOf "$tarball" package/package.json)"
+          package="$(jq -r .name <<<"$manifest")"
+          version="$(jq -r .version <<<"$manifest")"
+          test "$package" = "$EXPECTED_PACKAGE"
+          test "$version" = "$EXPECTED_VERSION"
+          integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          error_file="$(mktemp)"
+          if registry="$(npm view "$package@$version" --json 2>"$error_file")"; then
+            registry_name="$(jq -r .name <<<"$registry")"
+            registry_version="$(jq -r .version <<<"$registry")"
+            registry_integrity="$(jq -r .dist.integrity <<<"$registry")"
+            registry_provenance="$(jq -r '.dist.attestations.provenance.predicateType // empty' <<<"$registry")"
+            next="$(npm view "$package" dist-tags.next --json | jq -r '. // empty')"
+            if [ "$registry_name" != "$package" ] || [ "$registry_version" != "$version" ] || [ "$registry_integrity" != "$integrity" ] || [ "$next" != "$version" ]; then
+              echo "existing registry version does not match preserved artifact" >&2
+              exit 1
+            fi
+            test -n "$registry_provenance" || { echo "registry provenance is absent" >&2; exit 1; }
+            publish=false
+          elif grep -q 'E404' "$error_file"; then
+            publish=true
+          else
+            cat "$error_file" >&2
+            exit 1
+          fi
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+      - name: Publish preserved artifact under next
+        if: steps.registry.outputs.publish == 'true'
+        env:
+          TARBALL: ${{ steps.registry.outputs.tarball }}
+          NPM_BOOTSTRAP_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "$NPM_BOOTSTRAP_TOKEN" ]; then
+            NODE_AUTH_TOKEN="$NPM_BOOTSTRAP_TOKEN" npm publish "$TARBALL" --access public --tag next --provenance
+          else
+            npm publish "$TARBALL" --access public --tag next --provenance
+          fi
+      - name: Verify cold-cache registry bytes and provenance
+        id: registry_smoke
+        continue-on-error: true
+        env:
+          PACKAGE: ${{ steps.registry.outputs.package }}
+          VERSION: ${{ steps.registry.outputs.version }}
+          EXPECTED_INTEGRITY: ${{ steps.registry.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          cold="$(mktemp -d)"
+          fetched=""
+          for attempt in 1 2 3 4 5; do
+            if npm pack "$PACKAGE@$VERSION" --ignore-scripts --pack-destination "$cold" --cache "$cold/cache" >/dev/null; then
+              fetched="$(find "$cold" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+              break
+            fi
+            sleep 5
+          done
+          test -n "$fetched"
+          integrity="sha512-$(openssl dgst -sha512 -binary "$fetched" | openssl base64 -A)"
+          test "$integrity" = "$EXPECTED_INTEGRITY"
+          registry="$(npm view "$PACKAGE@$VERSION" --json --cache "$cold/cache")"
+          provenance="$(jq -r '.dist.attestations.provenance.predicateType // empty' <<<"$registry")"
+          test -n "$provenance" || { echo "registry provenance is absent" >&2; exit 1; }
+          next="$(npm view "$PACKAGE" dist-tags.next --json --cache "$cold/cache" | jq -r '. // empty')"
+          test "$next" = "$VERSION"
+      - name: Contain a failed new candidate
+        if: steps.registry_smoke.outcome == 'failure' && steps.registry.outputs.publish == 'true'
+        env:
+          PACKAGE: ${{ steps.registry.outputs.package }}
+          VERSION: ${{ steps.registry.outputs.version }}
+          NPM_DIST_TAG_TOKEN: ${{ secrets.NPM_DIST_TAG_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$NPM_DIST_TAG_TOKEN" || { echo "candidate containment authority is absent" >&2; exit 1; }
+          NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag rm "$PACKAGE" next
+          NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm deprecate "$PACKAGE@$VERSION" "Registry verification failed; fix-forward only to a later version."
+          echo "Candidate contained; fix-forward only. Do not reuse the immutable version." >&2
+      - name: Stop after registry verification failure
+        if: always() && steps.registry_smoke.outcome == 'failure'
+        run: |
+          echo "cold-cache registry verification failed; latest promotion is blocked" >&2
+          exit 1
+      - name: Promote the verified version to latest
+        if: steps.registry_smoke.outcome == 'success'
+        env:
+          PACKAGE: ${{ steps.registry.outputs.package }}
+          VERSION: ${{ steps.registry.outputs.version }}
+          NPM_DIST_TAG_TOKEN: ${{ secrets.NPM_DIST_TAG_TOKEN }}
+        run: |
+          set -euo pipefail
+          current="$(npm view "$PACKAGE" dist-tags.latest --json | jq -r '. // empty')"
+          if [ "$current" = "$VERSION" ]; then
+            exit 0
+          fi
+          test -n "$NPM_DIST_TAG_TOKEN" || { echo "latest promotion authority is absent" >&2; exit 1; }
+          NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag add "$PACKAGE@$VERSION" latest

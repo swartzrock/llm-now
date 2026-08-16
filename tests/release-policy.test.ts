@@ -9,6 +9,9 @@ const ciWorkflow = await Bun.file(new URL("../.github/workflows/ci.yml", import.
 const changesetsWorkflow = await Bun.file(
   new URL("../.github/workflows/changesets.yml", import.meta.url),
 ).text();
+const corePublishWorkflow = await Bun.file(
+  new URL("../.github/workflows/publish-core.yml", import.meta.url),
+).text();
 const rootPackage = await Bun.file(new URL("../package.json", import.meta.url)).json();
 const releaseCoordinatorExists = await Bun.file(
   new URL("../.github/workflows/release-coordinator.yml", import.meta.url),
@@ -183,17 +186,75 @@ describe("release workflow policy", () => {
       "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6",
       "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
       "actions/checkout@v7.0.0",
+      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "actions/download-artifact@v8.0.1",
       "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405",
       "actions/upload-artifact@v7.0.1",
+      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     ]);
-    for (const workflow of [ciWorkflow, releaseWorkflow, changesetsWorkflow]) {
+    for (const workflow of [ciWorkflow, releaseWorkflow, changesetsWorkflow, corePublishWorkflow]) {
       const actions = [...workflow.matchAll(/^\s+- uses:\s+([^\s#]+)/gm)].map((match) => match[1]!);
       expect(actions.length).toBeGreaterThan(0);
       expect(actions.every((action) => action.startsWith("actions/")
         ? githubActions.has(action)
         : /@[a-f0-9]{40}$/.test(action))).toBe(true);
     }
+  });
+
+  test("separates unprivileged core artifact construction from protected publication", () => {
+    const artifactJob = corePublishWorkflow.slice(
+      corePublishWorkflow.indexOf("\n  artifact:"),
+      corePublishWorkflow.indexOf("\n  publish:"),
+    );
+    const publishJob = corePublishWorkflow.slice(corePublishWorkflow.indexOf("\n  publish:"));
+
+    expect(artifactJob).toContain("permissions:\n      contents: read");
+    expect(artifactJob).toContain("bun scripts/release-plan.ts core");
+    expect(artifactJob).toContain("bun scripts/verify-core-package.ts dist/core-package");
+    expect(artifactJob).toContain("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
+    expect(artifactJob).not.toContain("id-token: write");
+    expect(artifactJob).not.toContain("NPM_");
+    expect(artifactJob).not.toContain("npm publish");
+
+    const checkoutSteps = corePublishWorkflow.split(/(?=^\s+- uses: actions\/checkout@)/gm)
+      .filter((step) => step.includes("actions/checkout@"));
+    expect(checkoutSteps).toHaveLength(2);
+    expect(checkoutSteps.every((step) => step.includes("persist-credentials: false"))).toBe(true);
+    expect(corePublishWorkflow).toContain('test "$GITHUB_REF" = "refs/heads/main"');
+    expect(corePublishWorkflow).toContain('test "$(git rev-parse HEAD)" = "$RELEASE_SHA"');
+    expect(corePublishWorkflow).toContain('git merge-base --is-ancestor "$RELEASE_SHA" origin/main');
+
+    expect(publishJob).toContain("environment: npm-core-publish");
+    expect(publishJob).toContain("id-token: write");
+    expect(publishJob).toContain("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c");
+    expect(publishJob).toContain("sha256sum -c SHA256SUMS");
+    expect(publishJob.indexOf("sha256sum -c SHA256SUMS")).toBeLessThan(
+      publishJob.indexOf("NPM_BOOTSTRAP_TOKEN"),
+    );
+    expect(publishJob).not.toContain("actions/checkout@");
+    expect(publishJob).not.toMatch(/\b(?:bun|npm) install\b/);
+    expect(publishJob).not.toContain("core:build");
+    expect(publishJob).toContain("npm publish \"$TARBALL\" --access public --tag next --provenance");
+    expect(publishJob).toContain("npm pack \"$PACKAGE@$VERSION\"");
+    expect(publishJob).toContain("npm dist-tag add \"$PACKAGE@$VERSION\" latest");
+    expect(publishJob).toContain("existing registry version does not match preserved artifact");
+    expect(publishJob).toContain("registry provenance is absent");
+    expect(publishJob).toContain("continue-on-error: true");
+    expect(publishJob).toContain("steps.registry_smoke.outcome == 'failure'");
+    expect(publishJob).toContain("npm dist-tag rm \"$PACKAGE\" next");
+    expect(publishJob).toContain("npm deprecate \"$PACKAGE@$VERSION\"");
+    expect(publishJob).toContain("fix-forward only");
+    expect(publishJob).toContain("if: steps.registry_smoke.outcome == 'success'");
+  });
+
+  test("keeps core publication separate from Changesets and native releases", () => {
+    expect(changesetsWorkflow).not.toContain("publish:");
+    expect(changesetsWorkflow).not.toContain("changeset publish");
+    expect(changesetsWorkflow).not.toContain("NPM_");
+    expect(corePublishWorkflow).not.toContain("gh release");
+    expect(corePublishWorkflow).not.toContain("build:native");
+    expect(corePublishWorkflow).not.toContain("packages/cli/CHANGELOG.md");
+    expect(releaseWorkflow).not.toContain("publish-core");
   });
 
   test("runs the locked macOS voice router suite in source CI only", () => {

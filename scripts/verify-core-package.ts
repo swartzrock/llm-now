@@ -2,6 +2,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rename,
   rm,
@@ -143,6 +144,15 @@ async function runtimeSmoke(
 }
 
 async function main(): Promise<void> {
+  const [outputDirectory] = process.argv.slice(2);
+  if (process.argv.length > 3) {
+    throw new Error("usage: bun scripts/verify-core-package.ts [artifact-directory]");
+  }
+  const sourceManifest = await Bun.file(join(coreRoot, "package.json")).json() as {
+    name?: string;
+    version?: string;
+    publishConfig?: { access?: string };
+  };
   let temporary: string;
   try {
     temporary = await mkdtemp(join(tmpdir(), "llm-now-core-package-"));
@@ -197,12 +207,13 @@ async function main(): Promise<void> {
       exports?: Record<string, unknown>;
       scripts?: Record<string, string>;
       dependencies?: Record<string, string>;
+      publishConfig?: { access?: string };
       bin?: unknown;
       browser?: unknown;
     };
     if (
       manifest.name !== "@swartzrock/llm-now-core"
-      || manifest.version !== "0.0.0"
+      || manifest.version !== sourceManifest.version
       || manifest.private !== undefined
       || manifest.type !== "module"
       || manifest.sideEffects !== false
@@ -211,6 +222,7 @@ async function main(): Promise<void> {
       || manifest.engines?.bun !== ">=1.3.14"
       || manifest.bin !== undefined
       || manifest.browser !== undefined
+      || manifest.publishConfig?.access !== "public"
     ) throw new Error("packed manifest does not match the public runtime contract");
     if (JSON.stringify(Object.keys(manifest.exports ?? {})) !== JSON.stringify(["."])) {
       throw new Error("packed package must expose only its root");
@@ -295,6 +307,16 @@ async function main(): Promise<void> {
       join(typescriptConsumer, "tsconfig.json"),
     ], typescriptConsumer, process.env);
 
+    if (outputDirectory !== undefined) {
+      await mkdir(outputDirectory, { recursive: true });
+      if ((await readdir(outputDirectory)).length !== 0) {
+        throw new Error("artifact directory must be empty");
+      }
+      const artifactName = `swartzrock-llm-now-core-${manifest.version}.tgz`;
+      await cp(tarball, join(outputDirectory, artifactName));
+      await writeFile(join(outputDirectory, "SHA256SUMS"), `${digest}  ${artifactName}\n`);
+    }
+
     console.log(JSON.stringify({
       package: manifest.name,
       version: manifest.version,
@@ -303,6 +325,7 @@ async function main(): Promise<void> {
       node: "passed",
       bun: "passed",
       nodeNext: "passed",
+      ...(outputDirectory === undefined ? {} : { artifactDirectory: outputDirectory }),
     }));
   } finally {
     await rm(temporary, { recursive: true, force: true });
