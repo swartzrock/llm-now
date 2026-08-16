@@ -3,25 +3,28 @@ import { readdir } from "node:fs/promises";
 import { validateVoiceDependencies } from "../scripts/release-validate.ts";
 import { NATIVE_VAULT_COMPATIBILITY } from "../packages/cli/src/credentials.ts";
 
-const releaseWorkflow = await Bun.file(
-  new URL("../.github/workflows/release.yml", import.meta.url),
-).text();
-const ciWorkflow = await Bun.file(new URL("../.github/workflows/ci.yml", import.meta.url)).text();
-const changesetsWorkflow = await Bun.file(
-  new URL("../.github/workflows/changesets.yml", import.meta.url),
-).text();
-const coreReleaseWorkflow = await Bun.file(
-  new URL("../.github/workflows/release-core.yml", import.meta.url),
-).text();
+const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+const workflowNames = (await readdir(workflowDirectory)).filter(
+  (name) => name.endsWith(".yml") || name.endsWith(".yaml"),
+);
+const workflowSources = new Map(
+  await Promise.all(
+    workflowNames.map(async (name) => [name, await Bun.file(new URL(name, workflowDirectory)).text()] as const),
+  ),
+);
+const workflowSource = (name: string): string => {
+  const source = workflowSources.get(name);
+  if (source === undefined) throw new Error(`missing workflow: ${name}`);
+  return source;
+};
+const releaseWorkflow = workflowSource("release.yml");
+const ciWorkflow = workflowSource("ci.yml");
+const changesetsWorkflow = workflowSource("changesets.yml");
+const coreReleaseWorkflow = workflowSource("release-core.yml");
 const legacyCorePublishWorkflowExists = await Bun.file(
   new URL("../.github/workflows/publish-core.yml", import.meta.url),
 ).exists();
-const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
-const activeWorkflowSource = (await Promise.all(
-  (await readdir(workflowDirectory))
-    .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
-    .map((name) => Bun.file(new URL(name, workflowDirectory)).text()),
-)).join("\n");
+const activeWorkflowSource = [...workflowSources.values()].join("\n");
 const rootPackage = await Bun.file(new URL("../package.json", import.meta.url)).json();
 const releaseCoordinatorExists = await Bun.file(
   new URL("../.github/workflows/release-coordinator.yml", import.meta.url),
@@ -289,10 +292,10 @@ describe("release workflow policy", () => {
     );
     expect(publishJob).toContain("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c");
     expect(publishJob).toContain("sha256sum --check --strict --status SHA256SUMS");
-    expect(publishJob).toContain('test "$package" = "@swartzrock/llm-now-core"');
-    expect(publishJob).toContain('test "$version" = "$VERSION"');
-    expect(publishJob).toContain('test "$private" = "true"');
-    expect(publishJob).toContain('test "$publish_config" = "false"');
+    expect(publishJob).toContain('.name == "@swartzrock/llm-now-core"');
+    expect(publishJob).toContain(".version == $version");
+    expect(publishJob).toContain(".private == true");
+    expect(publishJob).toContain('(has("publishConfig") | not)');
     expect(publishJob).toContain(
       "uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0",
     );

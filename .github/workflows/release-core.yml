@@ -103,18 +103,18 @@ jobs:
               exit 1
             }
           fi
-          PACKAGE_NAME="$(bun -p 'require("./packages/core/package.json").name')"
-          VERSION="$(bun -p 'require("./packages/core/package.json").version')"
+          manifest_metadata="$(bun -e '
+            const manifest = await Bun.file("packages/core/package.json").json();
+            if (manifest.private !== true) throw new Error("core release package must be private");
+            if (Object.hasOwn(manifest, "publishConfig")) throw new Error("core release package must not contain publishConfig");
+            console.log(`${manifest.name}\t${manifest.version}`);
+          ')"
+          IFS=$'\t' read -r PACKAGE_NAME VERSION <<< "$manifest_metadata"
           test "$PACKAGE_NAME" = "@swartzrock/llm-now-core"
           [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
             echo "core package version must be stable X.Y.Z" >&2
             exit 1
           }
-          bun -e '
-            const manifest = await Bun.file("packages/core/package.json").json();
-            if (manifest.private !== true) throw new Error("core release package must be private");
-            if (Object.hasOwn(manifest, "publishConfig")) throw new Error("core release package must not contain publishConfig");
-          '
           TAG="core-v$VERSION"
           ASSET="swartzrock-llm-now-core-$VERSION.tgz"
           echo "release-sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
@@ -161,7 +161,9 @@ jobs:
           fetch_release() {
             gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
               "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-              jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]' > release-matches.json
+              jq -s '[.[][]]' > releases.json
+            jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
+              releases.json > release-matches.json
             test "$(jq 'length' release-matches.json)" -le 1 || {
               echo "multiple Releases exist for $TAG" >&2
               exit 1
@@ -192,9 +194,8 @@ jobs:
           }
           reject_older_missing_release() {
             local published_tags published_tag candidate newest
-            published_tags="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
-              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+            published_tags="$(jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+              releases.json)"
             while IFS= read -r published_tag; do
               [[ "$published_tag" =~ ^core-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || continue
               candidate="${published_tag#core-v}"
@@ -419,14 +420,12 @@ jobs:
           test "$(cat dist/SHA256SUMS)" = "$expected_line"
           (cd dist && sha256sum --check --strict --status SHA256SUMS)
           manifest="$(tar -xOf "dist/$ASSET" package/package.json)"
-          package="$(jq -r '.name' <<< "$manifest")"
-          version="$(jq -r '.version' <<< "$manifest")"
-          private="$(jq -r '.private' <<< "$manifest")"
-          publish_config="$(jq 'has("publishConfig")' <<< "$manifest")"
-          test "$package" = "@swartzrock/llm-now-core"
-          test "$version" = "$VERSION"
-          test "$private" = "true"
-          test "$publish_config" = "false"
+          jq -e --arg version "$VERSION" '
+            .name == "@swartzrock/llm-now-core" and
+            .version == $version and
+            .private == true and
+            (has("publishConfig") | not)
+          ' <<< "$manifest" >/dev/null
           awk -v heading="## $VERSION" '
             $0 == heading { matches += 1; printing = 1 }
             printing && /^## / && $0 != heading { exit }
@@ -459,7 +458,9 @@ jobs:
           fetch_release() {
             gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
               "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-              jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]' > release-matches.json
+              jq -s '[.[][]]' > releases.json
+            jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
+              releases.json > release-matches.json
             test "$(jq 'length' release-matches.json)" -le 1 || {
               echo "multiple Releases exist for $TAG" >&2
               exit 1
@@ -490,9 +491,8 @@ jobs:
           }
           reject_older_missing_release() {
             local published_tags published_tag candidate newest
-            published_tags="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
-              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+            published_tags="$(jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+              releases.json)"
             while IFS= read -r published_tag; do
               [[ "$published_tag" =~ ^core-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || continue
               candidate="${published_tag#core-v}"
@@ -518,8 +518,8 @@ jobs:
             printf '%s\n' "$latest"
           }
           verify_native_latest() {
-            local after newest
-            after="$(current_native_latest)"
+            local after="${1:-}" newest
+            if [[ -z "$after" ]]; then after="$(current_native_latest)"; fi
             newest="$(printf '%s\n%s\n' "${NATIVE_LATEST_BASELINE#v}" "${after#v}" | sort -V | tail -n 1)"
             test "$newest" = "${after#v}" || {
               echo "latest Release moved backward during core publication" >&2
@@ -602,7 +602,8 @@ jobs:
             verify_native_latest
           }
 
-          test "$(current_native_latest)" = "$NATIVE_LATEST_BASELINE" || verify_native_latest
+          native_latest="$(current_native_latest)"
+          test "$native_latest" = "$NATIVE_LATEST_BASELINE" || verify_native_latest "$native_latest"
           tag_exists="$(tag_state)"
           release_exists=false
           if fetch_release; then release_exists=true; fi
@@ -643,7 +644,9 @@ jobs:
           fetch_release() {
             gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
               "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-              jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]' > release-matches.json
+              jq -s '[.[][]]' > releases.json
+            jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
+              releases.json > release-matches.json
             test "$(jq 'length' release-matches.json)" -le 1 || {
               echo "multiple Releases exist for $TAG" >&2
               exit 1
@@ -674,9 +677,8 @@ jobs:
           }
           reject_older_missing_release() {
             local published_tags published_tag candidate newest
-            published_tags="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
-              "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')"
+            published_tags="$(jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+              releases.json)"
             while IFS= read -r published_tag; do
               [[ "$published_tag" =~ ^core-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || continue
               candidate="${published_tag#core-v}"
