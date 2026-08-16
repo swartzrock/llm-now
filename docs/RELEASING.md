@@ -115,10 +115,12 @@ authority. Repeat all checks immediately before approval.
    exact-version checks in MT-43 before accepting `latest` as commissioned.
 8. Configure npm trusted publisher for `swartzrock/llm-now`, workflow
    `publish-core.yml`, environment `npm-core-publish`, and protected `main`.
-   Prove an OIDC publication on a later test release, then revoke the bootstrap
-   token and remove `NPM_BOOTSTRAP_TOKEN`. Keep OIDC permission confined to the
-   protected publisher job. Confirm it uses Node 24, npm 11.5.1 or later, and
-   `https://registry.npmjs.org` through the pinned setup action.
+   Revoke the bootstrap token and remove `NPM_BOOTSTRAP_TOKEN` before the next
+   release; the workflow fails closed if that secret remains after the package
+   exists. Then prove an OIDC publication on a later test release. Keep OIDC
+   permission confined to the protected publisher job. Confirm it uses Node 24,
+   npm 11.5.1 or later, and `https://registry.npmjs.org` through the pinned setup
+   action.
 
 **No-go:** stop before publication if authentication is absent; the package
 name, scope owner, or 2FA policy is unverified; the release environment or
@@ -127,8 +129,9 @@ already exists with different integrity; the registry cannot prove the exact
 provenance identity above; or the run would enter the native lane. Do not
 broaden a credential to bypass a failed check.
 
-If a new `next` candidate fails registry verification, remove its `next` tag,
-deprecate that immutable version, and fix-forward to a new version. Never
+If a new `next` candidate fails registry verification, deprecate that immutable
+version, remove its `next` tag, and fix-forward to a new version. This order lets
+an interrupted containment rerun complete either mutation idempotently. Never
 unpublish, overwrite, or reuse the failed version. If publication status is
 uncertain, query the exact version and integrity before taking another action.
 An exact existing version with identical integrity and provenance is a no-op;

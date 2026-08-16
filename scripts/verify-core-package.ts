@@ -3,10 +3,8 @@ import {
   mkdir,
   mkdtemp,
   readdir,
-  readFile,
   rename,
   rm,
-  writeFile,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -107,8 +105,8 @@ async function installConsumer(
 ): Promise<void> {
   await cp(source, destination, { recursive: true });
   const manifestPath = join(destination, "package.json");
-  const manifest = await readFile(manifestPath, "utf8");
-  await writeFile(manifestPath, manifest.replace("file:__CORE_TARBALL__", `file:${tarball}`));
+  const manifest = await Bun.file(manifestPath).text();
+  await Bun.write(manifestPath, manifest.replace("file:__CORE_TARBALL__", `file:${tarball}`));
   run([
     bunBinary,
     "install",
@@ -329,7 +327,7 @@ async function main(): Promise<void> {
       }
       const artifactName = `swartzrock-llm-now-core-${manifest.version}.tgz`;
       await cp(tarball, join(outputDirectory, artifactName));
-      await writeFile(join(outputDirectory, "SHA256SUMS"), `${digest}  ${artifactName}\n`);
+      await Bun.write(join(outputDirectory, "SHA256SUMS"), `${digest}  ${artifactName}\n`);
     }
 
     console.log(JSON.stringify({

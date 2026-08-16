@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
 
 const repositoryPackage = await Bun.file(
   new URL("../package.json", import.meta.url),
@@ -46,7 +48,7 @@ describe("public core package", () => {
     }
   });
 
-  test("packs and verifies real external Node, Bun, and NodeNext consumers", () => {
+  test("packs and verifies real external Node, Bun, and NodeNext consumers", async () => {
     expect(repositoryPackage.scripts?.["core:pack:verify"]).toBe(
       "bun run core:build && bun scripts/verify-core-package.ts",
     );
@@ -59,22 +61,53 @@ describe("public core package", () => {
       stderr: "pipe",
     });
     expect(build.exitCode).toBe(0);
-    const result = Bun.spawnSync([process.execPath, "scripts/verify-core-package.ts"], {
-      cwd: repository,
-      env: { ...process.env, NO_COLOR: "1" },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    expect(result.exitCode).toBe(0);
-    const output = result.stdout.toString().trim().split("\n").at(-1);
-    expect(output).toBeDefined();
-    expect(JSON.parse(output!)).toMatchObject({
-      package: "@swartzrock/llm-now-core",
-      version: corePackage.version,
-      node: "passed",
-      bun: "passed",
-      nodeNext: "passed",
-    });
-    expect(JSON.parse(output!).sha256).toMatch(/^[a-f0-9]{64}$/);
-  }, 120_000);
+    const artifactDirectory = await mkdtemp(join(repository, ".tmp-core-artifacts-"));
+    const verify = (...args: string[]) => {
+      const result = Bun.spawnSync([
+        process.execPath,
+        "scripts/verify-core-package.ts",
+        ...args,
+      ], {
+        cwd: repository,
+        env: { ...process.env, NO_COLOR: "1" },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(result.exitCode).toBe(0);
+      const output = result.stdout.toString().trim().split("\n").at(-1);
+      expect(output).toBeDefined();
+      const verification = JSON.parse(output!);
+      expect(verification).toMatchObject({
+        package: "@swartzrock/llm-now-core",
+        version: corePackage.version,
+        node: "passed",
+        bun: "passed",
+        nodeNext: "passed",
+      });
+      expect(verification.sha256).toMatch(/^[a-f0-9]{64}$/);
+      return verification as { sha256: string };
+    };
+
+    try {
+      expect(await readdir(artifactDirectory)).toEqual([]);
+      const packedVerification = verify(artifactDirectory);
+      const artifactFiles = (await readdir(artifactDirectory)).sort();
+      const tarballs = artifactFiles.filter((file) => file.endsWith(".tgz"));
+      expect(tarballs).toHaveLength(1);
+      expect(artifactFiles).toEqual(["SHA256SUMS", tarballs[0]!].sort());
+
+      const tarball = join(artifactDirectory, tarballs[0]!);
+      const digest = new Bun.CryptoHasher("sha256")
+        .update(new Uint8Array(await Bun.file(tarball).arrayBuffer()))
+        .digest("hex");
+      expect(digest).toBe(packedVerification.sha256);
+      expect(await Bun.file(join(artifactDirectory, "SHA256SUMS")).text())
+        .toBe(`${digest}  ${tarballs[0]}\n`);
+
+      const preservedVerification = verify("--tarball", tarball);
+      expect(preservedVerification.sha256).toBe(digest);
+    } finally {
+      await rm(artifactDirectory, { recursive: true, force: true });
+    }
+  }, 240_000);
 });

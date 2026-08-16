@@ -60,6 +60,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.3.14
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+          package-manager-cache: false
       - run: bun install --frozen-lockfile
       - name: Revalidate the exact release transition
         env:
@@ -84,12 +88,14 @@ jobs:
     needs: [classify, artifact]
     if: needs.classify.outputs.should-release == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: npm-core-publish
     outputs:
       package: ${{ steps.registry.outputs.package }}
       version: ${{ steps.registry.outputs.version }}
       integrity: ${{ steps.registry.outputs.integrity }}
       new-candidate: ${{ steps.registry.outputs.publish }}
+      package-absent: ${{ steps.registry.outputs.package-absent }}
     permissions:
       contents: read
       actions: read
@@ -130,6 +136,7 @@ jobs:
           test "$package" = "$EXPECTED_PACKAGE"
           test "$version" = "$EXPECTED_VERSION"
           integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          package_absent=false
           error_file="$(mktemp)"
           if registry="$(npm view "$package@$version" --json 2>"$error_file")"; then
             registry_name="$(jq -r .name <<<"$registry")"
@@ -144,6 +151,15 @@ jobs:
             test -n "$registry_provenance" || { echo "registry provenance is absent" >&2; exit 1; }
             publish=false
           elif grep -q 'E404' "$error_file"; then
+            package_error_file="$(mktemp)"
+            if npm view "$package" versions --json >/dev/null 2>"$package_error_file"; then
+              package_absent=false
+            elif grep -q 'E404' "$package_error_file"; then
+              package_absent=true
+            else
+              cat "$package_error_file" >&2
+              exit 1
+            fi
             publish=true
           else
             cat "$error_file" >&2
@@ -154,17 +170,26 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "integrity=$integrity" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "package-absent=$package_absent" >> "$GITHUB_OUTPUT"
       - name: Publish preserved artifact under next
         if: steps.registry.outputs.publish == 'true'
         env:
           TARBALL: ${{ steps.registry.outputs.tarball }}
+          VERSION: ${{ steps.registry.outputs.version }}
+          PACKAGE_ABSENT: ${{ steps.registry.outputs.package-absent }}
           NPM_BOOTSTRAP_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -n "$NPM_BOOTSTRAP_TOKEN" ]; then
+          if [ "$PACKAGE_ABSENT" = "true" ]; then
+            test "$VERSION" = "0.1.0" || { echo "bootstrap publication is restricted to version 0.1.0" >&2; exit 1; }
+            test -n "$NPM_BOOTSTRAP_TOKEN" || { echo "bootstrap publication authority is absent" >&2; exit 1; }
             NODE_AUTH_TOKEN="$NPM_BOOTSTRAP_TOKEN" npm publish "$TARBALL" --access public --tag next --provenance
-          else
+          elif [ "$PACKAGE_ABSENT" = "false" ]; then
+            test -z "$NPM_BOOTSTRAP_TOKEN" || { echo "lingering bootstrap token must be removed before OIDC publication" >&2; exit 1; }
             npm publish "$TARBALL" --access public --tag next --provenance
+          else
+            echo "package-absence state is invalid" >&2
+            exit 1
           fi
       - name: Verify candidate under next
         env:
@@ -191,6 +216,7 @@ jobs:
     needs: [classify, artifact, publish]
     if: needs.classify.outputs.should-release == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -271,7 +297,7 @@ jobs:
             https://registry.npmjs.org/-/npm/v1/attestations/*) ;;
             *) echo "invalid npm attestation endpoint" >&2; exit 1 ;;
           esac
-          attestations="$(curl --fail --silent --show-error "$attestations_url")"
+          attestations="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-max-time 120 "$attestations_url")"
           predicate="https://slsa.dev/provenance/v1"
           test "$(jq --arg predicate "$predicate" '[.attestations[]? | select(.predicateType == $predicate)] | length' <<<"$attestations")" -eq 1
           payload_type="$(jq -er --arg predicate "$predicate" '.attestations[] | select(.predicateType == $predicate) | .bundle.dsseEnvelope.payloadType' <<<"$attestations")"
@@ -299,6 +325,7 @@ jobs:
     needs: [classify, artifact, publish, registry-smoke]
     if: always() && needs.classify.outputs.should-release == 'true' && needs.artifact.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'failure')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: npm-core-publish
     permissions:
       contents: read
@@ -338,30 +365,59 @@ jobs:
             test "$local_integrity" = "$EXPECTED_INTEGRITY"
           fi
           present=false
+          identity_verified=false
+          ready=false
           for attempt in 1 2 3 4 5; do
             error_file="$(mktemp)"
             if registry="$(npm view "$EXPECTED_PACKAGE@$EXPECTED_VERSION" --json 2>"$error_file")"; then
-              test "$(jq -r .name <<<"$registry")" = "$EXPECTED_PACKAGE"
-              test "$(jq -r .version <<<"$registry")" = "$EXPECTED_VERSION"
-              test "$(jq -r .dist.integrity <<<"$registry")" = "$local_integrity"
+              registry_name="$(jq -r .name <<<"$registry")"
+              registry_version="$(jq -r .version <<<"$registry")"
+              registry_integrity="$(jq -r .dist.integrity <<<"$registry")"
+              if [ "$registry_name" != "$EXPECTED_PACKAGE" ] || [ "$registry_version" != "$EXPECTED_VERSION" ] || [ "$registry_integrity" != "$local_integrity" ]; then
+                echo "registry candidate identity or integrity mismatch" >&2
+                exit 1
+              fi
               present=true
-              echo "present=true" >> "$GITHUB_OUTPUT"
-              test -n "$(jq -r '.dist.attestations.provenance.predicateType // empty' <<<"$registry")"
+              identity_verified=true
+              provenance="$(jq -r '.dist.attestations.provenance.predicateType // empty' <<<"$registry")"
+              if [ -z "$provenance" ]; then
+                if [ "$attempt" -lt 5 ]; then
+                  sleep 5
+                fi
+                continue
+              fi
+              ready=true
               break
             elif ! grep -q 'E404' "$error_file"; then
               cat "$error_file" >&2
               exit 1
             fi
-            sleep 5
+            if [ "$attempt" -lt 5 ]; then
+              sleep 5
+            fi
           done
-          if [ "$present" = "false" ]; then
-            echo "present=false" >> "$GITHUB_OUTPUT"
+          quarantined=false
+          next=""
+          latest=""
+          if [ "$identity_verified" = "true" ]; then
+            tags="$(npm view "$EXPECTED_PACKAGE" dist-tags --json)"
+            next="$(jq -r '.next // empty' <<<"$tags")"
+            latest="$(jq -r '.latest // empty' <<<"$tags")"
+            if [ "$next" = "$EXPECTED_VERSION" ] && [ "$latest" != "$EXPECTED_VERSION" ]; then
+              quarantined=true
+            fi
           fi
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+          echo "identity-verified=$identity_verified" >> "$GITHUB_OUTPUT"
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          echo "quarantined=$quarantined" >> "$GITHUB_OUTPUT"
           if [ "${{ needs.registry-smoke.result }}" = "success" ]; then
-            test "$present" = "true"
-            test "$(npm view "$EXPECTED_PACKAGE" dist-tags.next --json | jq -r '. // empty')" = "$EXPECTED_VERSION"
+            test "$ready" = "true"
+            test "$next" = "$EXPECTED_VERSION"
           fi
-      - name: Verify exact npm provenance identity
+      - id: provenance
+        name: Verify exact npm provenance identity
+        if: steps.registry.outputs.identity-verified == 'true'
         env:
           PACKAGE: ${{ needs.classify.outputs.package-name }}
           VERSION: ${{ needs.classify.outputs.version }}
@@ -386,7 +442,7 @@ jobs:
             https://registry.npmjs.org/-/npm/v1/attestations/*) ;;
             *) echo "invalid npm attestation endpoint" >&2; exit 1 ;;
           esac
-          attestations="$(curl --fail --silent --show-error "$attestations_url")"
+          attestations="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-max-time 120 "$attestations_url")"
           predicate="https://slsa.dev/provenance/v1"
           test "$(jq --arg predicate "$predicate" '[.attestations[]? | select(.predicateType == $predicate)] | length' <<<"$attestations")" -eq 1
           payload_type="$(jq -er --arg predicate "$predicate" '.attestations[] | select(.predicateType == $predicate) | .bundle.dsseEnvelope.payloadType' <<<"$attestations")"
@@ -409,8 +465,9 @@ jobs:
               .uri == "git+https://github.com/swartzrock/llm-now@refs/heads/main" and
               .digest.gitCommit == $commit)
           ' <<<"$statement" >/dev/null
-      - name: Contain a failed new candidate
-        if: always() && needs.registry-smoke.result != 'success' && needs.publish.outputs.new-candidate == 'true' && steps.registry.outputs.present == 'true'
+          echo "verified=true" >> "$GITHUB_OUTPUT"
+      - name: Contain a failed quarantined candidate
+        if: always() && needs.registry-smoke.result != 'success' && steps.registry.outputs.identity-verified == 'true' && steps.registry.outputs.quarantined == 'true' && (needs.publish.outputs.new-candidate == 'true' || steps.provenance.outputs.verified == 'true')
         env:
           PACKAGE: ${{ needs.classify.outputs.package-name }}
           VERSION: ${{ needs.classify.outputs.version }}
@@ -418,11 +475,35 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$NPM_DIST_TAG_TOKEN" || { echo "candidate containment authority is absent" >&2; exit 1; }
-          next="$(npm view "$PACKAGE" dist-tags.next --json | jq -r '. // empty')"
+          containment_message="Registry verification failed; fix-forward only to a later version."
+          tags="$(npm view "$PACKAGE" dist-tags --json)"
+          next="$(jq -r '.next // empty' <<<"$tags")"
+          latest="$(jq -r '.latest // empty' <<<"$tags")"
+          if [ "$latest" = "$VERSION" ]; then
+            echo "candidate is already latest; refusing containment" >&2
+            exit 1
+          fi
+          if [ "$next" != "$VERSION" ]; then
+            echo "candidate is no longer quarantined under next; refusing containment" >&2
+            exit 1
+          fi
+          deprecated="$(npm view "$PACKAGE@$VERSION" deprecated --json | jq -r '. // empty')"
+          if [ -z "$deprecated" ]; then
+            NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm deprecate "$PACKAGE@$VERSION" "$containment_message"
+          elif [ "$deprecated" != "$containment_message" ]; then
+            echo "candidate has an unexpected deprecation message; refusing to overwrite it" >&2
+            exit 1
+          fi
+          tags="$(npm view "$PACKAGE" dist-tags --json)"
+          next="$(jq -r '.next // empty' <<<"$tags")"
+          latest="$(jq -r '.latest // empty' <<<"$tags")"
+          if [ "$latest" = "$VERSION" ]; then
+            echo "candidate became latest; refusing to remove next" >&2
+            exit 1
+          fi
           if [ "$next" = "$VERSION" ]; then
             NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag rm "$PACKAGE" next
           fi
-          NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm deprecate "$PACKAGE@$VERSION" "Registry verification failed; fix-forward only to a later version."
           echo "Candidate contained; fix-forward only. Do not reuse the immutable version." >&2
       - name: Stop after registry verification failure
         if: always() && needs.registry-smoke.result != 'success'
@@ -430,7 +511,7 @@ jobs:
           echo "cold-cache registry verification failed; latest promotion is blocked" >&2
           exit 1
       - name: Promote the verified version to latest
-        if: needs.registry-smoke.result == 'success'
+        if: needs.registry-smoke.result == 'success' && steps.provenance.outputs.verified == 'true'
         env:
           PACKAGE: ${{ needs.classify.outputs.package-name }}
           VERSION: ${{ needs.classify.outputs.version }}

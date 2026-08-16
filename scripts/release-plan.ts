@@ -29,6 +29,7 @@ export interface ReleasePlan {
 export interface CoreReleaseTransitionInput extends ReleaseTransitionInput {
   beforeCliPackage: PackageIdentity;
   afterCliPackage: PackageIdentity;
+  intendedCoreVersion: string | null;
 }
 
 export interface CoreReleasePlan extends ReleasePlan {
@@ -38,6 +39,7 @@ export interface CoreReleasePlan extends ReleasePlan {
 
 const stableVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const shaPattern = /^[a-f0-9]{40}$/;
+const corePackageName = "@swartzrock/llm-now-core";
 const cliPackagePath = "packages/cli/package.json";
 const legacyCliPackagePath = "package.json";
 const cliChangelogPath = "packages/cli/CHANGELOG.md";
@@ -120,10 +122,16 @@ export function classifyReleaseTransition(input: ReleaseTransitionInput): Releas
 }
 
 function hasConsumedChangeset(changedFiles: readonly ChangedFile[]): boolean {
-  return changedFiles.some((file) =>
+  return consumedChangesetPaths(changedFiles).length > 0;
+}
+
+function consumedChangesetPaths(changedFiles: readonly ChangedFile[]): string[] {
+  return changedFiles.flatMap((file) =>
     file.status === "D"
     && /^\.changeset\/.+\.md$/.test(file.path)
     && file.path !== ".changeset/README.md"
+      ? [file.path]
+      : []
   );
 }
 
@@ -140,8 +148,8 @@ export function classifyCoreReleaseTransition(
   if (input.beforePackage.name !== input.afterPackage.name) {
     throw new Error("package name must not change during a release transition");
   }
-  if (input.afterPackage.name !== "@swartzrock/llm-now-core") {
-    throw new Error("core release package name must be @swartzrock/llm-now-core");
+  if (input.afterPackage.name !== corePackageName) {
+    throw new Error(`core release package name must be ${corePackageName}`);
   }
   if (input.afterPackage.private === true) throw new Error("core release package must be public");
   if (input.beforeCliPackage.name !== input.afterCliPackage.name) {
@@ -167,8 +175,120 @@ export function classifyCoreReleaseTransition(
   if (!hasConsumedChangeset(input.changedFiles)) {
     throw new Error("release transition must delete a consumed Changeset");
   }
+  if (input.intendedCoreVersion === null) {
+    throw new Error(`consumed Changesets must explicitly select ${corePackageName}`);
+  }
+  parseStableVersion(input.intendedCoreVersion);
+  if (input.afterPackage.version !== input.intendedCoreVersion) {
+    throw new Error(
+      `Changeset intent requires core version ${input.intendedCoreVersion}, found ${input.afterPackage.version}`,
+    );
+  }
   extractChangelogSection(input.changelog, input.afterPackage.version);
   return { ...plan, shouldRelease: true };
+}
+
+type ReleaseType = "patch" | "minor" | "major";
+
+const releaseTypePriority: Record<ReleaseType, number> = {
+  patch: 0,
+  minor: 1,
+  major: 2,
+};
+
+function malformedChangeset(path: string, detail: string): never {
+  throw new Error(`${path} has malformed Changeset frontmatter: ${detail}`);
+}
+
+function parseChangesetPackageKey(rawKey: string, path: string): string {
+  if (rawKey.startsWith('"')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawKey);
+    } catch {
+      return malformedChangeset(path, "invalid quoted package key");
+    }
+    if (typeof parsed !== "string" || parsed.length === 0) {
+      return malformedChangeset(path, "package key must be a non-empty string");
+    }
+    return parsed;
+  }
+  if (rawKey.startsWith("'")) {
+    if (!/^'(?:[^']|'')*'$/.test(rawKey)) {
+      return malformedChangeset(path, "invalid quoted package key");
+    }
+    const parsed = rawKey.slice(1, -1).replaceAll("''", "'");
+    if (!parsed) return malformedChangeset(path, "package key must not be empty");
+    return parsed;
+  }
+  if (!rawKey || /[\s"'{}\[\],:#&*!|>?`]/.test(rawKey)) {
+    return malformedChangeset(path, "invalid package key");
+  }
+  return rawKey;
+}
+
+function parseChangesetFrontmatter(source: string, path: string): Map<string, ReleaseType> {
+  const normalized = source.replaceAll("\r\n", "\n");
+  if (normalized.includes("\r")) malformedChangeset(path, "unsupported line endings");
+  const lines = normalized.split("\n");
+  if (lines[0] !== "---") malformedChangeset(path, "missing opening delimiter");
+  const closingDelimiter = lines.indexOf("---", 1);
+  if (closingDelimiter === -1) malformedChangeset(path, "missing closing delimiter");
+
+  const releases = new Map<string, ReleaseType>();
+  for (const line of lines.slice(1, closingDelimiter)) {
+    if (line.trim() === "") continue;
+    const separator = line.indexOf(":");
+    if (separator === -1) malformedChangeset(path, `invalid entry ${JSON.stringify(line)}`);
+    const packageName = parseChangesetPackageKey(line.slice(0, separator).trim(), path);
+    const releaseType = line.slice(separator + 1).trim();
+    if (releaseType !== "patch" && releaseType !== "minor" && releaseType !== "major") {
+      malformedChangeset(path, `invalid release type for ${packageName}`);
+    }
+    if (releases.has(packageName)) {
+      malformedChangeset(path, `duplicate package key ${packageName}`);
+    }
+    releases.set(packageName, releaseType);
+  }
+  if (releases.size === 0) malformedChangeset(path, "frontmatter must select a package");
+  return releases;
+}
+
+function incrementStableVersion(version: string, releaseType: ReleaseType): string {
+  const [major, minor, patch] = parseStableVersion(version);
+  if (releaseType === "major") return `${major + 1n}.0.0`;
+  if (releaseType === "minor") return `${major}.${minor + 1n}.0`;
+  return `${major}.${minor}.${patch + 1n}`;
+}
+
+function intendedCoreVersionFromChangesets(
+  cwd: string,
+  beforeSha: string,
+  changedFiles: readonly ChangedFile[],
+  beforeVersion: string,
+): string | null {
+  let highestReleaseType: ReleaseType | null = null;
+  for (const path of consumedChangesetPaths(changedFiles)) {
+    let source: string;
+    try {
+      source = git(cwd, ["show", `${beforeSha}:${path}`]);
+    } catch (error) {
+      throw new Error(
+        `could not read consumed Changeset ${path} at ${beforeSha}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const releaseType = parseChangesetFrontmatter(source, path).get(corePackageName);
+    if (
+      releaseType !== undefined
+      && (highestReleaseType === null
+        || releaseTypePriority[releaseType] > releaseTypePriority[highestReleaseType])
+    ) {
+      highestReleaseType = releaseType;
+    }
+  }
+  return highestReleaseType === null
+    ? null
+    : incrementStableVersion(beforeVersion, highestReleaseType);
 }
 
 function git(cwd: string, args: string[]): string {
@@ -262,15 +382,24 @@ export function planCoreRelease(
   const beforeCliPackage = packageAtPath(cwd, beforeSha, cliPackagePath, true);
   const afterCliPackage = packageAtPath(cwd, afterSha, cliPackagePath);
   const versionChanged = beforePackage.version !== afterPackage.version;
+  const releaseChangedFiles = versionChanged ? changedFiles(cwd, beforeSha, afterSha) : [];
   return classifyCoreReleaseTransition({
     beforePackage,
     afterPackage,
     beforeCliPackage,
     afterCliPackage,
+    intendedCoreVersion: versionChanged
+      ? intendedCoreVersionFromChangesets(
+        cwd,
+        beforeSha,
+        releaseChangedFiles,
+        beforePackage.version,
+      )
+      : null,
     beforeSha,
     afterSha,
     firstParentSha,
-    changedFiles: versionChanged ? changedFiles(cwd, beforeSha, afterSha) : [],
+    changedFiles: releaseChangedFiles,
     changelog: versionChanged ? git(cwd, ["show", `${afterSha}:${coreChangelogPath}`]) : "",
   });
 }

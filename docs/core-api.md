@@ -9,7 +9,7 @@ npm install @swartzrock/llm-now-core
 ```
 
 The package exports these runtime values: `createLlmNowCore`, `LlmNowError`,
-`compactRoutingKey`, `routeTranscript`, `routingSimilarity`, and
+`RoutingInputError`, `compactRoutingKey`, `routeTranscript`, `routingSimilarity`, and
 `workspaceCapabilities`.
 
 It exports these TypeScript types:
@@ -127,6 +127,8 @@ Implement a host timeout by aborting the signal. Treat the resulting core
 or internal failure.
 
 ```ts
+import { LlmNowError } from "@swartzrock/llm-now-core";
+
 const controller = new AbortController();
 const timeout = setTimeout(() => controller.abort(), 15_000);
 try {
@@ -176,6 +178,11 @@ policy, and speech settings. Talk Show does not read or synchronize llm-now's
 configuration. Routing never implies voice selection; each caller applies its
 own speech behavior after a match.
 
+Structured routing rejections describe well-formed requests that do not route.
+Malformed routing input instead throws the public, catchable
+`RoutingInputError`. Catch it separately from `LlmNowError`, which is reserved
+for client operations.
+
 ## Workspace support
 
 Use `workspaceCapabilities(provider)` before sending a `WorkspaceRequest`.
@@ -186,10 +193,10 @@ directory before credentials, CLI execution, or provider construction.
 
 ## Public Error Contract
 
-Catch only `LlmNowError`. Its enumerable data is `code`, `operation`, and an
-optional allowlisted `provider`. Its message is fixed. It has no public cause
-and does not retain the unknown provider failure. These are the only permitted
-codes for each operation, in precedence order:
+For client operations, catch only `LlmNowError`. Its enumerable data is `code`,
+`operation`, and an optional allowlisted `provider`. Its message is fixed. It
+has no public cause and does not retain the unknown provider failure. These are
+the only permitted codes for each operation, in precedence order:
 
 | Operation | Allowed codes |
 | --- | --- |

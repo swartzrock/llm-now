@@ -236,10 +236,38 @@ describe("release workflow policy", () => {
       corePublishWorkflow.indexOf("\n  promote:"),
     );
     const promoteJob = corePublishWorkflow.slice(corePublishWorkflow.indexOf("\n  promote:"));
+    const publishRegistryStep = publishJob.slice(
+      publishJob.indexOf("Inspect preserved artifact and registry state"),
+      publishJob.indexOf("Publish preserved artifact under next"),
+    );
+    const publishMutationStep = publishJob.slice(
+      publishJob.indexOf("Publish preserved artifact under next"),
+      publishJob.indexOf("Verify candidate under next"),
+    );
+    const promoteRegistryStep = promoteJob.slice(
+      promoteJob.indexOf("Re-verify candidate and registry state"),
+      promoteJob.indexOf("Verify exact npm provenance identity"),
+    );
+    const promoteProvenanceStep = promoteJob.slice(
+      promoteJob.indexOf("- id: provenance"),
+      promoteJob.indexOf("Contain a failed quarantined candidate"),
+    );
+    const containmentStep = promoteJob.slice(
+      promoteJob.indexOf("Contain a failed quarantined candidate"),
+      promoteJob.indexOf("Stop after registry verification failure"),
+    );
 
     expect(artifactJob).toContain("permissions:\n      contents: read");
     expect(artifactJob).toContain("bun scripts/release-plan.ts core");
     expect(artifactJob).toContain("bun scripts/verify-core-package.ts dist/core-package");
+    expect(artifactJob).toContain("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e");
+    expect(artifactJob).toContain("node-version: 20");
+    expect([...artifactJob.matchAll(/node-version: (\d+)/g)].map((match) => match[1])).toEqual([
+      "20",
+    ]);
+    expect(artifactJob.indexOf("node-version: 20")).toBeLessThan(
+      artifactJob.indexOf("bun scripts/verify-core-package.ts dist/core-package"),
+    );
     expect(artifactJob).toContain("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
     expect(artifactJob).not.toContain("id-token: write");
     expect(artifactJob).not.toContain("NPM_");
@@ -254,6 +282,7 @@ describe("release workflow policy", () => {
     expect(corePublishWorkflow).toContain('git merge-base --is-ancestor "$RELEASE_SHA" origin/main');
 
     expect(publishJob).toContain("environment: npm-core-publish");
+    expect(publishJob).toContain("timeout-minutes: 15");
     expect(publishJob).toContain("id-token: write");
     expect(publishJob).toContain("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e");
     expect(publishJob).toContain("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c");
@@ -272,8 +301,35 @@ describe("release workflow policy", () => {
     expect(publishJob).toContain("package: ${{ steps.registry.outputs.package }}");
     expect(publishJob).toContain("integrity: ${{ steps.registry.outputs.integrity }}");
     expect(publishJob).toContain("new-candidate: ${{ steps.registry.outputs.publish }}");
+    expect(publishJob).toContain("package-absent: ${{ steps.registry.outputs.package-absent }}");
+    expect(publishRegistryStep).toContain('npm view "$package" versions --json');
+    expect(publishRegistryStep.indexOf("elif grep -q 'E404'")).toBeLessThan(
+      publishRegistryStep.indexOf('npm view "$package" versions --json'),
+    );
+    expect(publishRegistryStep.indexOf('npm view "$package" versions --json')).toBeLessThan(
+      publishRegistryStep.indexOf('echo "package-absent=$package_absent" >> "$GITHUB_OUTPUT"'),
+    );
+    expect(publishMutationStep).toContain(
+      "PACKAGE_ABSENT: ${{ steps.registry.outputs.package-absent }}",
+    );
+    expect(publishMutationStep).toContain('if [ "$PACKAGE_ABSENT" = "true" ]; then');
+    expect(publishMutationStep).toContain('test "$VERSION" = "0.1.0"');
+    expect(publishMutationStep).toContain('test -n "$NPM_BOOTSTRAP_TOKEN"');
+    expect(publishMutationStep).toContain('test -z "$NPM_BOOTSTRAP_TOKEN"');
+    expect(publishMutationStep).toContain(
+      "lingering bootstrap token must be removed before OIDC publication",
+    );
+    expect(publishMutationStep.indexOf('test "$VERSION" = "0.1.0"')).toBeLessThan(
+      publishMutationStep.indexOf('NODE_AUTH_TOKEN="$NPM_BOOTSTRAP_TOKEN" npm publish'),
+    );
+    expect(publishMutationStep.indexOf('test -z "$NPM_BOOTSTRAP_TOKEN"')).toBeLessThan(
+      publishMutationStep.lastIndexOf(
+        'npm publish "$TARBALL" --access public --tag next --provenance',
+      ),
+    );
 
     expect(registrySmokeJob).toContain("permissions:\n      contents: read");
+    expect(registrySmokeJob).toContain("timeout-minutes: 20");
     expect(registrySmokeJob).toContain("needs: [classify, artifact, publish]");
     expect(registrySmokeJob).toContain("ref: ${{ needs.classify.outputs.release-sha }}");
     expect(registrySmokeJob).toContain("persist-credentials: false");
@@ -299,6 +355,7 @@ describe("release workflow policy", () => {
     expect(promoteJob).toContain("needs: [classify, artifact, publish, registry-smoke]");
     expect(promoteJob).toContain("if: always()");
     expect(promoteJob).toContain("environment: npm-core-publish");
+    expect(promoteJob).toContain("timeout-minutes: 15");
     expect(promoteJob).toContain("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e");
     expect(promoteJob).toContain("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c");
     expect(promoteJob).toContain("sha256sum -c SHA256SUMS");
@@ -307,16 +364,60 @@ describe("release workflow policy", () => {
     expect(promoteJob).not.toContain("core:build");
     expect(promoteJob).toContain("needs.registry-smoke.result");
     expect(promoteJob).toContain("needs.publish.outputs.new-candidate == 'true'");
-    expect(promoteJob).toContain("steps.registry.outputs.present == 'true'");
+    expect(promoteJob).toContain("steps.registry.outputs.identity-verified == 'true'");
+    expect(promoteJob).toContain("steps.registry.outputs.quarantined == 'true'");
+    expect(promoteJob).toContain("steps.provenance.outputs.verified == 'true'");
     expect(promoteJob).toContain("needs.publish.result == 'failure'");
     expect(promoteJob).toContain("local_integrity=");
-    expect(promoteJob.indexOf('echo "present=true"')).toBeLessThan(
-      promoteJob.indexOf("provenance.predicateType"),
+    expect(promoteRegistryStep).toContain('if [ -z "$provenance" ]; then');
+    expect(promoteRegistryStep.indexOf("registry candidate identity or integrity mismatch"))
+      .toBeLessThan(promoteRegistryStep.indexOf("identity_verified=true"));
+    expect(promoteRegistryStep.indexOf('if [ -z "$provenance" ]; then')).toBeLessThan(
+      promoteRegistryStep.indexOf("continue"),
     );
-    expect(promoteJob).toContain("npm dist-tag rm \"$PACKAGE\" next");
-    expect(promoteJob).toContain("npm deprecate \"$PACKAGE@$VERSION\"");
-    expect(promoteJob).toContain("fix-forward only");
+    expect(promoteRegistryStep.indexOf("continue")).toBeLessThan(
+      promoteRegistryStep.indexOf("ready=true"),
+    );
+    expect(promoteRegistryStep).not.toContain(
+      'test -n "$(jq -r \'.dist.attestations.provenance.predicateType // empty\'',
+    );
+    expect(promoteRegistryStep).toContain('echo "present=$present" >> "$GITHUB_OUTPUT"');
+    expect(promoteRegistryStep).toContain(
+      'echo "identity-verified=$identity_verified" >> "$GITHUB_OUTPUT"',
+    );
+    expect(promoteRegistryStep).toContain('echo "ready=$ready" >> "$GITHUB_OUTPUT"');
+    expect(promoteRegistryStep).toContain(
+      'echo "quarantined=$quarantined" >> "$GITHUB_OUTPUT"',
+    );
+    expect(promoteProvenanceStep).toContain("id: provenance");
+    expect(promoteProvenanceStep.indexOf("digest.gitCommit == $commit")).toBeLessThan(
+      promoteProvenanceStep.indexOf('echo "verified=true" >> "$GITHUB_OUTPUT"'),
+    );
+    expect(containmentStep).toContain(
+      "if: always() && needs.registry-smoke.result != 'success' && steps.registry.outputs.identity-verified == 'true' && steps.registry.outputs.quarantined == 'true' && (needs.publish.outputs.new-candidate == 'true' || steps.provenance.outputs.verified == 'true')",
+    );
+    expect(containmentStep).toContain("npm dist-tag rm \"$PACKAGE\" next");
+    expect(containmentStep).toContain("npm deprecate \"$PACKAGE@$VERSION\"");
+    expect(containmentStep).toContain("fix-forward only");
+    expect(containmentStep).toContain("candidate is already latest; refusing containment");
+    expect(containmentStep).toContain("candidate is no longer quarantined under next");
+    expect(containmentStep.indexOf("candidate is already latest; refusing containment"))
+      .toBeLessThan(containmentStep.indexOf('npm deprecate "$PACKAGE@$VERSION"'));
+    expect(containmentStep.indexOf("candidate is no longer quarantined under next"))
+      .toBeLessThan(containmentStep.indexOf('npm deprecate "$PACKAGE@$VERSION"'));
+    expect(containmentStep.indexOf('if [ -z "$deprecated" ]; then')).toBeLessThan(
+      containmentStep.indexOf('npm deprecate "$PACKAGE@$VERSION"'),
+    );
+    expect(containmentStep.indexOf('npm deprecate "$PACKAGE@$VERSION"')).toBeLessThan(
+      containmentStep.indexOf('npm dist-tag rm "$PACKAGE" next'),
+    );
+    expect(containmentStep.indexOf('if [ "$next" = "$VERSION" ]; then')).toBeLessThan(
+      containmentStep.indexOf('npm dist-tag rm "$PACKAGE" next'),
+    );
     expect(promoteJob).toContain("npm dist-tag add \"$PACKAGE@$VERSION\" latest");
+    expect(promoteJob).toContain(
+      "if: needs.registry-smoke.result == 'success' && steps.provenance.outputs.verified == 'true'",
+    );
     expect(promoteJob.indexOf("Verify exact npm provenance identity")).toBeLessThan(
       promoteJob.indexOf("npm dist-tag rm \"$PACKAGE\" next"),
     );
@@ -326,6 +427,12 @@ describe("release workflow policy", () => {
     expect(promoteJob.indexOf("sha256sum -c SHA256SUMS")).toBeLessThan(
       promoteJob.indexOf("NPM_DIST_TAG_TOKEN"),
     );
+    for (const job of [publishJob, promoteJob]) {
+      expect(job).not.toContain("actions/checkout@");
+      expect(job).not.toMatch(/\b(?:bun|npm) install\b/);
+      expect(job).not.toContain("core:build");
+      expect(job).not.toMatch(/\b(?:bun|node)\s+(?:run\s+)?(?:\.\/)?scripts\//);
+    }
     for (const job of [publishJob, registrySmokeJob, promoteJob]) {
       expect(job).toContain("node-version: 24");
       expect(job).toContain("registry-url: https://registry.npmjs.org");
@@ -348,7 +455,9 @@ describe("release workflow policy", () => {
       expect(job).toContain("digest.gitCommit == $commit");
       expect(job).toContain("pkg:npm/%40swartzrock/llm-now-core@");
       expect(job).toContain(".subject[0].digest.sha512 == $sha512");
-      expect(job).toContain("curl --fail --silent --show-error");
+      expect(job).toContain(
+        "curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-max-time 120",
+      );
       expect(job).not.toMatch(/curl[^\n]+\|\s*(?:sh|bash|zsh)\b/);
     }
   });

@@ -1,5 +1,6 @@
 import {
   LlmNowError,
+  RoutingInputError,
   compactRoutingKey,
   createLlmNowCore,
   routeTranscript,
@@ -68,6 +69,15 @@ const routingInput: RouteTranscriptInput = {
   minMargin: 15,
 };
 const route: RouteTranscriptResult = routeTranscript(routingInput);
+let routingError: RoutingInputError | undefined;
+try {
+  routeTranscript(null as never);
+} catch (error) {
+  if (!(error instanceof RoutingInputError)) throw error;
+  routingError = error;
+}
+const aborted = (error: unknown): boolean =>
+  error instanceof LlmNowError && error.code === "ABORTED";
 const direct: DirectCliExecutionDescriptor | WindowsCommandShimExecutionDescriptor | null = null;
 const routeTypes: RouteMatch | RouteRejection | null = null;
 const reasonTypes: RouteMatchReason | RouteRejectionReason | null = null;
@@ -81,6 +91,7 @@ const workspace: WorkspaceRequest = {
 
 void [
   LlmNowError,
+  RoutingInputError,
   compactRoutingKey,
   routingSimilarity,
   generation,
@@ -89,6 +100,8 @@ void [
   models,
   validation,
   route,
+  routingError,
+  aborted,
   direct,
   routeTypes,
   reasonTypes,

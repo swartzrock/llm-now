@@ -12,7 +12,12 @@ export type {
   WindowsCommandShimExecutionDescriptor,
 } from "./cli-execution.js";
 export type { CredentialResolution, CredentialResolver } from "./credentials.js";
-export { compactRoutingKey, routeTranscript, routingSimilarity } from "./routing.js";
+export {
+  RoutingInputError,
+  compactRoutingKey,
+  routeTranscript,
+  routingSimilarity,
+} from "./routing.js";
 export type {
   RouteMatch,
   RouteMatchReason,

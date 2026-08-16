@@ -20,15 +20,29 @@ async function waitForFile(path) {
 
 const originalFetch = globalThis.fetch;
 let importFetches = 0;
-globalThis.fetch = async () => {
+let ollamaFixtureOrigin = null;
+globalThis.fetch = async (input, init) => {
+  const url = new URL(
+    typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+  );
+  if (
+    ollamaFixtureOrigin !== null
+    && url.href === "http://localhost:11434/api/generate"
+  ) {
+    const redirected = new URL(url.pathname, ollamaFixtureOrigin);
+    return input instanceof Request
+      ? originalFetch(new Request(redirected, input))
+      : originalFetch(redirected, init);
+  }
   importFetches++;
-  throw new Error("package import attempted network I/O");
+  throw new Error(`unexpected external network I/O: ${url.origin}`);
 };
 
 const homeBaseline = (await readdir(process.env.HOME)).sort();
 const coreModule = await import("@swartzrock/llm-now-core");
 assert(JSON.stringify(Object.keys(coreModule).sort()) === JSON.stringify([
   "LlmNowError",
+  "RoutingInputError",
   "compactRoutingKey",
   "createLlmNowCore",
   "routeTranscript",
@@ -75,6 +89,12 @@ const routed = coreModule.routeTranscript({
 });
 assert(routed.accepted && routed.candidateId === "character:terra", "routing failed");
 assert(routed.question === "explain streams", "routing changed the question");
+try {
+  coreModule.routeTranscript(null);
+  throw new Error("malformed routing input unexpectedly succeeded");
+} catch (error) {
+  assert(error instanceof coreModule.RoutingInputError, "wrong routing input error");
+}
 
 const preAborted = new AbortController();
 preAborted.abort();
@@ -101,7 +121,6 @@ await client.generateText({
   ),
 );
 
-globalThis.fetch = originalFetch;
 const markerBase = `${process.env.HOME}/fake-cli`;
 assert(typeof process.env.CORE_FIXTURE_EXECUTABLE === "string", "fake CLI executable is missing");
 assert(typeof process.env.CORE_FIXTURE_CLI === "string", "fake CLI path is missing");
@@ -183,9 +202,13 @@ const server = createServer(async (request, response) => {
   await new Promise((resolve) => setTimeout(resolve, 20));
   response.end(`${JSON.stringify({ response: input.prompt, done: true })}\n`);
 });
-server.listen(11_434);
-await once(server, "listening");
 try {
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address !== null && typeof address === "object", "fixture server address is missing");
+  ollamaFixtureOrigin = `http://127.0.0.1:${address.port}`;
+
   const nativeBuffered = await client.generateText({
     provider: "ollama",
     model: "fixture",
@@ -218,8 +241,13 @@ try {
   assert(nativeStream.text === nativeBuffered.text, "native stream and buffered text differ");
   assert(nativeDeltas.join("") === nativeStream.text, "native deltas differ from final text");
 } finally {
-  server.close();
-  await once(server, "close");
+  ollamaFixtureOrigin = null;
+  globalThis.fetch = originalFetch;
+  if (server.listening) {
+    await new Promise((resolve, reject) => {
+      server.close((error) => error === undefined ? resolve() : reject(error));
+    });
+  }
 }
 
 await import("@swartzrock/llm-now-core/dist/index.js").then(

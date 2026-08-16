@@ -1335,11 +1335,13 @@ npm token in a shell command, report, or local file.
 7. Confirm `npm view @swartzrock/llm-now-core dist-tags --json` reports the
    intended `latest`. Reinstall that exact version with new Node, Bun, and npm
    caches, repeat the root-import smoke, and confirm the native lane did not run.
-8. Configure and prove the trusted publisher transition described in the
-   release guide. Revoke the bootstrap credential and remove its GitHub secret.
+8. Configure the trusted publisher transition described in the release guide,
+   revoke the bootstrap credential, and remove its GitHub secret before proving
+   the next OIDC publication. Confirm a deliberately lingering bootstrap secret
+   makes the later workflow fail closed before `npm publish`.
 
 If the exact version appears with the wrong integrity or lacks provenance, do
-not promote it. Remove `next`, deprecate the immutable failed version, and
+not promote it. Deprecate the immutable failed version, remove `next`, and
 fix-forward to a new Changeset and version. Do not unpublish or reuse it.
 
 ### MT-44: Core release record and 24-hour check

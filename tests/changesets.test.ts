@@ -100,8 +100,8 @@ describe("Changesets authoring", () => {
       changeset: "changeset",
       "changeset:status": "changeset status --verbose",
       "changeset:version": "changeset version",
-      "changeset:publish": "changeset publish",
     });
+    expect(repositoryPackage.scripts).not.toHaveProperty("changeset:publish");
     expect(changesetsConfig.fixed).toEqual([]);
     expect(changesetsConfig.linked).toEqual([]);
     expect(changesetsConfig.access).toBe("restricted");
