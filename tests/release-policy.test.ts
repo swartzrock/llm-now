@@ -335,12 +335,16 @@ describe("release workflow policy", () => {
     expect(coreReleaseWorkflow).toContain('--target "$RELEASE_SHA"');
     expect(coreReleaseWorkflow).toContain("--draft");
     expect(coreReleaseWorkflow).toContain(".isDraft == true");
+    expect(coreReleaseWorkflow).toContain(".targetCommitish == env.RELEASE_SHA");
     expect(coreReleaseWorkflow).toContain(".immutable == true");
     expect(coreReleaseWorkflow).toContain('([.assets[].name] | sort) == (["SHA256SUMS", env.ASSET] | sort)');
     expect(coreReleaseWorkflow).not.toContain("--clobber");
     expect(coreReleaseWorkflow).toMatch(
-      /gh release edit "\$TAG" --repo "\$GITHUB_REPOSITORY"\s+\\?\s*--draft=false --prerelease=false --latest=false --verify-tag/,
+      /gh release edit "\$TAG" --repo "\$GITHUB_REPOSITORY"\s+\\?\s*--draft=false --prerelease=false --latest=false --target "\$RELEASE_SHA"/,
     );
+    expect(coreReleaseWorkflow).not.toContain("--verify-tag");
+    expect(coreReleaseWorkflow.indexOf('git fetch origin "refs/tags/$TAG:refs/tags/$TAG"'))
+      .toBeGreaterThan(coreReleaseWorkflow.indexOf('gh release edit "$TAG"'));
     expect(coreReleaseWorkflow).not.toContain("gh release delete");
     expect(coreReleaseWorkflow).not.toContain("gh release delete-asset");
     expect(coreReleaseWorkflow).not.toContain("git tag -f");
