@@ -142,6 +142,7 @@ describe("core streaming", () => {
 
   test("returns whole-response sanitized text when a control sequence spans deltas", async () => {
     const raw = "first\u001b[31m second\u001b[0m";
+    const deltas: string[] = [];
     const core = client(runtime({
       generateText: async () => ({ text: raw }),
       streamText: () => ({
@@ -158,11 +159,40 @@ describe("core streaming", () => {
       core.generateText({ provider: "ollama", model: "qwen", prompt: "question" }),
       core.streamText(
         { provider: "ollama", model: "qwen", prompt: "question" },
-        () => undefined,
+        (delta) => { deltas.push(delta); },
       ),
     ]);
     expect(streamed.text).toBe(buffered.text);
     expect(streamed.text).toBe("first second");
+    expect(deltas.join("")).toBe(streamed.text);
+  });
+
+  test("keeps callback and final text identical across split stream boundaries", async () => {
+    const chunks = [
+      "one\r",
+      "\ntwo\u001b[",
+      "31mthree\u001b]0;ti",
+      "tle\u0007four\u001b[",
+      "31",
+    ];
+    const deltas: string[] = [];
+    const core = client(runtime({
+      streamText: () => ({
+        delivery: "native",
+        textStream: (async function* () {
+          for (const chunk of chunks) yield chunk;
+        })(),
+      }),
+    }));
+
+    const streamed = await core.streamText({
+      provider: "ollama",
+      model: "qwen",
+      prompt: "question",
+    }, (delta) => { deltas.push(delta); });
+
+    expect(deltas.join("")).toBe(streamed.text);
+    expect(streamed.text).toBe("one\ntwothreefour[31");
   });
 
   test("withholds every delta that completes a split sensitive value", async () => {
@@ -211,6 +241,30 @@ describe("core streaming", () => {
       responseSensitiveValues: ["registered-secret"],
     }, (delta) => { emitted.push(delta); })).rejects.toMatchObject({ code: "UNSAFE_RESPONSE" });
     expect(emitted).toEqual(["safe registered-"]);
+  });
+
+  test("withholds a sensitive value completed by final sanitizer flush", async () => {
+    const emitted: string[] = [];
+    const core = client(runtime({
+      streamText: () => ({
+        delivery: "native",
+        textStream: (async function* () {
+          yield "safe \u001b[";
+          yield "31";
+        })(),
+      }),
+    }));
+
+    await expect(core.streamText({
+      provider: "ollama",
+      model: "qwen",
+      prompt: "question",
+      responseSensitiveValues: ["[31"],
+    }, (delta) => { emitted.push(delta); })).rejects.toMatchObject({
+      code: "UNSAFE_RESPONSE",
+      operation: "streaming",
+    });
+    expect(emitted.join("")).toBe("safe ");
   });
 
   test("screens resolver and approved-child credentials in buffered and streamed output", async () => {

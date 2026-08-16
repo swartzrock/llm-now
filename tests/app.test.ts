@@ -16,6 +16,10 @@ import { renderHelpText } from "../packages/cli/src/args.ts";
 import { serializeConfigDocument } from "../packages/cli/src/config-schema.ts";
 import { RuntimeStageError, type RuntimeGateway } from "../packages/cli/src/runtime.ts";
 import {
+  createLlmNowCoreWithInternals,
+  type LlmNowCoreClient,
+} from "../packages/core/src/client.ts";
+import {
   CONFIG_FAILED_NOTICE,
   REQUEST_FAILED_NOTICE,
   type VoiceCancellation,
@@ -24,7 +28,6 @@ import {
 } from "../packages/cli/src/voice.ts";
 import {
   createCoreRuntimeGateway,
-  createRuntimeGateway,
 } from "../packages/cli/src/runtime.ts";
 import { runApplication, type ApplicationPrompter } from "../packages/cli/src/app.ts";
 import {
@@ -156,18 +159,18 @@ function runtime(options: {
 } = {}) {
   const calls = { discover: 0, list: 0, generate: 0 };
   const value: RuntimeGateway = {
-    discover: async () => {
+    discover: async (signal) => {
       calls.discover += 1;
-      if (options.discover) return options.discover();
+      if (options.discover) return options.discover(signal);
       return options.providers ?? ["ollama"];
     },
-    listModels: async (provider) => {
+    listModels: async (provider, signal) => {
       calls.list += 1;
-      if (options.listModels) return options.listModels(provider);
+      if (options.listModels) return options.listModels(provider, signal);
       return [{ id: "qwen", label: "Qwen" }];
     },
-    validateCredential: async (provider, apiKey) => {
-      if (options.validateCredential) return options.validateCredential(provider, apiKey);
+    validateCredential: async (provider, apiKey, signal) => {
+      if (options.validateCredential) return options.validateCredential(provider, apiKey, signal);
       return [{ id: "qwen", label: "Qwen" }];
     },
     generate: async (...args) => {
@@ -4515,7 +4518,24 @@ describe("one-shot application", () => {
     const serialized = JSON.stringify(instruction);
     const escaped = serialized.slice(1, -1);
     const sensitive = createSensitiveValueRegistry();
-    const gateway = createRuntimeGateway({
+    const coreClient = createLlmNowCoreWithInternals({
+      environment: {},
+      credentialResolver: { resolve: async () => ({ status: "missing" }) },
+    }, {
+      findAvailableProviders: async () => ["ollama"],
+      createProvider: () => ({
+        id: "ollama",
+        label: "Ollama",
+        requiresNetwork: false,
+        requiresDownload: false,
+        testConnection: async () => ({ ok: true, message: "ok" }),
+        listModels: async () => [],
+        generateText: async () => {
+          throw new Error(`raw=${instruction} serialized=${serialized} escaped=${escaped}`);
+        },
+      }),
+    });
+    const gateway = createCoreRuntimeGateway({
       env: {},
       credentialResolver: createCredentialResolver({
         env: {},
@@ -4527,17 +4547,7 @@ describe("one-shot application", () => {
         vaultEnabled: false,
       }),
       sensitive,
-      createProvider: (config) => ({
-        id: config.provider,
-        label: "Fake",
-        requiresNetwork: false,
-        requiresDownload: false,
-        async testConnection() { return { ok: true, message: "ok" }; },
-        async listModels() { return []; },
-        async generateText() {
-          throw new Error(`raw=${instruction} serialized=${serialized} escaped=${escaped}`);
-        },
-      }),
+      coreClient,
     });
     const app = dependencies({
       args: [
@@ -4718,14 +4728,42 @@ describe("one-shot application", () => {
   });
 
   test("bounds model-list stages", async () => {
+    let aborted = false;
     const models = dependencies({
       args: ["--input", "hello"],
       stdin: input("", true),
       stderrTty: true,
       modelListTimeoutMs: 5,
-      runtime: runtime({ listModels: () => new Promise(() => {}) }),
+      runtime: runtime({
+        listModels: (_provider, signal) => new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            aborted = true;
+            reject(new RuntimeStageError("model-list", "ollama", "aborted"));
+          }, { once: true });
+        }),
+      }),
       prompter: prompts({ choices: ["ollama"] }),
     });
+    expect(await runApplication(models.value)).toBe(1);
+    expect(aborted).toBeTrue();
+    expect(models.stderr.text()).toContain("model-list (ollama): timed out");
+  });
+
+  test("reports a model-list timeout when an operation resolves after ignoring abort", async () => {
+    const models = dependencies({
+      args: ["--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      modelListTimeoutMs: 5,
+      runtime: runtime({
+        listModels: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return [{ id: "late-model", label: "Late model" }];
+        },
+      }),
+      prompter: prompts({ choices: ["ollama"] }),
+    });
+
     expect(await runApplication(models.value)).toBe(1);
     expect(models.stderr.text()).toContain("model-list (ollama): timed out");
   });
@@ -5655,9 +5693,6 @@ describe("API-key management", () => {
         },
       },
       sensitive,
-      createProvider: () => {
-        throw new Error("provider construction must not run");
-      },
     });
     const app = dependencies({
       args: [
@@ -6118,25 +6153,28 @@ describe("API-key management", () => {
     const fixture = vaultFixture();
     const sensitive = createSensitiveValueRegistry();
     const resolver = createCredentialResolver({ env: {}, vault: fixture.vault, vaultEnabled: true });
-    const gateway = createRuntimeGateway({
+    const coreClient: LlmNowCoreClient = {
+      discoverProviders: async () => ({ degraded: false, providers: [] }),
+      listModels: async ({ provider }) => ({ provider, models: [] }),
+      validateConnection: async ({ provider, candidateCredential }) => {
+        if (candidateCredential !== candidate) {
+          throw new Error(`wrong candidate ${candidate}`);
+        }
+        return { provider, models: [{ id: "gpt-5", label: "GPT-5" }] };
+      },
+      generateText: async ({ provider, model }) => ({ provider, model, text: "unused" }),
+      streamText: async ({ provider, model }) => ({
+        provider,
+        model,
+        delivery: "buffered",
+        text: "unused",
+      }),
+    };
+    const gateway = createCoreRuntimeGateway({
       env: {},
       credentialResolver: resolver,
       sensitive,
-      findProviders: async () => [],
-      createProvider: (config) => ({
-        id: config.provider,
-        label: "Fake",
-        requiresNetwork: true,
-        requiresDownload: false,
-        async testConnection() { return { ok: true, message: "ok" }; },
-        async listModels() {
-          if (!("apiKey" in config) || config.apiKey !== candidate) {
-            throw new Error(`wrong candidate ${candidate}`);
-          }
-          return [{ id: "gpt-5", label: "GPT-5" }];
-        },
-        async generateText() { return { text: "unused" }; },
-      }),
+      coreClient,
     });
     const app = dependencies({
       args: [],

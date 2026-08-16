@@ -1,24 +1,16 @@
+import type { ByokProviderId } from "@swartzrock/byok-runtime";
 import {
-  BYOK_PROVIDER_IDS,
-  type ByokProviderId,
-} from "@swartzrock/byok-runtime";
+  workspaceCapabilities as coreWorkspaceCapabilities,
+  type DirectoryAccess,
+  type WorkspaceCapabilities,
+  type WorkspaceRequest,
+} from "@swartzrock/llm-now-core";
 import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute, normalize, resolve } from "node:path";
 
-export interface WorkspaceConfig {
-  readonly primaryDirectory: string;
-  readonly additionalDirectories: readonly string[];
-  readonly directoryAccess: DirectoryAccess;
-}
-
-export type DirectoryAccess = "read-only" | "read-write";
-
-export interface WorkspaceCapabilities {
-  primaryDirectory: boolean;
-  additionalDirectories: boolean;
-  readWrite: boolean;
-}
+export type WorkspaceConfig = WorkspaceRequest;
+export type { DirectoryAccess, WorkspaceCapabilities };
 
 export class WorkspaceError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -27,35 +19,8 @@ export class WorkspaceError extends Error {
   }
 }
 
-const SUPPORTED_WORKSPACE: WorkspaceCapabilities = Object.freeze({
-  primaryDirectory: true,
-  additionalDirectories: true,
-  readWrite: false,
-});
-const WRITABLE_WORKSPACE: WorkspaceCapabilities = Object.freeze({
-  primaryDirectory: true,
-  additionalDirectories: true,
-  readWrite: true,
-});
-const UNSUPPORTED_WORKSPACE: WorkspaceCapabilities = Object.freeze({
-  primaryDirectory: false,
-  additionalDirectories: false,
-  readWrite: false,
-});
-
-const WORKSPACE_CAPABILITIES = Object.freeze(Object.fromEntries(
-  BYOK_PROVIDER_IDS.map((provider) => [
-    provider,
-    provider === "codex-cli"
-      ? WRITABLE_WORKSPACE
-      : provider === "claude-cli"
-        ? SUPPORTED_WORKSPACE
-        : UNSUPPORTED_WORKSPACE,
-  ]),
-) as Record<ByokProviderId, WorkspaceCapabilities>);
-
 export function workspaceCapabilities(provider: ByokProviderId): WorkspaceCapabilities {
-  return WORKSPACE_CAPABILITIES[provider];
+  return coreWorkspaceCapabilities(provider);
 }
 
 export function assertWorkspaceSupported(

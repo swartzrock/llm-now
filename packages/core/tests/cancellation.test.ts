@@ -30,6 +30,167 @@ function client(provider: ByokProviderRuntime, settlementTimeoutMs = 10) {
 }
 
 describe("core generation cancellation", () => {
+  test("aborts pending discovery, model listing, and validation work", async () => {
+    for (const operationName of ["discovery", "model-list", "validation"] as const) {
+      let rejectWork!: (error: Error) => void;
+      let markStarted!: () => void;
+      const started = new Promise<void>((resolve) => { markStarted = resolve; });
+      const pending = new Promise<never>((_resolve, reject) => { rejectWork = reject; });
+      const controller = new AbortController();
+      const core = createLlmNowCoreWithInternals({
+        environment: {},
+        credentialResolver: { resolve: async () => ({ status: "missing" }) },
+      }, {
+        findAvailableProviders: () => {
+          markStarted();
+          return pending;
+        },
+        createProvider: () => runtime({
+          listModels: () => {
+            markStarted();
+            return pending;
+          },
+        }),
+        settlementTimeoutMs: 5,
+      });
+      const operation = operationName === "discovery"
+        ? core.discoverProviders({ signal: controller.signal })
+        : operationName === "model-list"
+          ? core.listModels({ provider: "ollama", signal: controller.signal })
+          : core.validateConnection({ provider: "ollama", signal: controller.signal });
+
+      await started;
+      controller.abort();
+      await expect(operation).rejects.toMatchObject({
+        code: "ABORTED",
+        operation: operationName,
+      });
+      rejectWork(new Error(`late ${operationName} failure`));
+      await Promise.resolve();
+    }
+  });
+
+  test("passes model-list cancellation into an approved CLI child and waits for close", async () => {
+    const events = new EventEmitter();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stdin = new PassThrough();
+    const kills: Array<NodeJS.Signals | undefined> = [];
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const spawnProcess = (() => {
+      markStarted();
+      return {
+        stdout,
+        stderr,
+        stdin,
+        once: events.once.bind(events),
+        kill: (signal?: NodeJS.Signals) => {
+          kills.push(signal);
+          return true;
+        },
+      } as unknown as LocalProcess;
+    }) as LocalProcessSpawner;
+    const core = createLlmNowCoreWithInternals({
+      environment: {},
+      credentialResolver: { resolve: async () => ({ status: "missing" }) },
+      cliExecutionResolver: {
+        resolve: async () => ({
+          mode: "direct",
+          executable: "/approved/codex",
+          argsPrefix: [],
+          env: {},
+        }),
+      },
+    }, {
+      findAvailableProviders: async () => [],
+      createProvider: () => { throw new Error("unused"); },
+      spawnProcess,
+      settlementTimeoutMs: 5,
+    });
+    const controller = new AbortController();
+    let settled = false;
+    const operation = core.listModels({
+      provider: "codex-cli",
+      signal: controller.signal,
+    }).finally(() => { settled = true; });
+
+    await started;
+    controller.abort();
+    await Promise.resolve();
+    expect(kills).toEqual(["SIGTERM"]);
+    expect(settled).toBeFalse();
+    events.emit("close", null);
+    await expect(operation).rejects.toMatchObject({
+      code: "ABORTED",
+      operation: "model-list",
+      provider: "codex-cli",
+    });
+    expect(settled).toBeTrue();
+  });
+
+  test("aborts pending workspace preflight before resolving credentials or execution", async () => {
+    for (const operationName of ["generation", "streaming"] as const) {
+      let resolvePreflight!: () => void;
+      let markStarted!: () => void;
+      const started = new Promise<void>((resolve) => { markStarted = resolve; });
+      const pending = new Promise<void>((resolve) => { resolvePreflight = resolve; });
+      let resolverCalls = 0;
+      let executionCalls = 0;
+      let providerCalls = 0;
+      const controller = new AbortController();
+      const core = createLlmNowCoreWithInternals({
+        environment: {},
+        credentialResolver: { resolve: async () => {
+          resolverCalls += 1;
+          return { status: "missing" };
+        } },
+        cliExecutionResolver: { resolve: async () => {
+          executionCalls += 1;
+          return null;
+        } },
+      }, {
+        findAvailableProviders: async () => [],
+        createProvider: () => {
+          providerCalls += 1;
+          return runtime();
+        },
+        preflightWorkspace: async (_provider, workspace) => {
+          markStarted();
+          await pending;
+          return workspace;
+        },
+        settlementTimeoutMs: 5,
+      });
+      const request = {
+        provider: "codex-cli" as const,
+        model: "gpt-test",
+        prompt: "question",
+        signal: controller.signal,
+        workspace: {
+          primaryDirectory: "/approved/workspace",
+          additionalDirectories: [],
+          directoryAccess: "read-only" as const,
+        },
+      };
+      const operation = operationName === "generation"
+        ? core.generateText(request)
+        : core.streamText(request, () => undefined);
+
+      await started;
+      controller.abort();
+      await expect(operation).rejects.toMatchObject({
+        code: "ABORTED",
+        operation: operationName,
+      });
+      expect(resolverCalls).toBe(0);
+      expect(executionCalls).toBe(0);
+      expect(providerCalls).toBe(0);
+      resolvePreflight();
+      await Promise.resolve();
+    }
+  });
+
   test("reaps an erroring TERM-resistant CLI child before returning a safe abort", async () => {
     const events = new EventEmitter();
     const stdout = new PassThrough();

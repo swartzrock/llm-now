@@ -111,6 +111,55 @@ describe("Changesets authoring", () => {
       .toBe(true);
     expect(await Bun.file(new URL("../packages/core/dist/index.d.ts", import.meta.url)).exists())
       .toBe(true);
+    const builtCore = await Bun.file(
+      new URL("../packages/core/dist/index.js", import.meta.url),
+    ).text();
+    expect(builtCore).toMatch(/from ["']@3leaps\/string-metrics-wasm["']/);
+    expect(builtCore).toMatch(/from ["']@swartzrock\/byok-runtime["']/);
+    expect(builtCore).toMatch(/from ["']@swartzrock\/byok-runtime\/node["']/);
+    expect(builtCore).toMatch(/from ["']unicode-case-folding["']/);
+    for (const bundledMarker of [
+      "node_modules/.bun/@3leaps+string-metrics-wasm",
+      "node_modules/.bun/@swartzrock+byok-runtime",
+      "node_modules/.bun/unicode-case-folding",
+    ]) {
+      expect(builtCore).not.toContain(bundledMarker);
+    }
+    const declarations = await Bun.file(
+      new URL("../packages/core/dist/index.d.ts", import.meta.url),
+    ).text();
+    expect(declarations).not.toMatch(/from ["'][^"']+\.ts["']/);
+
+    const consumer = await mkdtemp(join(cli, ".tmp-node-next-consumer-"));
+    fixtureDirectories.push(consumer);
+    await Bun.write(join(consumer, "package.json"), JSON.stringify({ type: "module" }));
+    await Bun.write(join(consumer, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        lib: ["ES2022", "DOM"],
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        noEmit: true,
+        strict: true,
+        types: ["node"],
+      },
+      include: ["consumer.ts"],
+    }));
+    await Bun.write(join(consumer, "consumer.ts"), [
+      'import { createLlmNowCore, type ModelListResult } from "@swartzrock/llm-now-core";',
+      "const core = createLlmNowCore({",
+      "  environment: {},",
+      "  credentialResolver: { resolve: async () => ({ status: \"missing\" as const }) },",
+      "});",
+      "const result: Promise<ModelListResult> = core.listModels({ provider: \"ollama\" });",
+      "void result;",
+      "",
+    ].join("\n"));
+    run([
+      process.execPath,
+      new URL("../node_modules/typescript/bin/tsc", import.meta.url).pathname,
+      "--project",
+      join(consumer, "tsconfig.json"),
+    ], consumer);
     run([process.execPath, "-e", 'import("@swartzrock/llm-now-core")'], cli);
     const deepImport = Bun.spawnSync([
       process.execPath,

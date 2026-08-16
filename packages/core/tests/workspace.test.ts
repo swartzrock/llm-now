@@ -55,5 +55,12 @@ describe("core workspace capability", () => {
       operation: "generation",
       provider: "codex-cli",
     });
+
+    await expect(preflightWorkspace("codex-cli", null as never, "streaming"))
+      .rejects.toMatchObject({
+        code: "WORKSPACE_UNAVAILABLE",
+        operation: "streaming",
+        provider: "codex-cli",
+      });
   });
 });

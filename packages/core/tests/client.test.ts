@@ -134,6 +134,56 @@ describe("buffered core client", () => {
     }
   });
 
+  test("reports only a request-redacted diagnostic beside the fixed public error", async () => {
+    const prompt = "private prompt";
+    const instructions = 'private "instructions"';
+    const serializedInstructions = JSON.stringify(instructions);
+    const credential = "private-provider-credential";
+    const diagnostics: string[] = [];
+    const client = createLlmNowCoreWithInternals({
+      environment: {},
+      credentialResolver: { resolve: async () => ({ status: "resolved", credential }) },
+    }, internals({ createProvider: () => provider({
+      generateText: async () => {
+        throw new Error(
+          `provider failed: ${credential} ${prompt} ${instructions} ${serializedInstructions}`,
+        );
+      },
+    }) }));
+
+    await expect(client.generateText({
+      provider: "openai",
+      model: "gpt-test",
+      prompt,
+      instructions,
+      onDiagnostic: (diagnostic) => { diagnostics.push(diagnostic); },
+    })).rejects.toMatchObject({
+      code: "GENERATION_FAILED",
+      message: "Text generation failed.",
+    });
+    expect(diagnostics).toEqual([
+      "provider failed: [REDACTED] [REDACTED] [REDACTED] [REDACTED]",
+    ]);
+  });
+
+  test("does not let a diagnostic handler replace the primary failure", async () => {
+    const client = createLlmNowCoreWithInternals({
+      environment: {},
+      credentialResolver: { resolve: async () => ({ status: "missing" }) },
+    }, internals({ createProvider: () => provider({
+      generateText: async () => { throw new Error("provider failed"); },
+    }) }));
+
+    await expect(client.generateText({
+      provider: "ollama",
+      model: "qwen",
+      prompt: "hello",
+      onDiagnostic: async () => { throw new Error("diagnostic handler failed"); },
+    })).rejects.toMatchObject({ code: "GENERATION_FAILED" });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
   test("maps hostile request objects without inspecting their error details", async () => {
     const secret = "hostile-request-detail";
     const client = createLlmNowCoreWithInternals({
@@ -234,5 +284,131 @@ describe("buffered core client", () => {
       shell: false,
       env: { OPENAI_API_KEY: "approved-child-secret" },
     });
+  });
+
+  test("withholds resolver and candidate credentials echoed in model metadata", async () => {
+    let resolverCalls = 0;
+    const secret = "resolver-model-secret";
+    const client = createLlmNowCoreWithInternals({
+      environment: {},
+      credentialResolver: { resolve: async () => {
+        resolverCalls += 1;
+        return { status: "resolved", credential: secret };
+      } },
+    }, internals({ createProvider: (config) => provider({
+      listModels: async () => {
+        const credential = "apiKey" in config ? config.apiKey : secret;
+        return [{ id: credential, label: `Model ${credential}` }];
+      },
+    }) }));
+
+    await expect(client.listModels({ provider: "openai" })).rejects.toMatchObject({
+      code: "MODEL_LIST_FAILED",
+      operation: "model-list",
+    });
+    await expect(client.validateConnection({
+      provider: "openai",
+      candidateCredential: "candidate-model-secret",
+    })).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      operation: "validation",
+    });
+    expect(resolverCalls).toBe(1);
+  });
+
+  test("rejects model metadata that contains terminal control sequences", async () => {
+    const client = createLlmNowCoreWithInternals({
+      environment: {},
+      credentialResolver: { resolve: async () => ({ status: "missing" }) },
+    }, internals({ createProvider: () => provider({
+      listModels: async () => [{ id: "model\u001b[31m", label: "unsafe\u0000label" }],
+    }) }));
+
+    await expect(client.listModels({ provider: "ollama" })).rejects.toMatchObject({
+      code: "MODEL_LIST_FAILED",
+      operation: "model-list",
+    });
+  });
+
+  test("withholds approved-child credentials echoed in CLI model metadata", async () => {
+    const events = new EventEmitter();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stdin = new PassThrough();
+    const childSecret = "non-selected-child-secret";
+    const spawnProcess = (() => {
+      queueMicrotask(() => {
+        stdout.end(JSON.stringify([{ id: childSecret, displayName: "Unsafe model" }]));
+        events.emit("close", 0);
+      });
+      return {
+        stdout,
+        stderr,
+        stdin,
+        once: events.once.bind(events),
+        kill: () => true,
+      } as unknown as LocalProcess;
+    }) as LocalProcessSpawner;
+    const client = createLlmNowCoreWithInternals({
+      environment: {},
+      credentialResolver: { resolve: async () => ({ status: "missing" }) },
+      cliExecutionResolver: {
+        resolve: async () => ({
+          mode: "direct",
+          executable: "/approved/codex",
+          argsPrefix: [],
+          env: { OPENAI_API_KEY: childSecret },
+          responseSensitiveValues: [childSecret],
+        }),
+      },
+    }, internals({
+      createProvider: () => { throw new Error("unused"); },
+      spawnProcess,
+    }));
+
+    await expect(client.listModels({ provider: "codex-cli" })).rejects.toMatchObject({
+      code: "MODEL_LIST_FAILED",
+      operation: "model-list",
+      provider: "codex-cli",
+    });
+  });
+
+  test("snapshots mutable generation input before the first asynchronous boundary", async () => {
+    const configs: ByokProviderConfig[] = [];
+    const inputs: Array<{ prompt: string; instructions?: string }> = [];
+    const client = createLlmNowCoreWithInternals({
+      environment: {},
+      credentialResolver: { resolve: async () => ({ status: "missing" }) },
+    }, internals({ createProvider: (config) => {
+      configs.push(config);
+      return provider({
+        generateText: async (input) => {
+          inputs.push(input);
+          return { text: "generated" };
+        },
+      });
+    } }));
+    const sensitiveValues = ["original-secret"];
+    const request = {
+      provider: "ollama" as const,
+      model: "model-a",
+      prompt: "prompt-a",
+      instructions: "instructions-a",
+      responseSensitiveValues: sensitiveValues,
+    };
+
+    const operation = client.generateText(request);
+    request.model = "model-b";
+    request.prompt = "prompt-b";
+    request.instructions = "instructions-b";
+    sensitiveValues[0] = "mutated-secret";
+
+    await expect(operation).resolves.toEqual({
+      provider: "ollama",
+      model: "model-a",
+      text: "generated",
+    });
+    expect(configs).toEqual([{ provider: "ollama", model: "model-a" }]);
+    expect(inputs).toEqual([{ prompt: "prompt-a", instructions: "instructions-a" }]);
   });
 });

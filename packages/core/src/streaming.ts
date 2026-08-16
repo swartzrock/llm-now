@@ -1,5 +1,5 @@
-import { LlmNowError } from "./errors.ts";
-import type { ProviderId } from "./types.ts";
+import { LlmNowError } from "./errors.js";
+import type { ProviderId } from "./types.js";
 
 const DEFAULT_SETTLEMENT_TIMEOUT_MS = 500;
 

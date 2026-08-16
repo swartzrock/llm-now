@@ -345,6 +345,21 @@ export function createSensitiveValueRegistry(
   };
 }
 
+export function recognizedEnvironmentCredentialValues(
+  env: ByokEnvironment,
+  platform: NodeJS.Platform = process.platform,
+): readonly string[] {
+  const recognizedNames = new Set(BYOK_API_KEY_ENV_VARS.map((name) =>
+    platform === "win32" ? name.toLowerCase() : name
+  ));
+  return Object.freeze([...new Set(
+    Object.entries(env)
+      .filter(([name]) => recognizedNames.has(platform === "win32" ? name.toLowerCase() : name))
+      .map(([, value]) => value)
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  )].sort((left, right) => right.length - left.length));
+}
+
 export type ResolvedCredential =
   | {
     source: "environment";

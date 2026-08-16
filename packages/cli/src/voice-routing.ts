@@ -1,4 +1,5 @@
 import {
+  compactRoutingKey,
   routeTranscript as routeCoreTranscript,
   routingSimilarity,
   type RouteRejectionReason as CoreRouteRejectionReason,
@@ -10,7 +11,6 @@ const ALIAS_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const MIN_FUZZY_LENGTH = 4;
 const MIN_FUZZY_SIMILARITY = 65;
 const MIN_FUZZY_MARGIN = 15;
-const COMPACT_CHARACTER = /[\p{Letter}\p{Number}]/u;
 const CONTROL_CHARACTER = /\p{Cc}/u;
 const VOICE_ROW = /^(.+?)\s+([A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)+)\s+#/;
 
@@ -77,14 +77,7 @@ export function resolveVoiceConfigPath(home: string, xdgConfigHome?: string): st
   return posix.join(root, "llm-now", "voice-router.toml");
 }
 
-export function compactKey(value: string): string {
-  const folded = caseFold(value.normalize("NFKC"));
-  let result = "";
-  for (const character of folded) {
-    if (COMPACT_CHARACTER.test(character)) result += character;
-  }
-  return result;
-}
+export const compactKey = compactRoutingKey;
 
 export function parseVoiceInventory(text: string): ReadonlyMap<string, string> {
   const voices = new Map<string, string>();

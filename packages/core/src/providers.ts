@@ -1,7 +1,6 @@
 import {
   BYOK_PROVIDER_API_KEY_ENV_VARS,
   BYOK_PROVIDER_IDS,
-  type ByokCloudProviderId,
   type ByokProviderConfig,
   type ByokProviderId,
   type ByokProviderRuntime,
@@ -16,22 +15,21 @@ import {
   type LocalProcessSpawner,
 } from "@swartzrock/byok-runtime/node";
 import { spawn } from "node:child_process";
-import type { CliExecutionDescriptor, CliExecutionResolver } from "./cli-execution.ts";
-import { validateCliExecutionDescriptor } from "./cli-execution.ts";
-import { LlmNowError } from "./errors.ts";
-import { raceWithCancellation } from "./streaming.ts";
+import type { CliExecutionDescriptor, CliExecutionResolver } from "./cli-execution.js";
+import { validateCliExecutionDescriptor } from "./cli-execution.js";
+import { LlmNowError } from "./errors.js";
+import { raceWithCancellation } from "./streaming.js";
 import type {
   CliProviderId,
   CloudProviderId,
   ProviderFamily,
   ProviderId,
   WorkspaceRequest,
-} from "./types.ts";
+} from "./types.js";
 
 export const CLOUD_PROVIDERS = Object.freeze(
   Object.keys(BYOK_PROVIDER_API_KEY_ENV_VARS) as CloudProviderId[],
 );
-export const LOCAL_PROVIDERS = Object.freeze(["ollama", "lm-studio"] as const);
 export const CLI_PROVIDERS = Object.freeze(["codex-cli", "claude-cli"] as const);
 export const DISCOVERY_ORDER = Object.freeze([...BYOK_PROVIDER_IDS] as ProviderId[]);
 
@@ -59,6 +57,11 @@ export interface CoreInternalDependencies {
     context: ProviderDiscoveryContext,
   ) => Promise<readonly ByokProviderId[]>;
   readonly createProvider: (config: ByokProviderConfig) => ByokProviderRuntime;
+  readonly preflightWorkspace?: (
+    provider: ProviderId,
+    workspace: WorkspaceRequest,
+    operation: "generation" | "streaming",
+  ) => Promise<WorkspaceRequest>;
   readonly spawnProcess?: LocalProcessSpawner;
   readonly settlementTimeoutMs?: number;
 }
@@ -86,28 +89,44 @@ interface CommandRunner {
   run(request: LocalCommandRequest): Promise<LocalCommandResult>;
 }
 
-function windowsCreateProcessQuote(value: string): string {
-  return `"${value.replace(/(\\*)"/g, "$1$1\\\"").replace(/(\\*)$/g, "$1$1")}"`;
+const WINDOWS_COMMAND_META = /([()\][%!^"`<>&|;, *?])/g;
+
+function validWindowsCommandValue(value: string): string {
+  if (/[\r\n]/.test(value)) throw new Error("Windows CLI arguments cannot contain line breaks");
+  return value;
+}
+
+function windowsCommand(value: string): string {
+  return validWindowsCommandValue(value).replace(WINDOWS_COMMAND_META, "^$1");
+}
+
+function windowsCommandArgument(value: string): string {
+  let argument = validWindowsCommandValue(value)
+    .replace(/(?=(\\+?)?)\1"/g, '$1$1\\"')
+    .replace(/(?=(\\+?)?)\1$/g, "$1$1");
+  argument = `"${argument}"`.replace(WINDOWS_COMMAND_META, "^$1");
+  // A .cmd shim parses forwarded arguments a second time.
+  return argument.replace(WINDOWS_COMMAND_META, "^$1");
 }
 
 export function windowsCommandShimArguments(
   shim: string,
   args: readonly string[],
 ): readonly string[] {
-  const command = [shim, ...args]
-    .map((value) => windowsCreateProcessQuote(value).replaceAll("%", "%%"))
-    .join(" ");
-  return Object.freeze(["/d", "/s", "/c", `"${command}"`]);
+  const command = [windowsCommand(shim), ...args.map(windowsCommandArgument)].join(" ");
+  return Object.freeze(["/d", "/v:off", "/s", "/c", `"${command}"`]);
 }
 
 export class ApprovedExecutionRunner implements CommandRunner {
   constructor(
     private readonly descriptor: CliExecutionDescriptor,
     private readonly spawnProcess: LocalProcessSpawner,
+    private readonly defaultSignal?: AbortSignal,
   ) {}
 
   run(request: LocalCommandRequest): Promise<LocalCommandResult> {
-    request.signal?.throwIfAborted();
+    const signal = request.signal ?? this.defaultSignal;
+    signal?.throwIfAborted();
     const requestArgs = request.args ?? [];
     const providerArgs = [...this.descriptor.argsPrefix, ...requestArgs];
     const command = this.descriptor.mode === "direct"
@@ -120,6 +139,9 @@ export class ApprovedExecutionRunner implements CommandRunner {
       ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
       shell: false,
       env: { ...this.descriptor.env },
+      ...(this.descriptor.mode === "windows-command-shim"
+        ? { windowsVerbatimArguments: true }
+        : {}),
     });
 
     return new Promise((resolve, reject) => {
@@ -130,7 +152,7 @@ export class ApprovedExecutionRunner implements CommandRunner {
       let interruption: unknown;
       let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-      const signal = request.signal;
+      let childError: unknown;
       const cleanup = () => {
         signal?.removeEventListener("abort", abort);
         if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
@@ -157,10 +179,12 @@ export class ApprovedExecutionRunner implements CommandRunner {
       child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
       child.stdin.once("error", (error) => interrupt(error));
       child.once("error", (error) => {
-        if (!aborted) finish(() => reject(error));
+        if (!aborted) childError ??= error;
       });
       child.once("close", (code) => finish(() => aborted
         ? reject(interruption)
+        : childError !== undefined
+          ? reject(childError)
         : resolve({ stdout, stderr, exitCode: code ?? 1 })));
       if (request.timeoutMs !== undefined) {
         timeoutTimer = setTimeout(
@@ -246,10 +270,12 @@ export function createCliRuntime(
   descriptor: CliExecutionDescriptor,
   internals: CoreInternalDependencies,
   workspace?: WorkspaceRequest,
+  operationSignal?: AbortSignal,
 ): ByokProviderRuntime {
   let runner: CommandRunner = new ApprovedExecutionRunner(
     descriptor,
     internals.spawnProcess ?? (spawn as unknown as LocalProcessSpawner),
+    operationSignal,
   );
   if (workspace !== undefined) runner = new WorkspaceCommandRunner(provider, workspace, runner);
   const options = {

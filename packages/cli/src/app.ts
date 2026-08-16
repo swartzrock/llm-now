@@ -47,6 +47,7 @@ import {
 import {
   CredentialVaultError,
   createPersistenceBlocker,
+  recognizedEnvironmentCredentialValues,
   resolveCredentialLockDirectory,
   withCredentialMutationLock,
   type CredentialMutationLock,
@@ -183,14 +184,6 @@ async function preflightAliasWorkspace(selection: AliasRecord): Promise<AliasRec
   );
 }
 
-function recognizedCredentialValues(env: ByokEnvironment): string[] {
-  return [...new Set(
-    BYOK_API_KEY_ENV_VARS
-      .map((name) => env[name])
-      .filter((value): value is string => Boolean(value)),
-  )].sort((left, right) => right.length - left.length);
-}
-
 function sanitizeDiagnostic(
   text: string,
   env: ByokEnvironment,
@@ -199,7 +192,7 @@ function sanitizeDiagnostic(
   let sanitized = stripTerminalSequences(text.replace(/\r\n?|\u2028|\u2029/g, "\n"));
   sanitized = sanitized.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
   sanitized = sensitive.redact(sanitized);
-  for (const value of recognizedCredentialValues(env)) {
+  for (const value of recognizedEnvironmentCredentialValues(env)) {
     sanitized = sanitized.replaceAll(value, "[REDACTED]");
   }
   return sanitized.length <= MAX_DIAGNOSTIC_LENGTH
@@ -966,24 +959,31 @@ async function generateWithTimeout(
 }
 
 async function withStageTimeout<T>(
-  operation: Promise<T>,
+  operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   stage: "model-list",
   provider: ByokProviderId | null,
 ): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new RuntimeStageError(stage, provider, `timed out after ${timeoutMs}ms`)),
-          timeoutMs,
-        );
-      }),
-    ]);
+    const result = await operation(controller.signal);
+    if (timedOut) {
+      throw new RuntimeStageError(stage, provider, `timed out after ${timeoutMs}ms`);
+    }
+    return result;
+  } catch (error) {
+    if (timedOut) {
+      throw new RuntimeStageError(stage, provider, `timed out after ${timeoutMs}ms`);
+    }
+    if (error instanceof RuntimeStageError) throw error;
+    throw error;
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    clearTimeout(timer);
   }
 }
 
@@ -1052,7 +1052,7 @@ async function resolveFreshSelection(
     runtime: {
       ...deps.runtime,
       listModels: (provider) => withStageTimeout(
-        deps.runtime.listModels(provider),
+        (signal) => deps.runtime.listModels(provider, signal),
         deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
         "model-list",
         provider,
@@ -1192,7 +1192,7 @@ async function promptAndVerifyCredential(
   }
 
   const models = await withStageTimeout(
-    deps.runtime.validateCredential(provider, candidate),
+    (signal) => deps.runtime.validateCredential(provider, candidate, signal),
     deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
     "model-list",
     provider,

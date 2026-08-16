@@ -28,6 +28,7 @@ export interface ReleasePlan {
 const stableVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const shaPattern = /^[a-f0-9]{40}$/;
 const cliPackagePath = "packages/cli/package.json";
+const legacyCliPackagePath = "package.json";
 const cliChangelogPath = "packages/cli/CHANGELOG.md";
 
 export function parseStableVersion(version: string): readonly [bigint, bigint, bigint] {
@@ -114,19 +115,39 @@ function git(cwd: string, args: string[]): string {
   return result.stdout.toString().trimEnd();
 }
 
-function packageAt(cwd: string, revision: string): PackageIdentity {
+function packageAt(
+  cwd: string,
+  revision: string,
+  allowLegacyRootFallback = false,
+): PackageIdentity {
+  let packagePath = cliPackagePath;
+  let source: string;
+  try {
+    source = git(cwd, ["show", `${revision}:${packagePath}`]);
+  } catch (error) {
+    if (!allowLegacyRootFallback) {
+      throw new Error(`could not read ${packagePath} at ${revision}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    packagePath = legacyCliPackagePath;
+    try {
+      source = git(cwd, ["show", `${revision}:${packagePath}`]);
+    } catch (fallbackError) {
+      throw new Error(`could not read ${cliPackagePath} or ${legacyCliPackagePath} at ${revision}: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+    }
+  }
+
   let value: unknown;
   try {
-    value = JSON.parse(git(cwd, ["show", `${revision}:${cliPackagePath}`]));
+    value = JSON.parse(source);
   } catch (error) {
-    throw new Error(`could not read ${cliPackagePath} at ${revision}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`could not parse ${packagePath} at ${revision}: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (!value || typeof value !== "object") {
-    throw new Error(`${cliPackagePath} at ${revision} must be an object`);
+    throw new Error(`${packagePath} at ${revision} must be an object`);
   }
   const record = value as Record<string, unknown>;
   if (typeof record.name !== "string" || typeof record.version !== "string") {
-    throw new Error(`${cliPackagePath} at ${revision} must contain string name and version fields`);
+    throw new Error(`${packagePath} at ${revision} must contain string name and version fields`);
   }
   return { name: record.name, version: record.version };
 }
@@ -145,7 +166,7 @@ export function planRelease(beforeSha: string, afterSha: string, cwd = process.c
   validateCommitSha(beforeSha, "before SHA");
   validateCommitSha(afterSha, "after SHA");
   const firstParentSha = git(cwd, ["rev-parse", `${afterSha}^1`]);
-  const beforePackage = packageAt(cwd, beforeSha);
+  const beforePackage = packageAt(cwd, beforeSha, true);
   const afterPackage = packageAt(cwd, afterSha);
   const versionChanged = beforePackage.version !== afterPackage.version;
   return classifyReleaseTransition({

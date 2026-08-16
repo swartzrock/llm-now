@@ -14,6 +14,8 @@ export type ModelOption = ByokModelOption;
 
 export type ProviderFamily = "cloud" | "local" | "cli";
 
+export type DiagnosticHandler = (diagnostic: string) => void | Promise<void>;
+
 export type ProviderUnavailabilityReason =
   | "credential-missing"
   | "credential-unavailable"
@@ -34,11 +36,13 @@ export interface ProviderDiscoveryResult {
 }
 
 export interface ProviderDiscoveryRequest {
+  readonly onDiagnostic?: DiagnosticHandler;
   readonly signal?: AbortSignal;
 }
 
 export interface ModelListRequest {
   readonly provider: ProviderId;
+  readonly onDiagnostic?: DiagnosticHandler;
   readonly signal?: AbortSignal;
 }
 
@@ -50,6 +54,7 @@ export interface ModelListResult {
 export interface ValidateConnectionRequest {
   readonly provider: ProviderId;
   readonly candidateCredential?: string;
+  readonly onDiagnostic?: DiagnosticHandler;
   readonly signal?: AbortSignal;
 }
 
@@ -65,6 +70,7 @@ export interface GenerateTextRequest {
   readonly instructions?: string;
   readonly workspace?: WorkspaceRequest;
   readonly responseSensitiveValues?: readonly string[];
+  readonly onDiagnostic?: DiagnosticHandler;
   readonly signal?: AbortSignal;
 }
 

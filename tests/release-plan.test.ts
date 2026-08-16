@@ -106,6 +106,57 @@ describe("release transition classification", () => {
       shouldRelease: false, releaseSha: afterSha,
     });
   });
+  test("compares the first workspace commit with the legacy root manifest", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-release-plan-"));
+    temporaryDirectories.push(directory);
+    git(directory, "init", "--initial-branch=main");
+    git(directory, "config", "user.email", "release@example.invalid");
+    git(directory, "config", "user.name", "Release Test");
+    await Bun.write(join(directory, "package.json"), '{"name":"llm-now","version":"0.1.0"}\n');
+    git(directory, "add", ".");
+    git(directory, "commit", "-m", "legacy layout");
+    const beforeSha = git(directory, "rev-parse", "HEAD");
+
+    await Bun.write(
+      join(directory, "package.json"),
+      '{"name":"llm-now-workspace","private":true,"workspaces":["packages/*"]}\n',
+    );
+    await Bun.write(
+      join(directory, "packages/cli/package.json"),
+      '{"name":"llm-now","version":"0.1.0"}\n',
+    );
+    git(directory, "add", ".");
+    git(directory, "commit", "-m", "migrate to workspaces");
+    const afterSha = git(directory, "rev-parse", "HEAD");
+
+    expect(planRelease(beforeSha, afterSha, directory)).toEqual({
+      shouldRelease: false, releaseSha: afterSha,
+    });
+  });
+  test("requires the CLI manifest at the after revision", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-release-plan-"));
+    temporaryDirectories.push(directory);
+    git(directory, "init", "--initial-branch=main");
+    git(directory, "config", "user.email", "release@example.invalid");
+    git(directory, "config", "user.name", "Release Test");
+    await Bun.write(join(directory, "package.json"), '{"name":"llm-now","version":"0.1.0"}\n');
+    await Bun.write(
+      join(directory, "packages/cli/package.json"),
+      '{"name":"llm-now","version":"0.1.0"}\n',
+    );
+    git(directory, "add", ".");
+    git(directory, "commit", "-m", "workspace layout");
+    const beforeSha = git(directory, "rev-parse", "HEAD");
+
+    await rm(join(directory, "packages/cli/package.json"));
+    git(directory, "add", "-A");
+    git(directory, "commit", "-m", "remove CLI manifest");
+    const afterSha = git(directory, "rev-parse", "HEAD");
+
+    expect(() => planRelease(beforeSha, afterSha, directory)).toThrow(
+      "could not read packages/cli/package.json",
+    );
+  });
   test("plans a real generated release diff from its exact first parent", async () => {
     const directory = await mkdtemp(join(process.cwd(), ".tmp-release-plan-"));
     temporaryDirectories.push(directory);

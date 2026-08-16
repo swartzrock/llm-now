@@ -1,5 +1,5 @@
 import { posix, win32 } from "node:path";
-import type { CliProviderId } from "./types.ts";
+import type { CliProviderId } from "./types.js";
 
 export interface DirectCliExecutionDescriptor {
   readonly mode: "direct";

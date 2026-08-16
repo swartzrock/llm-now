@@ -2,13 +2,15 @@ import { BYOK_PROVIDER_IDS } from "@swartzrock/byok-runtime";
 import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
-import { LlmNowError } from "./errors.ts";
+import { LlmNowError } from "./errors.js";
 import type {
   DirectoryAccess,
   ProviderId,
   WorkspaceCapabilities,
   WorkspaceRequest,
-} from "./types.ts";
+} from "./types.js";
+
+type WorkspaceOperation = "generation" | "streaming";
 
 const SUPPORTED = Object.freeze({
   primaryDirectory: true,
@@ -35,8 +37,8 @@ export function workspaceCapabilities(provider: ProviderId): WorkspaceCapabiliti
   return CAPABILITIES[provider];
 }
 
-function workspaceFailure(provider: ProviderId): LlmNowError {
-  return new LlmNowError("WORKSPACE_UNAVAILABLE", "generation", provider);
+function workspaceFailure(provider: ProviderId, operation: WorkspaceOperation): LlmNowError {
+  return new LlmNowError("WORKSPACE_UNAVAILABLE", operation, provider);
 }
 
 function supportsWorkspace(provider: ProviderId, accessMode: DirectoryAccess): boolean {
@@ -66,34 +68,35 @@ function validWorkspace(value: WorkspaceRequest): boolean {
 export async function preflightWorkspace(
   provider: ProviderId,
   workspace: WorkspaceRequest,
+  operation: WorkspaceOperation = "generation",
 ): Promise<WorkspaceRequest> {
   try {
     if (!validWorkspace(workspace) || !supportsWorkspace(provider, workspace.directoryAccess)) {
-      throw workspaceFailure(provider);
+      throw workspaceFailure(provider, operation);
     }
 
     const canonical: string[] = [];
     for (const directory of [workspace.primaryDirectory, ...workspace.additionalDirectories]) {
       const resolved = await realpath(directory);
-      if (!(await stat(resolved)).isDirectory()) throw workspaceFailure(provider);
+      if (!(await stat(resolved)).isDirectory()) throw workspaceFailure(provider, operation);
       await access(
         resolved,
         constants.R_OK
           | constants.X_OK
           | (workspace.directoryAccess === "read-write" ? constants.W_OK : 0),
       );
-      if (canonical.includes(resolved)) throw workspaceFailure(provider);
+      if (canonical.includes(resolved)) throw workspaceFailure(provider, operation);
       canonical.push(resolved);
     }
 
     const [primaryDirectory, ...additionalDirectories] = canonical;
-    if (primaryDirectory === undefined) throw workspaceFailure(provider);
+    if (primaryDirectory === undefined) throw workspaceFailure(provider, operation);
     return Object.freeze({
       primaryDirectory,
       additionalDirectories: Object.freeze(additionalDirectories),
       directoryAccess: workspace.directoryAccess,
     });
   } catch {
-    throw workspaceFailure(provider);
+    throw workspaceFailure(provider, operation);
   }
 }

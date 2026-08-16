@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { BYOK_PROVIDER_IDS } from "@swartzrock/byok-runtime";
 import type { LocalProcess, LocalProcessSpawner } from "@swartzrock/byok-runtime/node";
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { createLlmNowCoreWithInternals } from "../src/client.ts";
 import { ApprovedExecutionRunner, windowsCommandShimArguments } from "../src/providers.ts";
@@ -172,6 +176,25 @@ describe("approved CLI execution", () => {
     expect(settled).toBeTrue();
   });
 
+  test("waits for a child error to close before rejecting", async () => {
+    const process = fakeProcess();
+    const runner = new ApprovedExecutionRunner({
+      mode: "direct",
+      executable: "/approved/bin/codex",
+      argsPrefix: [],
+      env: {},
+    }, (() => process.child) as LocalProcessSpawner);
+    let settled = false;
+    const running = runner.run({ command: "ignored" }).finally(() => { settled = true; });
+
+    process.events.emit("error", new Error("child failed before close"));
+    await Promise.resolve();
+    expect(settled).toBeFalse();
+    process.events.emit("close", null);
+    await expect(running).rejects.toThrow("child failed before close");
+    expect(settled).toBeTrue();
+  });
+
   test("ignores an aborted child error, escalates termination, and still waits for close", async () => {
     const kills: Array<NodeJS.Signals | undefined> = [];
     const process = fakeProcess();
@@ -208,9 +231,66 @@ describe("approved CLI execution", () => {
       "gpt %MODEL% & safe",
     ])).toEqual([
       "/d",
+      "/v:off",
       "/s",
       "/c",
-      '""C:\\Tools\\codex.cmd" "exec" "--model" "gpt %%MODEL%% & safe""',
+      '"C:\\Tools\\codex.cmd ^^^"exec^^^" ^^^"--model^^^" ^^^"gpt^^^ ^^^%MODEL^^^%^^^ ^^^&^^^ safe^^^""',
     ]);
+  });
+
+  test("escapes cmd metacharacters in every Windows command-shim argument", () => {
+    expect(windowsCommandShimArguments("C:\\Tools\\codex.cmd", [
+      'quote" & whoami | type < input > output (group) ^ %PATH% !delayed!',
+    ])).toEqual([
+      "/d",
+      "/v:off",
+      "/s",
+      "/c",
+      '"C:\\Tools\\codex.cmd ^^^"quote\\^^^"^^^ ^^^&^^^ whoami^^^ ^^^|^^^ type^^^ ^^^<^^^ input^^^ ^^^>^^^ output^^^ ^^^(group^^^)^^^ ^^^^^^^ ^^^%PATH^^^%^^^ ^^^!delayed^^^!^^^""',
+    ]);
+  });
+
+  test("rejects line breaks in Windows command-shim inputs", () => {
+    expect(() => windowsCommandShimArguments("C:\\Tools\\codex.cmd", ["safe\nunsafe"])).toThrow(
+      "Windows CLI arguments cannot contain line breaks",
+    );
+    expect(() => windowsCommandShimArguments("C:\\Tools\\codex\r.cmd", [])).toThrow(
+      "Windows CLI arguments cannot contain line breaks",
+    );
+  });
+
+  test("does not execute a hostile adjacent command through a real Windows shim", async () => {
+    if (process.platform !== "win32") return;
+    const processor = process.env.ComSpec ?? process.env.COMSPEC;
+    const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT;
+    if (processor === undefined || systemRoot === undefined) {
+      throw new Error("Windows command processor environment is unavailable");
+    }
+    const directory = await mkdtemp(join(tmpdir(), "llm-now-command-shim-"));
+    const shim = join(directory, "fixture.cmd");
+    const marker = join(directory, "injected.txt");
+    await writeFile(shim, "@echo off\r\nexit /b 0\r\n");
+    try {
+      const runner = new ApprovedExecutionRunner({
+        mode: "windows-command-shim",
+        commandProcessor: processor,
+        shim,
+        argsPrefix: [],
+        env: {
+          ComSpec: processor,
+          SystemRoot: systemRoot,
+          TEMP: process.env.TEMP ?? directory,
+          TMP: process.env.TMP ?? directory,
+        },
+      }, spawn as unknown as LocalProcessSpawner);
+
+      await runner.run({
+        command: "ignored",
+        args: [`safe\" & (echo injected)>\"${marker}\" & rem \" %PATH% !PATH! ^|`],
+      });
+      expect(await Bun.file(marker).exists()).toBeFalse();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

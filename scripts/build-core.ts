@@ -11,6 +11,7 @@ const build = await Bun.build({
   outdir: output,
   target: "node",
   format: "esm",
+  packages: "external",
   sourcemap: "none",
   minify: false,
   naming: "[dir]/[name].js",

@@ -1,4 +1,4 @@
-import type { CloudProviderId } from "./types.ts";
+import type { CloudProviderId } from "./types.js";
 
 export type CredentialResolution =
   | Readonly<{ status: "resolved"; credential: string }>
