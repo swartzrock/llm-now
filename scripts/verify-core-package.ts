@@ -160,8 +160,17 @@ async function main(): Promise<void> {
   const sourceManifest = await Bun.file(join(coreRoot, "package.json")).json() as {
     name?: string;
     version?: string;
-    publishConfig?: { access?: string };
+    private?: boolean;
+    publishConfig?: unknown;
+    scripts?: Record<string, string>;
   };
+  if (sourceManifest.private !== true) throw new Error("source core package must be private");
+  if (Object.hasOwn(sourceManifest, "publishConfig")) {
+    throw new Error("source core package must not contain publishConfig");
+  }
+  for (const script of Object.keys(sourceManifest.scripts ?? {})) {
+    if (LIFECYCLE_SCRIPTS.has(script)) throw new Error(`source lifecycle script is forbidden: ${script}`);
+  }
   let temporary: string;
   try {
     temporary = await mkdtemp(join(tmpdir(), "llm-now-core-package-"));
@@ -220,14 +229,17 @@ async function main(): Promise<void> {
       exports?: Record<string, unknown>;
       scripts?: Record<string, string>;
       dependencies?: Record<string, string>;
-      publishConfig?: { access?: string };
+      publishConfig?: unknown;
       bin?: unknown;
       browser?: unknown;
     };
+    if (manifest.private !== true) throw new Error("packed core package must be private");
+    if (Object.hasOwn(manifest, "publishConfig")) {
+      throw new Error("packed core package must not contain publishConfig");
+    }
     if (
       manifest.name !== "@swartzrock/llm-now-core"
       || manifest.version !== sourceManifest.version
-      || manifest.private !== undefined
       || manifest.type !== "module"
       || manifest.sideEffects !== false
       || manifest.license !== "MIT"
@@ -235,8 +247,7 @@ async function main(): Promise<void> {
       || manifest.engines?.bun !== ">=1.3.14"
       || manifest.bin !== undefined
       || manifest.browser !== undefined
-      || manifest.publishConfig?.access !== "public"
-    ) throw new Error("packed manifest does not match the public runtime contract");
+    ) throw new Error("packed manifest does not match the private runtime contract");
     if (JSON.stringify(Object.keys(manifest.exports ?? {})) !== JSON.stringify(["."])) {
       throw new Error("packed package must expose only its root");
     }

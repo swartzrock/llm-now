@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 const repositoryPackage = await Bun.file(
@@ -9,11 +9,12 @@ const corePackage = await Bun.file(
   new URL("../packages/core/package.json", import.meta.url),
 ).json() as Record<string, unknown> & { version: string };
 
-describe("public core package", () => {
-  test("declares the minimal public ESM boundary", async () => {
+describe("private core package", () => {
+  test("declares the minimal private ESM boundary", async () => {
     expect(corePackage).toMatchObject({
       name: "@swartzrock/llm-now-core",
       version: corePackage.version,
+      private: true,
       type: "module",
       sideEffects: false,
       license: "MIT",
@@ -37,7 +38,7 @@ describe("public core package", () => {
         "unicode-case-folding": "1.1.1",
       },
     });
-    expect(corePackage.private).toBeUndefined();
+    expect(corePackage.publishConfig).toBeUndefined();
     expect(corePackage.scripts).toBeUndefined();
     expect(corePackage.bin).toBeUndefined();
     expect(corePackage.browser).toBeUndefined();
@@ -47,6 +48,65 @@ describe("public core package", () => {
         .toBe(true);
     }
   });
+
+  test.each([
+    ["a public manifest", (manifest: Record<string, unknown>) => {
+      delete manifest.private;
+    }, "packed core package must be private"],
+    ["publishConfig", (manifest: Record<string, unknown>) => {
+      manifest.publishConfig = {};
+    }, "packed core package must not contain publishConfig"],
+    ["an install lifecycle script", (manifest: Record<string, unknown>) => {
+      manifest.scripts = { postinstall: "echo forbidden" };
+    }, "packed lifecycle script is forbidden: postinstall"],
+  ])("rejects %s in the packed manifest", async (_label, mutate, expectedError) => {
+    const repository = new URL("..", import.meta.url).pathname;
+    const core = new URL("../packages/core", import.meta.url).pathname;
+    const directory = await mkdtemp(join(repository, ".tmp-core-policy-"));
+    try {
+      const fixture = join(directory, "package");
+      await cp(core, fixture, { recursive: true });
+      const manifest = structuredClone(corePackage);
+      manifest.private = true;
+      delete manifest.publishConfig;
+      mutate(manifest);
+      await Bun.write(join(fixture, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+      const npm = Bun.which("npm");
+      expect(npm).not.toBeNull();
+      const packed = Bun.spawnSync([
+        npm!,
+        "pack",
+        "--ignore-scripts",
+        "--json",
+        "--pack-destination",
+        directory,
+      ], {
+        cwd: fixture,
+        env: { ...process.env, npm_config_cache: join(directory, "npm-cache") },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(packed.exitCode, packed.stderr.toString()).toBe(0);
+      const [{ filename }] = JSON.parse(packed.stdout.toString()) as [{ filename: string }];
+
+      const verify = Bun.spawnSync([
+        process.execPath,
+        "scripts/verify-core-package.ts",
+        "--tarball",
+        join(directory, filename),
+      ], {
+        cwd: repository,
+        env: { ...process.env, NO_COLOR: "1" },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(verify.exitCode).not.toBe(0);
+      expect(verify.stderr.toString()).toContain(expectedError);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   test("packs and verifies real external Node, Bun, and NodeNext consumers", async () => {
     expect(repositoryPackage.scripts?.["core:pack:verify"]).toBe(

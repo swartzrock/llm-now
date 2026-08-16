@@ -44,8 +44,8 @@ function coreTransition(
   overrides: Partial<CoreReleaseTransitionInput> = {},
 ): CoreReleaseTransitionInput {
   return {
-    beforePackage: { name: "@swartzrock/llm-now-core", version: "0.0.0" },
-    afterPackage: { name: "@swartzrock/llm-now-core", version: "0.1.0", private: false },
+    beforePackage: { name: "@swartzrock/llm-now-core", version: "0.0.0", private: true },
+    afterPackage: { name: "@swartzrock/llm-now-core", version: "0.1.0", private: true },
     beforeCliPackage: { name: "llm-now", version: "2.7.0", private: true },
     afterCliPackage: { name: "llm-now", version: "2.7.0", private: true },
     intendedCoreVersion: "0.1.0",
@@ -250,7 +250,7 @@ describe("release transition classification", () => {
 });
 
 describe("core release transition classification", () => {
-  test("accepts only a public, first-parent, Changesets-generated core transition", () => {
+  test("accepts only a private, first-parent, Changesets-generated core transition", () => {
     expect(classifyCoreReleaseTransition(coreTransition())).toEqual({
       shouldRelease: true,
       releaseSha,
@@ -261,8 +261,16 @@ describe("core release transition classification", () => {
       firstParentSha: "c".repeat(40),
     }))).toThrow("first parent");
     expect(() => classifyCoreReleaseTransition(coreTransition({
-      afterPackage: { name: "@swartzrock/llm-now-core", version: "0.1.0", private: true },
-    }))).toThrow("must be public");
+      afterPackage: { name: "@swartzrock/llm-now-core", version: "0.1.0", private: false },
+    }))).toThrow("must be private");
+    expect(() => classifyCoreReleaseTransition(coreTransition({
+      afterPackage: {
+        name: "@swartzrock/llm-now-core",
+        version: "0.1.0",
+        private: true,
+        publishConfig: { access: "public" },
+      },
+    }))).toThrow("must not contain publishConfig");
     expect(() => classifyCoreReleaseTransition(coreTransition({
       changedFiles: coreTransition().changedFiles.filter((file) => !file.path.endsWith("CHANGELOG.md")),
     }))).toThrow("packages/core/CHANGELOG.md");
@@ -279,7 +287,7 @@ describe("core release transition classification", () => {
 
   test("returns no-op for orchestration-only and CLI-only transitions", () => {
     expect(classifyCoreReleaseTransition(coreTransition({
-      afterPackage: { name: "@swartzrock/llm-now-core", version: "0.0.0", private: false },
+      afterPackage: { name: "@swartzrock/llm-now-core", version: "0.0.0", private: true },
       intendedCoreVersion: null,
       changedFiles: [{ status: "M", path: "README.md" }], changelog: "",
     }))).toEqual({
@@ -288,6 +296,11 @@ describe("core release transition classification", () => {
       packageName: "@swartzrock/llm-now-core",
       version: "0.0.0",
     });
+    expect(() => classifyCoreReleaseTransition(coreTransition({
+      afterPackage: { name: "@swartzrock/llm-now-core", version: "0.0.0", private: false },
+      intendedCoreVersion: null,
+      changedFiles: [{ status: "M", path: "README.md" }], changelog: "",
+    }))).toThrow("must be private");
   });
 
   test("writes package identity outputs for the artifact job", async () => {
@@ -311,12 +324,12 @@ describe("core release transition classification", () => {
     git(directory, "config", "user.email", "release@example.invalid");
     git(directory, "config", "user.name", "Release Test");
     await Bun.write(join(directory, "packages/cli/package.json"), '{"name":"llm-now","version":"2.7.0","private":true}\n');
-    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"0.0.0"}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"0.0.0","private":true}\n');
     await Bun.write(join(directory, ".changeset/initial-core.md"), '---\n"@swartzrock/llm-now-core": minor\n---\n\nPublish core.\n');
     git(directory, "add", ".");
     git(directory, "commit", "-m", "feature intent");
     const beforeSha = git(directory, "rev-parse", "HEAD");
-    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"0.1.0"}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"0.1.0","private":true}\n');
     await Bun.write(join(directory, "packages/core/CHANGELOG.md"), '# @swartzrock/llm-now-core\n\n## 0.1.0\n\n- Publish core.\n');
     await rm(join(directory, ".changeset/initial-core.md"));
     git(directory, "add", "-A");
@@ -341,7 +354,7 @@ describe("core release transition classification", () => {
     git(directory, "config", "user.email", "release@example.invalid");
     git(directory, "config", "user.name", "Release Test");
     await Bun.write(join(directory, "packages/cli/package.json"), '{"name":"llm-now","version":"2.7.0","private":true}\n');
-    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.3"}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.3","private":true}\n');
     await Bun.write(
       join(directory, ".changeset/core-release.md"),
       `---\n"@swartzrock/llm-now-core": ${bump}\n---\n\nRelease core.\n`,
@@ -350,7 +363,7 @@ describe("core release transition classification", () => {
     git(directory, "commit", "-m", "feature intent");
     const beforeSha = git(directory, "rev-parse", "HEAD");
 
-    await Bun.write(join(directory, "packages/core/package.json"), `{"name":"@swartzrock/llm-now-core","version":"${version}"}\n`);
+    await Bun.write(join(directory, "packages/core/package.json"), `{"name":"@swartzrock/llm-now-core","version":"${version}","private":true}\n`);
     await Bun.write(
       join(directory, "packages/core/CHANGELOG.md"),
       `# @swartzrock/llm-now-core\n\n## ${version}\n\n- Release core.\n`,
@@ -373,13 +386,13 @@ describe("core release transition classification", () => {
     git(directory, "config", "user.email", "release@example.invalid");
     git(directory, "config", "user.name", "Release Test");
     await Bun.write(join(directory, "packages/cli/package.json"), '{"name":"llm-now","version":"2.7.0","private":true}\n');
-    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.3"}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.3","private":true}\n');
     await Bun.write(join(directory, ".changeset/cli-only.md"), '---\n"llm-now": patch\n---\n\nRelease CLI.\n');
     git(directory, "add", ".");
     git(directory, "commit", "-m", "CLI intent");
     const beforeSha = git(directory, "rev-parse", "HEAD");
 
-    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.4"}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.4","private":true}\n');
     await Bun.write(join(directory, "packages/core/CHANGELOG.md"), "# core\n\n## 1.2.4\n\n- Manual bump.\n");
     await rm(join(directory, ".changeset/cli-only.md"));
     git(directory, "add", "-A");
@@ -398,14 +411,14 @@ describe("core release transition classification", () => {
     git(directory, "config", "user.email", "release@example.invalid");
     git(directory, "config", "user.name", "Release Test");
     await Bun.write(join(directory, "packages/cli/package.json"), '{"name":"llm-now","version":"2.7.0","private":true}\n');
-    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.3"}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.3","private":true}\n');
     await Bun.write(join(directory, ".changeset/core-patch.md"), '---\n"@swartzrock/llm-now-core": patch\n---\n\nFix core.\n');
     await Bun.write(join(directory, ".changeset/core-minor.md"), '---\n"@swartzrock/llm-now-core": minor\n---\n\nAdd core behavior.\n');
     git(directory, "add", ".");
     git(directory, "commit", "-m", "core intent");
     const beforeSha = git(directory, "rev-parse", "HEAD");
 
-    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.4"}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.4","private":true}\n');
     await Bun.write(join(directory, "packages/core/CHANGELOG.md"), "# core\n\n## 1.2.4\n\n- Wrong bump.\n");
     await rm(join(directory, ".changeset/core-patch.md"));
     await rm(join(directory, ".changeset/core-minor.md"));
@@ -425,13 +438,13 @@ describe("core release transition classification", () => {
     git(directory, "config", "user.email", "release@example.invalid");
     git(directory, "config", "user.name", "Release Test");
     await Bun.write(join(directory, "packages/cli/package.json"), '{"name":"llm-now","version":"2.7.0","private":true}\n');
-    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.3"}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.3","private":true}\n');
     await Bun.write(join(directory, ".changeset/malformed.md"), '---\n"@swartzrock/llm-now-core": patch\n\nMissing delimiter.\n');
     git(directory, "add", ".");
     git(directory, "commit", "-m", "malformed intent");
     const beforeSha = git(directory, "rev-parse", "HEAD");
 
-    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.4"}\n');
+    await Bun.write(join(directory, "packages/core/package.json"), '{"name":"@swartzrock/llm-now-core","version":"1.2.4","private":true}\n');
     await Bun.write(join(directory, "packages/core/CHANGELOG.md"), "# core\n\n## 1.2.4\n\n- Manual bump.\n");
     await rm(join(directory, ".changeset/malformed.md"));
     git(directory, "add", "-A");

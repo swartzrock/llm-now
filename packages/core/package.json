@@ -1,6 +1,7 @@
 {
   "name": "@swartzrock/llm-now-core",
   "version": "0.1.0",
+  "private": true,
   "description": "Headless provider, generation, streaming, cancellation, safety, and transcript routing for trusted Node and Bun hosts",
   "type": "module",
   "sideEffects": false,
@@ -9,9 +10,6 @@
     "type": "git",
     "url": "git+https://github.com/swartzrock/llm-now.git",
     "directory": "packages/core"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "engines": {
     "node": ">=20",
