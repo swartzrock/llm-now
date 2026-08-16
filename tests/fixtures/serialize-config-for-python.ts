@@ -1,7 +1,7 @@
 import {
   serializeConfigDocument,
   type ConfigDocumentV1,
-} from "../../src/config-schema.ts";
+} from "../../packages/cli/src/config-schema.ts";
 
 const document: ConfigDocumentV1 = {
   version: 1,

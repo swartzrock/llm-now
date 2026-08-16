@@ -10,13 +10,13 @@ import {
   resolveAliasPath,
   sameAliasRecord,
   saveAlias,
-} from "../src/aliases.ts";
-import { createPersistenceBlocker } from "../src/credentials.ts";
+} from "../packages/cli/src/aliases.ts";
+import { createPersistenceBlocker } from "../packages/cli/src/credentials.ts";
 import {
   normalizeWorkspace,
   workspaceCapabilities,
   workspaceStateLabel,
-} from "../src/workspace.ts";
+} from "../packages/cli/src/workspace.ts";
 
 const temporaryDirectories: string[] = [];
 

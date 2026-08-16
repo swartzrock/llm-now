@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { BYOK_API_KEY_ENV_VARS, type ByokEnvironment } from "@swartzrock/byok-runtime";
-import type { AliasDocument } from "../src/aliases.ts";
-import type { ConfigSnapshot } from "../src/config.ts";
-import { createSensitiveValueRegistry } from "../src/credentials.ts";
+import type { AliasDocument } from "../packages/cli/src/aliases.ts";
+import type { ConfigSnapshot } from "../packages/cli/src/config.ts";
+import { createSensitiveValueRegistry } from "../packages/cli/src/credentials.ts";
 import {
   REQUEST_FAILED_NOTICE,
   RETRY_NOTICE,
@@ -16,8 +16,8 @@ import {
   type VoiceProcessRequest,
   type VoiceProcessRunner,
   type VoiceSpeechDependencies,
-} from "../src/voice.ts";
-import { parseVoiceConfig } from "../src/voice-routing.ts";
+} from "../packages/cli/src/voice.ts";
+import { parseVoiceConfig } from "../packages/cli/src/voice-routing.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

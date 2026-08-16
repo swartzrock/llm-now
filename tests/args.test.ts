@@ -8,7 +8,7 @@ import {
   parseArguments,
   renderHelpText,
   requireDeterministicSelection,
-} from "../src/args.ts";
+} from "../packages/cli/src/args.ts";
 import {
   InvalidUtf8Error,
   isInteractive,
@@ -16,8 +16,8 @@ import {
   readUtf8,
   resolveInputSource,
   resolvePrompt,
-} from "../src/io.ts";
-import { stripTerminalSequences } from "../src/prompts.ts";
+} from "../packages/cli/src/io.ts";
+import { stripTerminalSequences } from "../packages/cli/src/prompts.ts";
 
 const APPROVED_HELP_TEXT = `A tiny CLI for prompting models you already use.
 

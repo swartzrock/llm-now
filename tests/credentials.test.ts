@@ -6,6 +6,7 @@ import {
 import {
   CredentialVaultError,
   NATIVE_VAULT_SERVICE,
+  adaptCredentialResolverForCore,
   createBunCredentialVault,
   createCredentialResolver,
   createPersistenceBlocker,
@@ -14,7 +15,7 @@ import {
   nativeVaultName,
   withCredentialMutationLock,
   type NativeSecretStore,
-} from "../src/credentials.ts";
+} from "../packages/cli/src/credentials.ts";
 import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -146,6 +147,29 @@ describe("native credential vault", () => {
 });
 
 describe("credential resolution and redaction", () => {
+  test("adapts CLI-owned credential sources to the storage-agnostic core contract", async () => {
+    const resolved = adaptCredentialResolverForCore({
+      resolve: async () => ({
+        source: "environment",
+        apiKey: "caller-secret",
+        envName: "OPENAI_API_KEY",
+      }),
+    });
+    const missing = adaptCredentialResolverForCore({
+      resolve: async () => ({ source: "missing" }),
+    });
+    const unavailable = adaptCredentialResolverForCore({
+      resolve: async () => ({ source: "unavailable", reason: "target-disabled" }),
+    });
+
+    expect(await resolved.resolve("openai")).toEqual({
+      status: "resolved",
+      credential: "caller-secret",
+    });
+    expect(await missing.resolve("openai")).toEqual({ status: "missing" });
+    expect(await unavailable.resolve("openai")).toEqual({ status: "unavailable" });
+  });
+
   test("separates source-aware persistence blocking from broad output redaction", () => {
     const blocker = createPersistenceBlocker({
       OPENAI_API_KEY: "x",

@@ -8,7 +8,6 @@ import {
 } from "@swartzrock/byok-runtime";
 import pc from "picocolors";
 import type { Readable, Writable } from "node:stream";
-import { stripVTControlCharacters } from "node:util";
 import {
   type AliasRecord,
   type SaveAliasResult,
@@ -48,6 +47,7 @@ import {
 import {
   CredentialVaultError,
   createPersistenceBlocker,
+  recognizedEnvironmentCredentialValues,
   resolveCredentialLockDirectory,
   withCredentialMutationLock,
   type CredentialMutationLock,
@@ -104,7 +104,6 @@ import {
 } from "./workspace.ts";
 
 const DEFAULT_GENERATION_TIMEOUT_MS = 45_000;
-const DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS = 500;
 const DEFAULT_MODEL_LIST_TIMEOUT_MS = 10_000;
 const MAX_DIAGNOSTIC_LENGTH = 1_024;
 const MANAGE_API_KEYS_VALUE = "setup:manage-api-keys";
@@ -143,7 +142,6 @@ export interface ApplicationDependencies {
   saveAlias?: typeof saveStoredAlias;
   migrateConfig?: typeof migrateStoredConfig;
   generationTimeoutMs?: number;
-  generationCleanupTimeoutMs?: number;
   modelListTimeoutMs?: number;
   credentialVault: CredentialVault;
   credentialResolver: CredentialResolver;
@@ -186,14 +184,6 @@ async function preflightAliasWorkspace(selection: AliasRecord): Promise<AliasRec
   );
 }
 
-function recognizedCredentialValues(env: ByokEnvironment): string[] {
-  return [...new Set(
-    BYOK_API_KEY_ENV_VARS
-      .map((name) => env[name])
-      .filter((value): value is string => Boolean(value)),
-  )].sort((left, right) => right.length - left.length);
-}
-
 function sanitizeDiagnostic(
   text: string,
   env: ByokEnvironment,
@@ -202,7 +192,7 @@ function sanitizeDiagnostic(
   let sanitized = stripTerminalSequences(text.replace(/\r\n?|\u2028|\u2029/g, "\n"));
   sanitized = sanitized.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
   sanitized = sensitive.redact(sanitized);
-  for (const value of recognizedCredentialValues(env)) {
+  for (const value of recognizedEnvironmentCredentialValues(env)) {
     sanitized = sanitized.replaceAll(value, "[REDACTED]");
   }
   return sanitized.length <= MAX_DIAGNOSTIC_LENGTH
@@ -919,20 +909,6 @@ type GenerationOutcome =
   | Readonly<{ kind: "timed_out" }>
   | Readonly<{ kind: "cancelled" }>;
 
-async function waitForSettlement(
-  operation: Promise<unknown>,
-  timeoutMs: number,
-): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([
-    operation.then(() => undefined, () => undefined),
-    new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, timeoutMs);
-    }),
-  ]);
-  if (timer !== undefined) clearTimeout(timer);
-}
-
 async function generateWithTimeout(
   deps: ApplicationDependencies,
   provider: ByokProviderId,
@@ -945,20 +921,18 @@ async function generateWithTimeout(
 ): Promise<GenerationOutcome> {
   const timeoutMs = deps.generationTimeoutMs ?? DEFAULT_GENERATION_TIMEOUT_MS;
   const controller = new AbortController();
-  let interrupt: (outcome: GenerationOutcome) => void = () => undefined;
-  const interrupted = new Promise<GenerationOutcome>((resolve) => {
-    interrupt = resolve;
-  });
   const cancel = () => {
-    controller.abort(rootSignal?.reason);
-    interrupt({ kind: "cancelled" });
+    controller.abort();
   };
   rootSignal?.addEventListener("abort", cancel, { once: true });
+  let timedOut = false;
   const timer = setTimeout(() => {
-    controller.abort(new Error("generation timed out"));
-    interrupt({ kind: "timed_out" });
+    timedOut = true;
+    controller.abort();
   }, timeoutMs);
-  const generation = Promise.resolve().then(() => deps.runtime.generate(
+  if (rootSignal?.aborted) cancel();
+  try {
+    const response = await deps.runtime.generate(
       provider,
       model,
       prompt,
@@ -966,47 +940,50 @@ async function generateWithTimeout(
       instructions,
       workspace,
       onChunk,
-    )).then<GenerationOutcome, GenerationOutcome>(
-      (response) => ({ kind: "completed", response }),
-      (error) => ({ kind: "failed", error }),
     );
-  if (rootSignal?.aborted) cancel();
-  const outcome = await Promise.race([generation, interrupted]);
-  clearTimeout(timer);
-  rootSignal?.removeEventListener("abort", cancel);
-
-  if (outcome.kind === "cancelled" || outcome.kind === "timed_out") {
-    if (provider === "codex-cli" || provider === "claude-cli") {
-      await generation;
-    } else {
-      await waitForSettlement(
-        generation,
-        deps.generationCleanupTimeoutMs ?? DEFAULT_GENERATION_CLEANUP_TIMEOUT_MS,
-      );
-    }
+    return rootSignal?.aborted
+      ? { kind: "cancelled" }
+      : timedOut
+        ? { kind: "timed_out" }
+        : { kind: "completed", response };
+  } catch (error) {
+    return rootSignal?.aborted
+      ? { kind: "cancelled" }
+      : timedOut
+        ? { kind: "timed_out" }
+        : { kind: "failed", error };
+  } finally {
+    clearTimeout(timer);
+    rootSignal?.removeEventListener("abort", cancel);
   }
-  return rootSignal?.aborted ? { kind: "cancelled" } : outcome;
 }
 
 async function withStageTimeout<T>(
-  operation: Promise<T>,
+  operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   stage: "model-list",
   provider: ByokProviderId | null,
 ): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new RuntimeStageError(stage, provider, `timed out after ${timeoutMs}ms`)),
-          timeoutMs,
-        );
-      }),
-    ]);
+    const result = await operation(controller.signal);
+    if (timedOut) {
+      throw new RuntimeStageError(stage, provider, `timed out after ${timeoutMs}ms`);
+    }
+    return result;
+  } catch (error) {
+    if (timedOut) {
+      throw new RuntimeStageError(stage, provider, `timed out after ${timeoutMs}ms`);
+    }
+    if (error instanceof RuntimeStageError) throw error;
+    throw error;
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    clearTimeout(timer);
   }
 }
 
@@ -1075,7 +1052,7 @@ async function resolveFreshSelection(
     runtime: {
       ...deps.runtime,
       listModels: (provider) => withStageTimeout(
-        deps.runtime.listModels(provider),
+        (signal) => deps.runtime.listModels(provider, signal),
         deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
         "model-list",
         provider,
@@ -1215,7 +1192,7 @@ async function promptAndVerifyCredential(
   }
 
   const models = await withStageTimeout(
-    deps.runtime.validateCredential(provider, candidate),
+    (signal) => deps.runtime.validateCredential(provider, candidate, signal),
     deps.modelListTimeoutMs ?? DEFAULT_MODEL_LIST_TIMEOUT_MS,
     "model-list",
     provider,
@@ -1716,11 +1693,6 @@ function writeInteractiveBoundary(stderr: TextOutput, response: string): void {
   stderr.write(`\u001b[0m${response.endsWith("\n") ? "\n" : "\n\n"}`);
 }
 
-function sanitizeGeneratedOutput(text: string): string {
-  return stripVTControlCharacters(text)
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, "");
-}
-
 function writeOutput(output: TextOutput, text: string): Promise<void> {
   return new Promise((resolve, reject) => {
     output.write(text, (error) => error ? reject(error) : resolve());
@@ -2019,13 +1991,8 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       let streamedResponse = "";
       const writeStreamChunk = parsed.stream
         ? async (chunk: string) => {
-          const outputChunk = sanitizeGeneratedOutput(chunk);
-          const nextResponse = streamedResponse + outputChunk;
-          if (deps.sensitive.redact(nextResponse) !== nextResponse) {
-            throw new Error("response stream stopped because it contained a registered credential");
-          }
-          streamedResponse = nextResponse;
-          await writeOutput(deps.stdout, outputChunk);
+          streamedResponse += chunk;
+          await writeOutput(deps.stdout, chunk);
         }
         : undefined;
       const generated = await generateWithTimeout(
@@ -2066,13 +2033,8 @@ export async function runApplication(deps: ApplicationDependencies): Promise<num
       } else if (parsed.stream) {
         if (interactive) writeInteractiveBoundary(deps.stderr, streamedResponse);
       } else {
-        const outputResponse = sanitizeGeneratedOutput(response);
-        if (deps.sensitive.redact(outputResponse) !== outputResponse) {
-          diagnostic("generation: response withheld because it contained a registered credential.");
-          return 1;
-        }
-        await writeOutput(deps.stdout, outputResponse);
-        if (interactive) writeInteractiveBoundary(deps.stderr, outputResponse);
+        await writeOutput(deps.stdout, response);
+        if (interactive) writeInteractiveBoundary(deps.stderr, response);
       }
 
       if (signal?.aborted) return cancelled();

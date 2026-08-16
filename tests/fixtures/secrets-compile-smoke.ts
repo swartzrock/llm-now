@@ -1,4 +1,4 @@
-import type { NativeSecretAdapter } from "../../src/credentials.ts";
+import type { NativeSecretAdapter } from "../../packages/cli/src/credentials.ts";
 
 type LifecycleStage =
   | "missing"

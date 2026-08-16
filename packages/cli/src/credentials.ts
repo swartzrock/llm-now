@@ -4,6 +4,7 @@ import {
   type ByokCloudProviderId,
   type ByokEnvironment,
 } from "@swartzrock/byok-runtime";
+import type { CredentialResolver as CoreCredentialResolver } from "@swartzrock/llm-now-core";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -344,6 +345,21 @@ export function createSensitiveValueRegistry(
   };
 }
 
+export function recognizedEnvironmentCredentialValues(
+  env: ByokEnvironment,
+  platform: NodeJS.Platform = process.platform,
+): readonly string[] {
+  const recognizedNames = new Set(BYOK_API_KEY_ENV_VARS.map((name) =>
+    platform === "win32" ? name.toLowerCase() : name
+  ));
+  return Object.freeze([...new Set(
+    Object.entries(env)
+      .filter(([name]) => recognizedNames.has(platform === "win32" ? name.toLowerCase() : name))
+      .map(([, value]) => value)
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  )].sort((left, right) => right.length - left.length));
+}
+
 export type ResolvedCredential =
   | {
     source: "environment";
@@ -392,6 +408,26 @@ export function createCredentialResolver(
       vaultValues.delete(provider);
     },
   };
+}
+
+export function adaptCredentialResolverForCore(
+  resolver: CredentialResolver,
+): CoreCredentialResolver {
+  const adapter: CoreCredentialResolver = {
+    async resolve(provider) {
+      const resolved = await resolver.resolve(provider);
+      switch (resolved.source) {
+        case "environment":
+        case "vault":
+          return Object.freeze({ status: "resolved", credential: resolved.apiKey });
+        case "missing":
+          return Object.freeze({ status: "missing" });
+        case "unavailable":
+          return Object.freeze({ status: "unavailable" });
+      }
+    },
+  };
+  return Object.freeze(adapter);
 }
 
 export interface NativeVaultTarget {

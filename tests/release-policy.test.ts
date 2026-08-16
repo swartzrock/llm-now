@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { validateVoiceDependencies } from "../scripts/release-validate.ts";
-import { NATIVE_VAULT_COMPATIBILITY } from "../src/credentials.ts";
+import { NATIVE_VAULT_COMPATIBILITY } from "../packages/cli/src/credentials.ts";
 
 const releaseWorkflow = await Bun.file(
   new URL("../.github/workflows/release.yml", import.meta.url),
@@ -9,6 +9,7 @@ const ciWorkflow = await Bun.file(new URL("../.github/workflows/ci.yml", import.
 const changesetsWorkflow = await Bun.file(
   new URL("../.github/workflows/changesets.yml", import.meta.url),
 ).text();
+const rootPackage = await Bun.file(new URL("../package.json", import.meta.url)).json();
 const releaseCoordinatorExists = await Bun.file(
   new URL("../.github/workflows/release-coordinator.yml", import.meta.url),
 ).exists();
@@ -23,6 +24,25 @@ describe("release workflow policy", () => {
       expect(upload).toBeGreaterThan(gate);
       expect(workflow.match(/bun scripts\/release-validate\.ts secrets/g)).toHaveLength(2);
       expect(workflow).toContain("bun scripts/release-validate.ts secrets ${{ matrix.target }}");
+    }
+  });
+
+  test("builds the core workspace before every direct release-validation job", () => {
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      const validationJobs = workflow
+        .split(/(?=^  [a-zA-Z0-9_-]+:\n)/m)
+        .filter((job) => job.includes("bun scripts/release-validate.ts"));
+
+      expect(validationJobs.length).toBeGreaterThan(0);
+      for (const job of validationJobs) {
+        const install = job.indexOf("run: bun install --frozen-lockfile");
+        const coreBuild = job.indexOf("run: bun run core:build");
+        const validation = job.indexOf("bun scripts/release-validate.ts");
+
+        expect(install).toBeGreaterThan(-1);
+        expect(coreBuild).toBeGreaterThan(install);
+        expect(validation).toBeGreaterThan(coreBuild);
+      }
     }
   });
 
@@ -90,6 +110,29 @@ describe("release workflow policy", () => {
     expect(releaseWorkflow).toContain("RELEASE_SHA: ${{ needs.classify.outputs.release-sha }}");
     expect(releaseWorkflow).toContain("bun scripts/release-plan.ts \"$parent_sha\" \"$RELEASE_SHA\"");
     expect(releaseWorkflow).toContain("untagged publication requires a release-shaped first-parent transition");
+  });
+
+  test("derives native version, tag, and changelog only from the CLI workspace", async () => {
+    const buildScript = await Bun.file(new URL("../scripts/build.ts", import.meta.url)).text();
+    const releasePlan = await Bun.file(
+      new URL("../scripts/release-plan.ts", import.meta.url),
+    ).text();
+    const releaseValidation = await Bun.file(
+      new URL("../scripts/release-validate.ts", import.meta.url),
+    ).text();
+
+    for (const source of [buildScript, releasePlan, releaseValidation]) {
+      expect(source).toContain("packages/cli/package.json");
+      expect(source).not.toMatch(/from\s+["']\.\.\/package\.json["']/);
+    }
+    expect(releasePlan).toContain('const cliChangelogPath = "packages/cli/CHANGELOG.md"');
+    expect(releaseWorkflow).toContain(
+      `VERSION="$(bun -p 'require("./packages/cli/package.json").version')"`,
+    );
+    expect(releaseWorkflow).toContain(
+      'bun scripts/release-notes.ts "$VERSION" "$RELEASE_SHA" packages/cli/CHANGELOG.md dist/RELEASE_NOTES.md',
+    );
+    expect(releaseWorkflow).not.toMatch(/packages\/core\/(?:package\.json|CHANGELOG\.md).*\b(?:VERSION|TAG)\b/);
   });
 
   test("classifies pushes inside the top-level release workflow", () => {
@@ -171,7 +214,10 @@ describe("release workflow policy", () => {
     );
     expect(sourceJob).toContain('python-version: "3.11"');
     expect(sourceJob).toContain('version: "0.11.16"');
-    expect(sourceJob).toContain("run: bun scripts/release-validate.ts packages");
+    expect(sourceJob).toContain("run: bun run release:validate");
+    expect(rootPackage.scripts["release:validate"]).toBe(
+      "bun run core:build && bun scripts/release-validate.ts packages",
+    );
     expect(sourceJob).toContain("run: bun run check");
     expect(sourceJob).toContain(
       "run: uv run --project examples/macos-voice-router --locked python -m unittest discover -s examples/macos-voice-router/tests",
@@ -397,7 +443,7 @@ describe("release workflow policy", () => {
       releaseWorkflow.indexOf("\n  homebrew-sync:"),
     );
     expect(finalAssetsJob).toContain(
-      'bun scripts/release-notes.ts "$VERSION" "$RELEASE_SHA" CHANGELOG.md dist/RELEASE_NOTES.md',
+      'bun scripts/release-notes.ts "$VERSION" "$RELEASE_SHA" packages/cli/CHANGELOG.md dist/RELEASE_NOTES.md',
     );
     expect(finalAssetsJob).toContain("dist/RELEASE_NOTES.md");
     expect(publishJob).toContain('--notes-file dist/RELEASE_NOTES.md');

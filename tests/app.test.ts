@@ -11,19 +11,25 @@ import {
   type AliasRecord,
   type AliasDocument,
   type SaveAliasResult,
-} from "../src/aliases.ts";
-import { renderHelpText } from "../src/args.ts";
-import { serializeConfigDocument } from "../src/config-schema.ts";
-import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
+} from "../packages/cli/src/aliases.ts";
+import { renderHelpText } from "../packages/cli/src/args.ts";
+import { serializeConfigDocument } from "../packages/cli/src/config-schema.ts";
+import { RuntimeStageError, type RuntimeGateway } from "../packages/cli/src/runtime.ts";
+import {
+  createLlmNowCoreWithInternals,
+  type LlmNowCoreClient,
+} from "../packages/core/src/client.ts";
 import {
   CONFIG_FAILED_NOTICE,
   REQUEST_FAILED_NOTICE,
   type VoiceCancellation,
   type VoiceProcessRequest,
   type VoiceProcessRunner,
-} from "../src/voice.ts";
-import { createRuntimeGateway } from "../src/runtime.ts";
-import { runApplication, type ApplicationPrompter } from "../src/app.ts";
+} from "../packages/cli/src/voice.ts";
+import {
+  createCoreRuntimeGateway,
+} from "../packages/cli/src/runtime.ts";
+import { runApplication, type ApplicationPrompter } from "../packages/cli/src/app.ts";
 import {
   CredentialVaultError,
   createCredentialResolver,
@@ -32,14 +38,14 @@ import {
   type CredentialResolver,
   type CredentialVault,
   type SensitiveValueRegistry,
-} from "../src/credentials.ts";
+} from "../packages/cli/src/credentials.ts";
 import {
   CLOUD_CREDENTIAL_PROVIDERS,
   stripTerminalSequences,
   type PromptOption,
   type TextPromptOptions,
   type PromptValue,
-} from "../src/prompts.ts";
+} from "../packages/cli/src/prompts.ts";
 
 const temporaryDirectories: string[] = [];
 const conflictingAliasDocument = JSON.stringify({
@@ -153,18 +159,18 @@ function runtime(options: {
 } = {}) {
   const calls = { discover: 0, list: 0, generate: 0 };
   const value: RuntimeGateway = {
-    discover: async () => {
+    discover: async (signal) => {
       calls.discover += 1;
-      if (options.discover) return options.discover();
+      if (options.discover) return options.discover(signal);
       return options.providers ?? ["ollama"];
     },
-    listModels: async (provider) => {
+    listModels: async (provider, signal) => {
       calls.list += 1;
-      if (options.listModels) return options.listModels(provider);
+      if (options.listModels) return options.listModels(provider, signal);
       return [{ id: "qwen", label: "Qwen" }];
     },
-    validateCredential: async (provider, apiKey) => {
-      if (options.validateCredential) return options.validateCredential(provider, apiKey);
+    validateCredential: async (provider, apiKey, signal) => {
+      if (options.validateCredential) return options.validateCredential(provider, apiKey, signal);
       return [{ id: "qwen", label: "Qwen" }];
     },
     generate: async (...args) => {
@@ -2289,7 +2295,7 @@ describe("one-shot application", () => {
     expect(app.runtime.calls.generate).toBe(0);
   });
 
-  test("withholds an entire generated response containing a registered sensitive value", async () => {
+  test("preserves a buffered safety rejection from the runtime boundary", async () => {
     const sensitive = createSensitiveValueRegistry(["u2-output-secret"]);
     let saves = 0;
     const app = dependencies({
@@ -2298,7 +2304,13 @@ describe("one-shot application", () => {
       stderrTty: true,
       env: { NO_COLOR: "1" },
       sensitive,
-      runtime: runtime({ response: "prefix u2-output-secret suffix" }),
+      runtime: runtime({
+        generate: async () => {
+          throw new Error(
+            "generation: response withheld because it contained a registered credential.",
+          );
+        },
+      }),
       prompter: prompts({
         choices: [
           "launcher:create-shortcut",
@@ -2322,12 +2334,18 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).not.toContain("u2-output-secret");
   });
 
-  test("withholds a registered sensitive value split by terminal control sequences", async () => {
+  test("preserves a control-split safety rejection from the runtime boundary", async () => {
     const sensitive = createSensitiveValueRegistry(["u2-output-secret"]);
     const app = dependencies({
       args: ["--provider", "ollama", "--model", "qwen", "--input", "hello"],
       sensitive,
-      runtime: runtime({ response: "prefix u2-output-\u001b[31msecret suffix" }),
+      runtime: runtime({
+        generate: async () => {
+          throw new Error(
+            "generation: response withheld because it contained a registered credential.",
+          );
+        },
+      }),
     });
 
     expect(await runApplication(app.value)).toBe(1);
@@ -3855,8 +3873,8 @@ describe("one-shot application", () => {
     expect(app.runtime.calls).toEqual({ discover: 0, list: 0, generate: 1 });
   });
 
-  test("sanitizes terminal controls before writing an interactive response", async () => {
-    const response = " exact\u001b[31m model\b\toutput \r\n";
+  test("writes terminal-safe interactive bytes returned by the runtime boundary", async () => {
+    const response = " exact model\toutput \n";
     const app = dependencies({
       args: ["--input", "poem"],
       stdin: input("", true),
@@ -3903,7 +3921,7 @@ describe("one-shot application", () => {
     const buffered = runtime({
       generate: async (...args) => {
         expect(args[6]).toBeUndefined();
-        return "complete response";
+        return "first second";
       },
     });
     const defaultApp = dependencies({
@@ -3912,14 +3930,14 @@ describe("one-shot application", () => {
     });
 
     expect(await runApplication(defaultApp.value)).toBe(0);
-    expect(defaultApp.stdout.text()).toBe("complete response");
+    expect(defaultApp.stdout.text()).toBe(streamingApp.stdout.text());
   });
 
-  test("sanitizes terminal cursor controls in buffered and streaming output", async () => {
+  test("writes terminal-safe buffered and streaming output from the runtime boundary", async () => {
     const sensitive = createSensitiveValueRegistry(["sk-secret"]);
     const buffered = dependencies({
       args: ["--provider", "ollama", "--model", "qwen", "--input", "hello"],
-      runtime: runtime({ response: "sk-X\u001b[1Dsecret" }),
+      runtime: runtime({ response: "sk-Xsecret" }),
       sensitive,
     });
 
@@ -3930,8 +3948,8 @@ describe("one-shot application", () => {
       generate: async (...args) => {
         const onChunk = args[6];
         await onChunk?.("sk-X");
-        await onChunk?.("\u001b[1Dsecret");
-        return "sk-X\u001b[1Dsecret";
+        await onChunk?.("secret");
+        return "sk-Xsecret";
       },
     });
     const streaming = dependencies({
@@ -3952,14 +3970,17 @@ describe("one-shot application", () => {
     expect(streaming.stdout.text()).toBe("sk-Xsecret");
   });
 
-  test("stops before a streaming chunk completes a registered credential", async () => {
+  test("preserves safe streamed prefixes when the runtime withholds a completing chunk", async () => {
     const sensitive = createSensitiveValueRegistry(["registered-secret"]);
     const streamed = runtime({
       generate: async (...args) => {
         const onChunk = args[6];
-        await onChunk?.("safe prefix registered-\u001b[31m");
-        await onChunk?.("secret unsafe suffix");
-        return "unreachable";
+        await onChunk?.("safe prefix registered-");
+        throw new RuntimeStageError(
+          "generation",
+          "ollama",
+          "response stream stopped because it contained a registered credential",
+        );
       },
     });
     const app = dependencies({
@@ -4497,7 +4518,24 @@ describe("one-shot application", () => {
     const serialized = JSON.stringify(instruction);
     const escaped = serialized.slice(1, -1);
     const sensitive = createSensitiveValueRegistry();
-    const gateway = createRuntimeGateway({
+    const coreClient = createLlmNowCoreWithInternals({
+      environment: {},
+      credentialResolver: { resolve: async () => ({ status: "missing" }) },
+    }, {
+      findAvailableProviders: async () => ["ollama"],
+      createProvider: () => ({
+        id: "ollama",
+        label: "Ollama",
+        requiresNetwork: false,
+        requiresDownload: false,
+        testConnection: async () => ({ ok: true, message: "ok" }),
+        listModels: async () => [],
+        generateText: async () => {
+          throw new Error(`raw=${instruction} serialized=${serialized} escaped=${escaped}`);
+        },
+      }),
+    });
+    const gateway = createCoreRuntimeGateway({
       env: {},
       credentialResolver: createCredentialResolver({
         env: {},
@@ -4509,17 +4547,7 @@ describe("one-shot application", () => {
         vaultEnabled: false,
       }),
       sensitive,
-      createProvider: (config) => ({
-        id: config.provider,
-        label: "Fake",
-        requiresNetwork: false,
-        requiresDownload: false,
-        async testConnection() { return { ok: true, message: "ok" }; },
-        async listModels() { return []; },
-        async generateText() {
-          throw new Error(`raw=${instruction} serialized=${serialized} escaped=${escaped}`);
-        },
-      }),
+      coreClient,
     });
     const app = dependencies({
       args: [
@@ -4629,6 +4657,60 @@ describe("one-shot application", () => {
     expect(app.stderr.text()).toContain("generation (ollama): timed out");
   });
 
+  test("fully settles timed-out CLI work but bounds remote cleanup", async () => {
+    let releaseCli!: () => void;
+    let markCliStarted!: () => void;
+    const cliStarted = new Promise<void>((resolve) => {
+      markCliStarted = resolve;
+    });
+    const cli = dependencies({
+      args: ["--input", "hello", "--provider", "codex-cli", "--model", "default"],
+      generationTimeoutMs: 5,
+      runtime: runtime({
+        generate: async (_provider, _model, _prompt, signal) =>
+          await new Promise<string>((resolve) => {
+            releaseCli = () => resolve("late CLI response");
+            signal?.addEventListener("abort", () => undefined, { once: true });
+            markCliStarted();
+          }),
+      }),
+    });
+    let cliSettled = false;
+    const cliRun = runApplication(cli.value).then((exit) => {
+      cliSettled = true;
+      return exit;
+    });
+
+    await cliStarted;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(cliSettled).toBe(false);
+    releaseCli();
+    expect(await cliRun).toBe(1);
+    expect(cli.stderr.text()).toContain("generation (codex-cli): timed out");
+
+    const remote = dependencies({
+      args: ["--input", "hello", "--provider", "ollama", "--model", "qwen"],
+      generationTimeoutMs: 5,
+      runtime: runtime({
+        generate: (_provider, _model, _prompt, signal) =>
+          new Promise<string>((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              setTimeout(() => reject(new Error("remote cleanup complete")), 5);
+            }, { once: true });
+          }),
+      }),
+    });
+    const remoteExit = await Promise.race([
+      runApplication(remote.value),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("remote cleanup did not remain bounded")), 250);
+      }),
+    ]);
+
+    expect(remoteExit).toBe(1);
+    expect(remote.stderr.text()).toContain("generation (ollama): timed out");
+  });
+
   test("does not put a synthetic timeout around discovery that may read the native vault", async () => {
     const discovery = dependencies({
       args: ["--input", "hello"],
@@ -4646,14 +4728,42 @@ describe("one-shot application", () => {
   });
 
   test("bounds model-list stages", async () => {
+    let aborted = false;
     const models = dependencies({
       args: ["--input", "hello"],
       stdin: input("", true),
       stderrTty: true,
       modelListTimeoutMs: 5,
-      runtime: runtime({ listModels: () => new Promise(() => {}) }),
+      runtime: runtime({
+        listModels: (_provider, signal) => new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            aborted = true;
+            reject(new RuntimeStageError("model-list", "ollama", "aborted"));
+          }, { once: true });
+        }),
+      }),
       prompter: prompts({ choices: ["ollama"] }),
     });
+    expect(await runApplication(models.value)).toBe(1);
+    expect(aborted).toBeTrue();
+    expect(models.stderr.text()).toContain("model-list (ollama): timed out");
+  });
+
+  test("reports a model-list timeout when an operation resolves after ignoring abort", async () => {
+    const models = dependencies({
+      args: ["--input", "hello"],
+      stdin: input("", true),
+      stderrTty: true,
+      modelListTimeoutMs: 5,
+      runtime: runtime({
+        listModels: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return [{ id: "late-model", label: "Late model" }];
+        },
+      }),
+      prompter: prompts({ choices: ["ollama"] }),
+    });
+
     expect(await runApplication(models.value)).toBe(1);
     expect(models.stderr.text()).toContain("model-list (ollama): timed out");
   });
@@ -5571,7 +5681,7 @@ describe("API-key management", () => {
   test("preserves vault remediation through the production runtime boundary", async () => {
     const backendDetail = "runtime vault-backend-detail";
     const sensitive = createSensitiveValueRegistry();
-    const gateway = createRuntimeGateway({
+    const gateway = createCoreRuntimeGateway({
       env: {},
       credentialResolver: {
         resolve: async (provider) => {
@@ -5583,9 +5693,6 @@ describe("API-key management", () => {
         },
       },
       sensitive,
-      createProvider: () => {
-        throw new Error("provider construction must not run");
-      },
     });
     const app = dependencies({
       args: [
@@ -6046,25 +6153,28 @@ describe("API-key management", () => {
     const fixture = vaultFixture();
     const sensitive = createSensitiveValueRegistry();
     const resolver = createCredentialResolver({ env: {}, vault: fixture.vault, vaultEnabled: true });
-    const gateway = createRuntimeGateway({
+    const coreClient: LlmNowCoreClient = {
+      discoverProviders: async () => ({ degraded: false, providers: [] }),
+      listModels: async ({ provider }) => ({ provider, models: [] }),
+      validateConnection: async ({ provider, candidateCredential }) => {
+        if (candidateCredential !== candidate) {
+          throw new Error(`wrong candidate ${candidate}`);
+        }
+        return { provider, models: [{ id: "gpt-5", label: "GPT-5" }] };
+      },
+      generateText: async ({ provider, model }) => ({ provider, model, text: "unused" }),
+      streamText: async ({ provider, model }) => ({
+        provider,
+        model,
+        delivery: "buffered",
+        text: "unused",
+      }),
+    };
+    const gateway = createCoreRuntimeGateway({
       env: {},
       credentialResolver: resolver,
       sensitive,
-      findProviders: async () => [],
-      createProvider: (config) => ({
-        id: config.provider,
-        label: "Fake",
-        requiresNetwork: true,
-        requiresDownload: false,
-        async testConnection() { return { ok: true, message: "ok" }; },
-        async listModels() {
-          if (!("apiKey" in config) || config.apiKey !== candidate) {
-            throw new Error(`wrong candidate ${candidate}`);
-          }
-          return [{ id: "gpt-5", label: "GPT-5" }];
-        },
-        async generateText() { return { text: "unused" }; },
-      }),
+      coreClient,
     });
     const app = dependencies({
       args: [],

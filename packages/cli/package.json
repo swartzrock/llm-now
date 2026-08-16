@@ -1,0 +1,23 @@
+{
+  "name": "llm-now",
+  "version": "2.7.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "llm-now": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@clack/core": "1.4.3",
+    "@clack/prompts": "1.7.0",
+    "@swartzrock/byok-runtime": "2.4.1",
+    "picocolors": "1.1.1",
+    "smol-toml": "1.7.1",
+    "unicode-case-folding": "1.1.1"
+  },
+  "devDependencies": {
+    "@swartzrock/llm-now-core": "workspace:^"
+  }
+}

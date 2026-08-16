@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseConfigDocument, projectVoiceConfig } from "../src/config-schema.ts";
+import { parseConfigDocument, projectVoiceConfig } from "../packages/cli/src/config-schema.ts";
 import {
   VoiceRouterError,
   compactKey,
@@ -10,7 +10,7 @@ import {
   resolveVoiceConfigPath,
   routeTranscript,
   validateSpeechAnswer,
-} from "../src/voice-routing.ts";
+} from "../packages/cli/src/voice-routing.ts";
 
 interface NormalizationCase {
   id: string;

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { ByokModelOption, ByokProviderId } from "@swartzrock/byok-runtime";
 import { PassThrough } from "node:stream";
-import { RuntimeStageError, type RuntimeGateway } from "../src/runtime.ts";
-import { promptValidationMessage } from "../src/io.ts";
+import { RuntimeStageError, type RuntimeGateway } from "../packages/cli/src/runtime.ts";
+import { promptValidationMessage } from "../packages/cli/src/io.ts";
 import {
   createSearchablePrompter,
   createTerminalColors,
@@ -17,7 +17,7 @@ import {
   type PromptOption,
   type PromptValue,
   type SearchablePrompter,
-} from "../src/prompts.ts";
+} from "../packages/cli/src/prompts.ts";
 
 function gateway(options: {
   providers?: ByokProviderId[];
