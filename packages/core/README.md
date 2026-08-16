@@ -1,4 +1,4 @@
-# `@swartzrock/llm-now-core`
+# @swartzrock/llm-now-core
 
 Headless provider operations and transcript routing for trusted Node and Bun hosts.
 
@@ -13,5 +13,33 @@ Hosts supply an environment snapshot, a credential resolver, and, when they
 approve CLI providers, a CLI execution resolver. Importing the package and
 constructing a client do not read host configuration or start provider work.
 
-The complete API and security contract is maintained in the llm-now
-repository documentation.
+```ts
+import { createLlmNowCore } from "@swartzrock/llm-now-core";
+
+const environment = Object.freeze({ ...process.env });
+const core = createLlmNowCore({
+  environment,
+  credentialResolver: {
+    async resolve(provider, signal) {
+      signal?.throwIfAborted();
+      const variable = provider === "openai" ? "OPENAI_API_KEY" : undefined;
+      const credential = variable === undefined ? undefined : environment[variable];
+      return credential ? { status: "resolved", credential } : { status: "missing" };
+    },
+  },
+});
+
+const result = await core.generateText({
+  provider: "openai",
+  model: "gpt-5-mini",
+  prompt: "Summarize this request.",
+});
+```
+
+The host owns credentials, approved CLI execution, timeouts, routing candidates,
+and voice selection. The core does not expose the `llm-now` CLI's configuration
+or `Bun.secrets` vault.
+
+Read the complete [API contract](https://github.com/swartzrock/llm-now/blob/main/docs/core-api.md)
+and [security contract](https://github.com/swartzrock/llm-now/blob/main/docs/core-security.md)
+before integrating the package.

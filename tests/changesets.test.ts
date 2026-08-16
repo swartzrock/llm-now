@@ -40,6 +40,9 @@ const changesetsConfig = await Bun.file(
 const changesetsWorkflow = await Bun.file(
   new URL("../.github/workflows/changesets.yml", import.meta.url),
 ).text();
+const changesetsReadme = await Bun.file(
+  new URL("../.changeset/README.md", import.meta.url),
+).text();
 const changesetsBinary = new URL(
   "../node_modules/@changesets/cli/bin.js",
   import.meta.url,
@@ -104,6 +107,10 @@ describe("Changesets authoring", () => {
     expect(changesetsConfig.access).toBe("restricted");
     expect(changesetsConfig.privatePackages).toEqual({ version: true, tag: false });
     expect(corePackage.publishConfig).toEqual({ access: "public" });
+    expect(changesetsReadme).toContain("`llm-now` for CLI-only");
+    expect(changesetsReadme).toContain("`@swartzrock/llm-now-core` for core-only");
+    expect(changesetsReadme).toContain("both for shared");
+    expect(changesetsReadme).toContain("versions are independent");
 
     const workflowFiles = [
       new URL("../.github/workflows/ci.yml", import.meta.url),
