@@ -1292,70 +1292,102 @@ aliases send accepted question content to their provider, and speech is audible.
 ## Headless core package
 
 The native manual-test matrix above is unchanged. These package checks are a
-separate release lane and must produce no native archive, tag, GitHub Release,
-signing request, or Homebrew update.
+separate release lane and must produce no native archive or `vX.Y.Z` tag, must
+not replace the repository's latest Release, and must request no signing or
+Homebrew update.
 
-### MT-43: First core package publication
+### MT-43: First GitHub core Release
 
-Run this test only after an authorized maintainer completes the owner, scope,
-2FA, protected-environment, package-name, and bootstrap checks in
-[RELEASING.md](RELEASING.md#first-core-publication-and-bootstrap). Do not put an
-npm token in a shell command, report, or local file.
+Run this test only after an authorized maintainer completes the immutable
+Release, protected-environment, tag-rule, and exact-state checks in
+[RELEASING.md](RELEASING.md#first-github-core-release).
 
-1. Record the protected commit and `Publish core` workflow run. Confirm the
-   classifier reports only `@swartzrock/llm-now-core` and the intended version.
-2. Download the artifact before approving publication. Verify `SHA256SUMS`,
-   inspect the exact pack allowlist, and record the tarball SHA-256. Confirm the
-   artifact job had no npm or OIDC authority.
-3. Approve the `npm-core-publish` environment. Confirm the protected publisher
-   downloads the preserved artifact, rechecks its digest before credential
-   access, performs no checkout, install, or build, and publishes the candidate
-   under `next` with provenance. Confirm the npm CLI jobs use the pinned Node 24
-   setup, npm 11.5.1 or later, and `https://registry.npmjs.org`.
-4. During the `next` quarantine, query the exact version from a new cache and
-   verify its registry integrity equals the preserved tarball. Confirm the
-   SLSA v1 DSSE payload names repository
-   `https://github.com/swartzrock/llm-now`, workflow
-   `.github/workflows/publish-core.yml`, ref `refs/heads/main`, and a resolved
-   `gitCommit` equal to the recorded release SHA. Confirm its sole subject is
-   `pkg:npm/%40swartzrock/llm-now-core@VERSION` and its SHA-512 digest equals
-   the preserved tarball. Presence and a valid signature alone are insufficient.
-5. Run the Cold-cache Node and Bun consumers from empty directories. Install
-   the exact `@swartzrock/llm-now-core@VERSION` with lifecycle scripts disabled,
-   never a workspace link or floating tag. Use Node 20 or later and Bun 1.3.14
-   or later. Repeat the maintained external-consumer smoke: root import and
-   construction without side effects, pure routing, pre-aborted generation
-   without resolver or provider I/O, controlled fake-CLI buffered generation,
-   native streaming, awaited callback backpressure, cancellation and child
-   cleanup, final-text parity, deep-import rejection, and TypeScript NodeNext
-   declaration resolution.
-6. Confirm `latest` was absent or still named the previous stable version until
-   all registry and consumer checks passed. Then confirm promotion names the
-   same immutable package version and integrity; no second tarball is built.
-7. Confirm `npm view @swartzrock/llm-now-core dist-tags --json` reports the
-   intended `latest`. Reinstall that exact version with new Node, Bun, and npm
-   caches, repeat the root-import smoke, and confirm the native lane did not run.
-8. Configure the trusted publisher transition described in the release guide,
-   revoke the bootstrap credential, and remove its GitHub secret before proving
-   the next OIDC publication. Confirm a deliberately lingering bootstrap secret
-   makes the later workflow fail closed before `npm publish`.
+1. Review the Changesets version pull request. Confirm it advances core from
+   `0.1.0` to `0.1.1`, consumes only the core patch Changeset, adds the matching
+   changelog section, and leaves the CLI version unchanged unless independent
+   CLI intent is present. Record its merge SHA and first parent.
+2. Confirm repository-level immutable Releases are enabled. Confirm
+   `release-publication` admits protected `main` and stable `core-v*` recovery
+   tags but denies feature branches and pull-request refs. Record the current
+   stable native latest tag; there must be no `core-v0.1.1` tag or Release and
+   no higher public stable core Release.
+3. Observe the merge push start `Release core` from
+   `.github/workflows/release-core.yml`. Confirm classification reports the
+   recorded release SHA, version `0.1.1`, tag `core-v0.1.1`, and asset
+   `swartzrock-llm-now-core-0.1.1.tgz`.
+4. Before protected approval, download the unprivileged workflow artifact.
+   Confirm it contains exactly the tarball and `SHA256SUMS`, then run
+   `sha256sum --check --strict --status SHA256SUMS`. Inspect the pack allowlist
+   and private manifest, record the SHA-256, and confirm the job had no release
+   write authority.
+5. Approve `release-publication`. Confirm the publisher consumes only the
+   current run's preserved artifact, repeats checksum and package-identity
+   checks, and creates the action artifact attestation before any tag. It must
+   create `core-v0.1.1` at the release SHA, stage a draft Release with the exact
+   two-asset allowlist, verify staged digests, and publish it immutable with
+   `--latest=false`. No upload may clobber an existing draft asset.
+6. Download the public assets and repeat the checksum. Verify the action
+   attestation against the exact release SHA and
+   `swartzrock/llm-now/.github/workflows/release-core.yml`, then run
+   `gh release verify core-v0.1.1` and
+   `gh release verify-asset core-v0.1.1 swartzrock-llm-now-core-0.1.1.tgz` for
+   the immutable Release attestation.
+7. From empty external projects, install the exact URL
+   `https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz`
+   with every `X.Y.Z` replaced by `0.1.1`; never use a floating latest URL.
+   Use Node 20 or later and Bun 1.3.14 or later, and commit each lockfile. Repeat
+   the maintained external-consumer smoke: root import and construction without
+   side effects, pure routing, pre-aborted generation without resolver or
+   provider I/O, controlled fake-CLI buffered generation, native streaming,
+   awaited callback backpressure, cancellation and child cleanup, final-text
+   parity, deep-import rejection, and TypeScript NodeNext declaration
+   resolution. Transitive dependencies may still resolve through the package
+   manager's configured registries.
+8. Confirm the repository's latest Release is still a stable native `vX.Y.Z`
+   tag, equal to the recorded baseline or a higher native version. Core must not
+   start native builds, signing, or Homebrew projection.
 
-If the exact version appears with the wrong integrity or lacks provenance, do
-not promote it. Deprecate the immutable failed version, remove `next`, and
-fix-forward to a new Changeset and version. Do not unpublish or reuse it.
+The package's `private: true` prevents npm publication; the public repository
+source and GitHub Release assets remain public.
 
-### MT-44: Core release record and 24-hour check
+### MT-44: Core Release record and 24-hour check
 
-Attach the commit, workflow run, package/version, candidate SHA-256, registry
-integrity, pack allowlist, external Node/Bun/NodeNext evidence, dist tags,
-provenance subject and exact source identity, protected-environment approval,
-trusted-publisher state, bootstrap-token revocation, and native-lane no-op to
-the durable release record.
+Attach the source SHA, tag, Release URL, tarball digest, exact two-asset list,
+checksum result, action and immutable-Release attestation identities,
+Node/Bun/NodeNext evidence, `release-publication` approval, and native-lane
+baseline/result to the durable release record.
 
-Immediately after promotion and again after 24 hours, use a cold cache to query
-the exact version. Reconfirm integrity, provenance, `latest`, expected package
-metadata, successful Node and Bun root imports, and the absence of a native tag,
-GitHub Release, or Homebrew mutation for the core-only release.
+Re-run the exact tag and peeled SHA with `publish: true`. An exact complete
+immutable Release must be a verification-only no-op: no rebuild, attestation,
+tag movement, asset upload, Release edit, native build, or Homebrew update.
+
+```bash
+TAG=core-v0.1.1
+RELEASE_SHA="$(git rev-parse "${TAG}^{commit}")"
+gh workflow run release-core.yml --ref "$TAG" \
+  -f release-sha="$RELEASE_SHA" \
+  -f publish=true
+```
+
+For recovery before publication:
+
+- if no tag or Release exists, rerun the original automatic workflow run at
+  the recorded release SHA rather than dispatching from newer `main`;
+- if the exact tag exists without a Release, use the exact tag-ref command
+  above with its peeled SHA;
+- if an exact draft exists, accept only missing expected assets whose bytes
+  match the preserved candidate; and
+- on any wrong tag SHA, unexpected or changed asset, incomplete published
+  Release, attestation mismatch, newer public core version, or ambiguous public
+  state, stop and preserve evidence. Fix-forward through a reviewed higher
+  patch Changeset; never delete, edit, move, overwrite, or replace public state.
+
+Never rerun the historical `publish-core` npm workflow and never add credentials to make it pass.
+
+Immediately after publication and again after 24 hours, use a cold download to
+reconfirm immutable status, tag target, Release flags, exact two-asset list,
+checksum, both attestations, Node and Bun root imports, TypeScript NodeNext
+resolution, and native latest-Release separation.
 
 ## Automation-backed coverage
 

@@ -9,6 +9,44 @@ Import only the package root:
 import { createLlmNowCore, routeTranscript } from "@swartzrock/llm-now-core";
 ```
 
+## Install and verify an exact Release
+
+Core is distributed as an npm-format tarball on an immutable GitHub Release,
+not through npmjs. Choose one exact version and download both public assets:
+
+```bash
+curl --fail --location --remote-name \
+  https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz
+curl --fail --location --remote-name \
+  https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/SHA256SUMS
+sha256sum --check --strict --status SHA256SUMS
+```
+
+Verify the action artifact attestation against the exact Release source SHA,
+then verify the immutable Release attestation and its tarball asset:
+
+```bash
+gh attestation verify swartzrock-llm-now-core-X.Y.Z.tgz \
+  --repo swartzrock/llm-now \
+  --signer-workflow swartzrock/llm-now/.github/workflows/release-core.yml \
+  --source-digest <SHA>
+gh release verify core-vX.Y.Z
+gh release verify-asset core-vX.Y.Z swartzrock-llm-now-core-X.Y.Z.tgz
+```
+
+After verification, install the same exact version URL and commit your
+lockfile. Do not replace `X.Y.Z` with a floating latest-Release URL.
+
+```bash
+npm install "https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz"
+# or: bun add "https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz"
+```
+
+The manifest's `private: true` prevents npm publication; it is not a visibility
+control. The repository source and GitHub Release assets remain public.
+Installing the tarball can still resolve its transitive dependencies through
+the package manager's configured registries.
+
 Hosts supply an environment snapshot, a credential resolver, and, when they
 approve CLI providers, a CLI execution resolver. Importing the package and
 constructing a client do not read host configuration or start provider work.

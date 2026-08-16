@@ -5,8 +5,18 @@ Node 20 or later and Bun 1.3.14 or later. Import only the package root; deep
 imports are not public.
 
 ```bash
-npm install @swartzrock/llm-now-core
+npm install "https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz"
+# or: bun add "https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz"
 ```
+
+Replace every `X.Y.Z` with one exact version from a GitHub core Release and
+commit the lockfile. Never use a floating latest-Release URL for the core.
+Before installing, follow the checksum, action-attestation, and
+immutable-Release verification in the
+[package README](../packages/core/README.md). The package manifest's
+`private: true` prevents npm publication, while the source and GitHub Release
+assets remain public. Its transitive dependencies may still come from your
+package manager's configured registries.
 
 The package exports these runtime values: `createLlmNowCore`, `LlmNowError`,
 `RoutingInputError`, `compactRoutingKey`, `routeTranscript`, `routingSimilarity`, and
