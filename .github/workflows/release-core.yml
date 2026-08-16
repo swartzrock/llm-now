@@ -75,6 +75,7 @@ jobs:
       should-build: ${{ steps.state.outputs.should-build }}
       release-state: ${{ steps.state.outputs.release-state }}
       native-latest-baseline: ${{ steps.state.outputs.native-latest-baseline }}
+      tarball-sha256: ${{ steps.state.outputs.tarball-sha256 }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -142,11 +143,6 @@ jobs:
             exit 0
           fi
 
-          test "$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
-            "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')" = "true" || {
-            echo "immutable Releases must be enabled before publication" >&2
-            exit 1
-          }
           awk -v heading="## $VERSION" '
             $0 == heading { matches += 1; printing = 1 }
             printing && /^## / && $0 != heading { exit }
@@ -159,11 +155,17 @@ jobs:
             printf '%s\n' "$ASSET" "SHA256SUMS" | sort
           }
           fetch_release() {
-            gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
-              "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-              jq -s '[.[][]]' > releases.json
-            jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
-              releases.json > release-matches.json
+            if ! gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
+                "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+                jq -s '[.[][]]' > releases.json; then
+              echo "failed to fetch GitHub Releases" >&2
+              exit 1
+            fi
+            if ! jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
+                releases.json > release-matches.json; then
+              echo "failed to select the target GitHub Release" >&2
+              exit 1
+            fi
             test "$(jq 'length' release-matches.json)" -le 1 || {
               echo "multiple Releases exist for $TAG" >&2
               exit 1
@@ -249,14 +251,16 @@ jobs:
             test "$(wc -l < .published-release/SHA256SUMS)" -eq 1
             test "$(cat .published-release/SHA256SUMS)" = "$expected_line"
             (cd .published-release && sha256sum --check --strict --status SHA256SUMS)
+            echo "tarball-sha256=${expected_line%% *}" >> "$GITHUB_OUTPUT"
             verified=false
             for attempt in 1 2 3 4 5; do
               if gh attestation verify ".published-release/$ASSET" \
                   --repo "$GITHUB_REPOSITORY" \
                   --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml" \
                   --source-digest "$RELEASE_SHA" &&
-                gh release verify "$TAG" &&
-                gh release verify-asset "$TAG" ".published-release/$ASSET"; then
+                gh release verify "$TAG" --repo "$GITHUB_REPOSITORY" &&
+                gh release verify-asset "$TAG" ".published-release/$ASSET" \
+                  --repo "$GITHUB_REPOSITORY"; then
                 verified=true
                 break
               fi
@@ -387,7 +391,7 @@ jobs:
     timeout-minutes: 20
     environment: release-publication
     outputs:
-      release-outcome: ${{ steps.remote-state.outputs.release-outcome || steps.reconcile.outputs.release-outcome }}
+      release-outcome: ${{ steps.reconcile.outputs.release-outcome || steps.remote-state.outputs.release-outcome }}
       tarball-sha256: ${{ steps.candidate.outputs.tarball-sha256 }}
     permissions:
       contents: write
@@ -437,6 +441,7 @@ jobs:
       - id: remote-state
         env:
           GH_TOKEN: ${{ github.token }}
+          CORE_RELEASE_SETTINGS_TOKEN: ${{ secrets.CORE_RELEASE_SETTINGS_TOKEN }}
           TAG: ${{ needs.validate-ref.outputs.tag }}
           ASSET: ${{ needs.validate-ref.outputs.asset }}
           VERSION: ${{ needs.validate-ref.outputs.version }}
@@ -446,8 +451,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          test "$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
-            "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')" = "true" || {
+          test -n "$CORE_RELEASE_SETTINGS_TOKEN" || {
+            echo "CORE_RELEASE_SETTINGS_TOKEN is required for immutable Release verification" >&2
+            exit 1
+          }
+          if ! immutable_releases_enabled="$(GH_TOKEN="$CORE_RELEASE_SETTINGS_TOKEN" gh api \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')"; then
+            echo "failed to read immutable Release settings" >&2
+            exit 1
+          fi
+          test "$immutable_releases_enabled" = "true" || {
             echo "immutable Releases must be enabled before publication" >&2
             exit 1
           }
@@ -456,11 +470,17 @@ jobs:
             printf '%s\n' "$ASSET" "SHA256SUMS" | sort
           }
           fetch_release() {
-            gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
-              "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-              jq -s '[.[][]]' > releases.json
-            jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
-              releases.json > release-matches.json
+            if ! gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
+                "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+                jq -s '[.[][]]' > releases.json; then
+              echo "failed to fetch GitHub Releases" >&2
+              exit 1
+            fi
+            if ! jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
+                releases.json > release-matches.json; then
+              echo "failed to select the target GitHub Release" >&2
+              exit 1
+            fi
             test "$(jq 'length' release-matches.json)" -le 1 || {
               echo "multiple Releases exist for $TAG" >&2
               exit 1
@@ -588,8 +608,9 @@ jobs:
                   --repo "$GITHUB_REPOSITORY" \
                   --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml" \
                   --source-digest "$RELEASE_SHA" &&
-                gh release verify "$TAG" &&
-                gh release verify-asset "$TAG" ".published-release/$ASSET"; then
+                gh release verify "$TAG" --repo "$GITHUB_REPOSITORY" &&
+                gh release verify-asset "$TAG" ".published-release/$ASSET" \
+                  --repo "$GITHUB_REPOSITORY"; then
                 verified=true
                 break
               fi
@@ -629,6 +650,7 @@ jobs:
         id: reconcile
         env:
           GH_TOKEN: ${{ github.token }}
+          CORE_RELEASE_SETTINGS_TOKEN: ${{ secrets.CORE_RELEASE_SETTINGS_TOKEN }}
           TAG: ${{ needs.validate-ref.outputs.tag }}
           ASSET: ${{ needs.validate-ref.outputs.asset }}
           VERSION: ${{ needs.validate-ref.outputs.version }}
@@ -642,11 +664,17 @@ jobs:
             printf '%s\n' "$ASSET" "SHA256SUMS" | sort
           }
           fetch_release() {
-            gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
-              "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-              jq -s '[.[][]]' > releases.json
-            jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
-              releases.json > release-matches.json
+            if ! gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
+                "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+                jq -s '[.[][]]' > releases.json; then
+              echo "failed to fetch GitHub Releases" >&2
+              exit 1
+            fi
+            if ! jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
+                releases.json > release-matches.json; then
+              echo "failed to select the target GitHub Release" >&2
+              exit 1
+            fi
             test "$(jq 'length' release-matches.json)" -le 1 || {
               echo "multiple Releases exist for $TAG" >&2
               exit 1
@@ -776,8 +804,9 @@ jobs:
                   --repo "$GITHUB_REPOSITORY" \
                   --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml" \
                   --source-digest "$RELEASE_SHA" &&
-                gh release verify "$TAG" &&
-                gh release verify-asset "$TAG" ".published-release/$ASSET"; then
+                gh release verify "$TAG" --repo "$GITHUB_REPOSITORY" &&
+                gh release verify-asset "$TAG" ".published-release/$ASSET" \
+                  --repo "$GITHUB_REPOSITORY"; then
                 verified=true
                 break
               fi
@@ -790,8 +819,17 @@ jobs:
             verify_native_latest
           }
 
-          test "$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
-            "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')" = "true" || {
+          test -n "$CORE_RELEASE_SETTINGS_TOKEN" || {
+            echo "CORE_RELEASE_SETTINGS_TOKEN is required for immutable Release verification" >&2
+            exit 1
+          }
+          if ! immutable_releases_enabled="$(GH_TOKEN="$CORE_RELEASE_SETTINGS_TOKEN" gh api \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')"; then
+            echo "failed to read immutable Release settings" >&2
+            exit 1
+          fi
+          test "$immutable_releases_enabled" = "true" || {
             echo "immutable Releases must be enabled before publication" >&2
             exit 1
           }
@@ -854,7 +892,7 @@ jobs:
           ASSET: ${{ needs.validate-ref.outputs.asset }}
           RELEASE_STATE: ${{ needs.validate-ref.outputs.release-state }}
           NATIVE_LATEST_BASELINE: ${{ needs.validate-ref.outputs.native-latest-baseline }}
-          TARBALL_SHA256: ${{ needs.publish.outputs.tarball-sha256 || needs.artifact.outputs.tarball-sha256 }}
+          TARBALL_SHA256: ${{ needs.publish.outputs.tarball-sha256 || needs.artifact.outputs.tarball-sha256 || needs.validate-ref.outputs.tarball-sha256 }}
           RELEASE_OUTCOME: ${{ needs.publish.outputs.release-outcome || needs.validate-ref.outputs.release-state }}
         run: |
           set -euo pipefail

@@ -93,7 +93,12 @@ The first GitHub core Release is an explicit maintainer go/no-go operation.
 3. Configure the protected `release-publication` environment to admit protected
    `main` and stable `core-v*` recovery tags. Deny feature branches and
    pull-request refs. Add the intended required reviewers if publication should
-   require approval.
+   require approval. Add an environment secret named
+   `CORE_RELEASE_SETTINGS_TOKEN` containing a fine-grained GitHub token limited
+   to this repository with only **Administration: read** permission. The
+   publisher uses it only to fail closed when checking that immutable Releases
+   are enabled; keep Contents and every write permission disabled, set an
+   expiry, and rotate it before expiry.
 4. Confirm repository rules let the publication actor create `core-v*` tags but
    prevent unauthorized movement or deletion. Keep native `v*` ownership and
    latest-Release behavior unchanged.

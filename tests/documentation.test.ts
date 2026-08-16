@@ -127,8 +127,8 @@ describe("headless core documentation", () => {
       "gh attestation verify",
       "--signer-workflow swartzrock/llm-now/.github/workflows/release-core.yml",
       "--source-digest <SHA>",
-      "gh release verify core-vX.Y.Z",
-      "gh release verify-asset core-vX.Y.Z swartzrock-llm-now-core-X.Y.Z.tgz",
+      "gh release verify core-vX.Y.Z --repo swartzrock/llm-now",
+      "gh release verify-asset core-vX.Y.Z swartzrock-llm-now-core-X.Y.Z.tgz --repo swartzrock/llm-now",
     ]) expect(packageReadme).toContain(command);
     expect(manualTesting).toContain("Node 20 or later");
     expect(manualTesting).toContain("Bun 1.3.14 or later");
@@ -143,6 +143,8 @@ describe("headless core documentation", () => {
     expect(releasing).toContain("shared change");
     expect(releasing).toContain("unprivileged artifact");
     expect(releasing).toContain("protected publisher");
+    expect(releasing).toContain("CORE_RELEASE_SETTINGS_TOKEN");
+    expect(releasing).toContain("Administration: read");
     expect(releasing).toContain("@swartzrock/llm-now-core");
     expect(releasing).toContain(coreWorkflow);
     expect(releasing).toContain("core-vX.Y.Z");

@@ -316,7 +316,18 @@ describe("release workflow policy", () => {
   });
 
   test("reconciles only exact absent, tag-only, draft, or immutable public state", () => {
-    expect(coreReleaseWorkflow).toContain("repos/$GITHUB_REPOSITORY/immutable-releases");
+    const immutableSettingChecks = coreReleaseWorkflow.match(
+      /repos\/\$GITHUB_REPOSITORY\/immutable-releases/g,
+    ) ?? [];
+    const settingsSecretBindings = coreReleaseWorkflow.match(
+      /CORE_RELEASE_SETTINGS_TOKEN: \$\{\{ secrets\.CORE_RELEASE_SETTINGS_TOKEN \}\}/g,
+    ) ?? [];
+    expect(immutableSettingChecks).toHaveLength(2);
+    expect(settingsSecretBindings).toHaveLength(2);
+    expect(coreReleaseWorkflow).toContain('test -n "$CORE_RELEASE_SETTINGS_TOKEN"');
+    expect(coreReleaseWorkflow).toContain('GH_TOKEN="$CORE_RELEASE_SETTINGS_TOKEN" gh api');
+    expect(coreReleaseWorkflow.indexOf("repos/$GITHUB_REPOSITORY/immutable-releases"))
+      .toBeGreaterThan(coreReleaseWorkflow.indexOf("environment: release-publication"));
     expect(coreReleaseWorkflow).toContain("immutable Releases must be enabled before publication");
     expect(coreReleaseWorkflow).toContain('TAG="core-v$VERSION"');
     expect(coreReleaseWorkflow).toContain('ASSET="swartzrock-llm-now-core-$VERSION.tgz"');
@@ -355,9 +366,11 @@ describe("release workflow policy", () => {
       '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml"',
     );
     expect(coreReleaseWorkflow).toContain('--source-digest "$RELEASE_SHA"');
-    expect(coreReleaseWorkflow).toContain('gh release verify "$TAG"');
     expect(coreReleaseWorkflow).toContain(
-      'gh release verify-asset "$TAG" ".published-release/$ASSET"',
+      'gh release verify "$TAG" --repo "$GITHUB_REPOSITORY"',
+    );
+    expect(coreReleaseWorkflow).toMatch(
+      /gh release verify-asset "\$TAG" "\.published-release\/\$ASSET"\s+\\?\s*--repo "\$GITHUB_REPOSITORY"/,
     );
     expect(coreReleaseWorkflow).toContain("native-latest-baseline=");
     expect(coreReleaseWorkflow).toContain(
@@ -367,7 +380,29 @@ describe("release workflow policy", () => {
     expect(coreReleaseWorkflow).toContain("latest Release must never be the core Release");
     expect(coreReleaseWorkflow).toContain("release-outcome=");
     expect(coreReleaseWorkflow).toContain("tarball-sha256=");
-    expect(coreReleaseWorkflow).toContain("needs.publish.outputs.release-outcome");
+    expect(coreReleaseWorkflow).toContain(
+      "release-outcome: ${{ steps.reconcile.outputs.release-outcome || steps.remote-state.outputs.release-outcome }}",
+    );
+    expect(coreReleaseWorkflow).toContain(
+      "tarball-sha256: ${{ steps.state.outputs.tarball-sha256 }}",
+    );
+    expect(coreReleaseWorkflow).toContain(
+      'echo "tarball-sha256=${expected_line%% *}" >> "$GITHUB_OUTPUT"',
+    );
+    expect(coreReleaseWorkflow).toContain(
+      "needs.validate-ref.outputs.tarball-sha256",
+    );
+  });
+
+  test("fails closed when the GitHub release inventory cannot be read", () => {
+    const fetchFunctions = coreReleaseWorkflow.match(/fetch_release\(\) \{[\s\S]*?^          \}/gm) ?? [];
+    expect(fetchFunctions).toHaveLength(3);
+    for (const source of fetchFunctions) {
+      expect(source).toContain("if ! gh api");
+      expect(source).toContain("failed to fetch GitHub Releases");
+      expect(source).toContain("if ! jq --arg tag");
+      expect(source).toContain("failed to select the target GitHub Release");
+    }
   });
 
   test("keeps core publication separate from Changesets and native releases", () => {

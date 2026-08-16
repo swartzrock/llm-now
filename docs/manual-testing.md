@@ -1308,9 +1308,12 @@ Release, protected-environment, tag-rule, and exact-state checks in
    CLI intent is present. Record its merge SHA and first parent.
 2. Confirm repository-level immutable Releases are enabled. Confirm
    `release-publication` admits protected `main` and stable `core-v*` recovery
-   tags but denies feature branches and pull-request refs. Record the current
-   stable native latest tag; there must be no `core-v0.1.1` tag or Release and
-   no higher public stable core Release.
+   tags but denies feature branches and pull-request refs. Confirm its
+   `CORE_RELEASE_SETTINGS_TOKEN` environment secret is a fine-grained GitHub
+   token limited to this repository with only **Administration: read**
+   permission and a current expiry. Record the current stable native latest
+   tag; there must be no `core-v0.1.1` tag or Release and no higher public
+   stable core Release.
 3. Observe the merge push start `Release core` from
    `.github/workflows/release-core.yml`. Confirm classification reports the
    recorded release SHA, version `0.1.1`, tag `core-v0.1.1`, and asset
@@ -1329,8 +1332,8 @@ Release, protected-environment, tag-rule, and exact-state checks in
 6. Download the public assets and repeat the checksum. Verify the action
    attestation against the exact release SHA and
    `swartzrock/llm-now/.github/workflows/release-core.yml`, then run
-   `gh release verify core-v0.1.1` and
-   `gh release verify-asset core-v0.1.1 swartzrock-llm-now-core-0.1.1.tgz` for
+   `gh release verify core-v0.1.1 --repo swartzrock/llm-now` and
+   `gh release verify-asset core-v0.1.1 swartzrock-llm-now-core-0.1.1.tgz --repo swartzrock/llm-now` for
    the immutable Release attestation.
 7. From empty external projects, install the exact URL
    `https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz`

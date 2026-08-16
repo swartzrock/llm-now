@@ -30,8 +30,8 @@ gh attestation verify swartzrock-llm-now-core-X.Y.Z.tgz \
   --repo swartzrock/llm-now \
   --signer-workflow swartzrock/llm-now/.github/workflows/release-core.yml \
   --source-digest <SHA>
-gh release verify core-vX.Y.Z
-gh release verify-asset core-vX.Y.Z swartzrock-llm-now-core-X.Y.Z.tgz
+gh release verify core-vX.Y.Z --repo swartzrock/llm-now
+gh release verify-asset core-vX.Y.Z swartzrock-llm-now-core-X.Y.Z.tgz --repo swartzrock/llm-now
 ```
 
 After verification, install the same exact version URL and commit your
