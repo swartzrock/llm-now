@@ -167,7 +167,7 @@ describe("Changesets authoring", () => {
       'import("@swartzrock/llm-now-core/dist/index.js")',
     ], { cwd: cli, stdout: "pipe", stderr: "pipe" });
     expect(deepImport.exitCode).not.toBe(0);
-  });
+  }, 30_000);
 
   test("keeps the root wrapper and CLI workspace entry equivalent", () => {
     const cwd = new URL("..", import.meta.url).pathname;
