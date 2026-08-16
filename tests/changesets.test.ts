@@ -27,12 +27,22 @@ const corePackage = await Bun.file(
   name?: string;
   version?: string;
   private?: boolean;
+  publishConfig?: { access?: string };
 };
 const changesetsConfig = await Bun.file(
   new URL("../.changeset/config.json", import.meta.url),
 ).json() as {
+  access?: string;
+  fixed?: unknown[];
+  linked?: unknown[];
   privatePackages?: { version?: boolean; tag?: boolean };
 };
+const changesetsWorkflow = await Bun.file(
+  new URL("../.github/workflows/changesets.yml", import.meta.url),
+).text();
+const changesetsReadme = await Bun.file(
+  new URL("../.changeset/README.md", import.meta.url),
+).text();
 const changesetsBinary = new URL(
   "../node_modules/@changesets/cli/bin.js",
   import.meta.url,
@@ -70,9 +80,10 @@ describe("Changesets authoring", () => {
     expect(cliPackage).toMatchObject({ name: "llm-now", version: "2.7.0", private: true });
     expect(corePackage).toMatchObject({
       name: "@swartzrock/llm-now-core",
-      version: "0.0.0",
-      private: true,
+      publishConfig: { access: "public" },
     });
+    expect(corePackage.version).toMatch(/^0\.\d+\.\d+$/);
+    expect(corePackage.private).toBeUndefined();
     expect(cliPackage.devDependencies?.["@swartzrock/llm-now-core"]).toBe("workspace:^");
 
     const discovered = getPackagesSync(new URL("..", import.meta.url).pathname);
@@ -82,7 +93,7 @@ describe("Changesets authoring", () => {
     ]);
   });
 
-  test("uses the exact private, version-only Changesets configuration", async () => {
+  test("uses independent versions and keeps Changesets version-only", async () => {
     expect(repositoryPackage.private).toBe(true);
     expect(repositoryPackage.devDependencies?.["@changesets/cli"]).toBe("2.31.0");
     expect(repositoryPackage.scripts).toMatchObject({
@@ -90,8 +101,16 @@ describe("Changesets authoring", () => {
       "changeset:status": "changeset status --verbose",
       "changeset:version": "changeset version",
     });
-    expect(repositoryPackage.scripts?.["changeset:publish"]).toBeUndefined();
+    expect(repositoryPackage.scripts).not.toHaveProperty("changeset:publish");
+    expect(changesetsConfig.fixed).toEqual([]);
+    expect(changesetsConfig.linked).toEqual([]);
+    expect(changesetsConfig.access).toBe("restricted");
     expect(changesetsConfig.privatePackages).toEqual({ version: true, tag: false });
+    expect(corePackage.publishConfig).toEqual({ access: "public" });
+    expect(changesetsReadme).toContain("`llm-now` for CLI-only");
+    expect(changesetsReadme).toContain("`@swartzrock/llm-now-core` for core-only");
+    expect(changesetsReadme).toContain("both for shared");
+    expect(changesetsReadme).toContain("versions are independent");
 
     const workflowFiles = [
       new URL("../.github/workflows/ci.yml", import.meta.url),
@@ -101,6 +120,8 @@ describe("Changesets authoring", () => {
       .join("\n");
     expect(workflows).not.toMatch(/\b(?:changeset|npm) publish\b/);
     expect(workflows).not.toContain("NPM_TOKEN");
+    expect(changesetsWorkflow).not.toContain("publish:");
+    expect(changesetsWorkflow).not.toContain("changeset publish");
   });
 
   test("builds the core workspace behind its package-root export only", async () => {
@@ -194,7 +215,7 @@ describe("Changesets authoring", () => {
     expect(workspace.stderr.toString()).toBe(root.stderr.toString());
   });
 
-  test("does not version the CLI through its build-time core dependency", async () => {
+  test("does not induce cross-package bumps for core patch, core minor, or CLI-only intent", async () => {
     const directory = await mkdtemp(join(process.cwd(), ".tmp-changesets-workspaces-"));
     fixtureDirectories.push(directory);
 
@@ -212,7 +233,7 @@ describe("Changesets authoring", () => {
     await Bun.write(join(directory, "packages/core/package.json"), JSON.stringify({
       name: "@swartzrock/llm-now-core",
       version: "0.1.0",
-      private: true,
+      publishConfig: { access: "public" },
     }, null, 2));
     await Bun.write(
       join(directory, ".changeset", "config.json"),
@@ -239,6 +260,91 @@ describe("Changesets authoring", () => {
     };
     expect(versionedCli.version).toBe("2.7.0");
     expect(versionedCore.version).toBe("0.1.1");
+
+    await Bun.write(
+      join(directory, ".changeset", "core-minor.md"),
+      '---\n"@swartzrock/llm-now-core": minor\n---\n\nAdd core behavior.\n',
+    );
+    run(["git", "add", "."], directory);
+    run(["git", "commit", "-m", "core minor intent"], directory);
+    run([process.execPath, changesetsBinary, "version"], directory);
+    expect((await Bun.file(join(directory, "packages/cli/package.json")).json() as { version: string }).version)
+      .toBe("2.7.0");
+    expect((await Bun.file(join(directory, "packages/core/package.json")).json() as { version: string }).version)
+      .toBe("0.2.0");
+
+    await Bun.write(
+      join(directory, ".changeset", "cli-patch.md"),
+      '---\n"llm-now": patch\n---\n\nFix CLI behavior.\n',
+    );
+    run(["git", "add", "."], directory);
+    run(["git", "commit", "-m", "CLI patch intent"], directory);
+    run([process.execPath, changesetsBinary, "version"], directory);
+    expect((await Bun.file(join(directory, "packages/cli/package.json")).json() as { version: string }).version)
+      .toBe("2.7.1");
+    expect((await Bun.file(join(directory, "packages/core/package.json")).json() as { version: string }).version)
+      .toBe("0.2.0");
+  });
+
+  test("plans the first public core release without inducing a CLI bump", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-changesets-initial-core-"));
+    fixtureDirectories.push(directory);
+    await Bun.write(join(directory, "package.json"), JSON.stringify({
+      name: "fixture-workspace", private: true, workspaces: ["packages/*"],
+    }));
+    await Bun.write(join(directory, "packages/cli/package.json"), JSON.stringify({
+      name: "llm-now", version: "2.7.0", private: true,
+      devDependencies: { "@swartzrock/llm-now-core": "workspace:^" },
+    }));
+    await Bun.write(join(directory, "packages/core/package.json"), JSON.stringify({
+      name: "@swartzrock/llm-now-core", version: "0.0.0",
+      publishConfig: { access: "public" },
+    }));
+    await Bun.write(join(directory, ".changeset/config.json"), JSON.stringify(changesetsConfig));
+    await Bun.write(join(directory, ".changeset/README.md"), "# Changesets\n");
+    await Bun.write(join(directory, ".changeset/initial-core.md"),
+      '---\n"@swartzrock/llm-now-core": minor\n---\n\nPublish the headless core.\n');
+    run(["git", "init", "--initial-branch=main"], directory);
+    run(["git", "config", "user.email", "changesets@example.invalid"], directory);
+    run(["git", "config", "user.name", "Changesets Fixture"], directory);
+    run(["git", "add", "."], directory);
+    run(["git", "commit", "-m", "fixture"], directory);
+    run([process.execPath, changesetsBinary, "version"], directory);
+
+    const versionedCli = await Bun.file(join(directory, "packages/cli/package.json")).json() as { version: string };
+    const versionedCore = await Bun.file(join(directory, "packages/core/package.json")).json() as { version: string };
+    expect(versionedCli.version).toBe("2.7.0");
+    expect(versionedCore.version).toBe("0.1.0");
+  });
+
+  test("versions shared changes only when both packages are explicit", async () => {
+    const directory = await mkdtemp(join(process.cwd(), ".tmp-changesets-shared-"));
+    fixtureDirectories.push(directory);
+    await Bun.write(join(directory, "package.json"), JSON.stringify({
+      name: "fixture-workspace", private: true, workspaces: ["packages/*"],
+    }));
+    await Bun.write(join(directory, "packages/cli/package.json"), JSON.stringify({
+      name: "llm-now", version: "2.7.0", private: true,
+      devDependencies: { "@swartzrock/llm-now-core": "workspace:^" },
+    }));
+    await Bun.write(join(directory, "packages/core/package.json"), JSON.stringify({
+      name: "@swartzrock/llm-now-core", version: "0.1.9", publishConfig: { access: "public" },
+    }));
+    await Bun.write(join(directory, ".changeset/config.json"), JSON.stringify(changesetsConfig));
+    await Bun.write(join(directory, ".changeset/README.md"), "# Changesets\n");
+    await Bun.write(join(directory, ".changeset/shared.md"),
+      '---\n"@swartzrock/llm-now-core": minor\n"llm-now": patch\n---\n\nUpdate both products.\n');
+    run(["git", "init", "--initial-branch=main"], directory);
+    run(["git", "config", "user.email", "changesets@example.invalid"], directory);
+    run(["git", "config", "user.name", "Changesets Fixture"], directory);
+    run(["git", "add", "."], directory);
+    run(["git", "commit", "-m", "fixture"], directory);
+    run([process.execPath, changesetsBinary, "version"], directory);
+
+    const versionedCli = await Bun.file(join(directory, "packages/cli/package.json")).json() as { version: string };
+    const versionedCore = await Bun.file(join(directory, "packages/core/package.json")).json() as { version: string };
+    expect(versionedCli.version).toBe("2.7.1");
+    expect(versionedCore.version).toBe("0.2.0");
   });
 
   test("batches patch and minor intent into one private version and changelog", async () => {

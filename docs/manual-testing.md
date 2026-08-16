@@ -1289,6 +1289,74 @@ pitch values and audible comparison, cancellation exit/diagnostic, and
 permission prompts. Also record that Dictation may use Apple services, hosted
 aliases send accepted question content to their provider, and speech is audible.
 
+## Headless core package
+
+The native manual-test matrix above is unchanged. These package checks are a
+separate release lane and must produce no native archive, tag, GitHub Release,
+signing request, or Homebrew update.
+
+### MT-43: First core package publication
+
+Run this test only after an authorized maintainer completes the owner, scope,
+2FA, protected-environment, package-name, and bootstrap checks in
+[RELEASING.md](RELEASING.md#first-core-publication-and-bootstrap). Do not put an
+npm token in a shell command, report, or local file.
+
+1. Record the protected commit and `Publish core` workflow run. Confirm the
+   classifier reports only `@swartzrock/llm-now-core` and the intended version.
+2. Download the artifact before approving publication. Verify `SHA256SUMS`,
+   inspect the exact pack allowlist, and record the tarball SHA-256. Confirm the
+   artifact job had no npm or OIDC authority.
+3. Approve the `npm-core-publish` environment. Confirm the protected publisher
+   downloads the preserved artifact, rechecks its digest before credential
+   access, performs no checkout, install, or build, and publishes the candidate
+   under `next` with provenance. Confirm the npm CLI jobs use the pinned Node 24
+   setup, npm 11.5.1 or later, and `https://registry.npmjs.org`.
+4. During the `next` quarantine, query the exact version from a new cache and
+   verify its registry integrity equals the preserved tarball. Confirm the
+   SLSA v1 DSSE payload names repository
+   `https://github.com/swartzrock/llm-now`, workflow
+   `.github/workflows/publish-core.yml`, ref `refs/heads/main`, and a resolved
+   `gitCommit` equal to the recorded release SHA. Confirm its sole subject is
+   `pkg:npm/%40swartzrock/llm-now-core@VERSION` and its SHA-512 digest equals
+   the preserved tarball. Presence and a valid signature alone are insufficient.
+5. Run the Cold-cache Node and Bun consumers from empty directories. Install
+   the exact `@swartzrock/llm-now-core@VERSION` with lifecycle scripts disabled,
+   never a workspace link or floating tag. Use Node 20 or later and Bun 1.3.14
+   or later. Repeat the maintained external-consumer smoke: root import and
+   construction without side effects, pure routing, pre-aborted generation
+   without resolver or provider I/O, controlled fake-CLI buffered generation,
+   native streaming, awaited callback backpressure, cancellation and child
+   cleanup, final-text parity, deep-import rejection, and TypeScript NodeNext
+   declaration resolution.
+6. Confirm `latest` was absent or still named the previous stable version until
+   all registry and consumer checks passed. Then confirm promotion names the
+   same immutable package version and integrity; no second tarball is built.
+7. Confirm `npm view @swartzrock/llm-now-core dist-tags --json` reports the
+   intended `latest`. Reinstall that exact version with new Node, Bun, and npm
+   caches, repeat the root-import smoke, and confirm the native lane did not run.
+8. Configure the trusted publisher transition described in the release guide,
+   revoke the bootstrap credential, and remove its GitHub secret before proving
+   the next OIDC publication. Confirm a deliberately lingering bootstrap secret
+   makes the later workflow fail closed before `npm publish`.
+
+If the exact version appears with the wrong integrity or lacks provenance, do
+not promote it. Deprecate the immutable failed version, remove `next`, and
+fix-forward to a new Changeset and version. Do not unpublish or reuse it.
+
+### MT-44: Core release record and 24-hour check
+
+Attach the commit, workflow run, package/version, candidate SHA-256, registry
+integrity, pack allowlist, external Node/Bun/NodeNext evidence, dist tags,
+provenance subject and exact source identity, protected-environment approval,
+trusted-publisher state, bootstrap-token revocation, and native-lane no-op to
+the durable release record.
+
+Immediately after promotion and again after 24 hours, use a cold cache to query
+the exact version. Reconfirm integrity, provenance, `latest`, expected package
+metadata, successful Node and Bun root imports, and the absence of a native tag,
+GitHub Release, or Homebrew mutation for the core-only release.
+
 ## Automation-backed coverage
 
 Keep the Bun test suite as the authority for behavior that is difficult or unreliable to verify manually:
@@ -1348,4 +1416,4 @@ corrupt unified replacement or legacy fallback, credential-store unavailability
 misclassification, missing store cleanup, absent compiled lifecycle evidence,
 checksum mismatch, or inability to run without Bun or Node.js blocks release.
 
-See the [README](../README.md), [CLI argument contract](../src/args.ts), and [release workflow](../.github/workflows/release.yml) for the source-of-truth behavior.
+See the [README](../README.md), [CLI argument contract](../packages/cli/src/args.ts), and [release workflow](../.github/workflows/release.yml) for the source-of-truth behavior.

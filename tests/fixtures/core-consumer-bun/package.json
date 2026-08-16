@@ -1,0 +1,8 @@
+{
+  "name": "core-consumer-bun-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@swartzrock/llm-now-core": "file:__CORE_TARBALL__"
+  }
+}

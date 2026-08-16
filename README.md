@@ -27,6 +27,7 @@ $ llm-now local --input "Explain this error in plain English: ECONNREFUSED 127.0
 - [Voice](#voice)
 - [Configuration](#configuration)
 - [Credentials](#credentials)
+- [Headless core package](#headless-core-package)
 - [CLI reference](docs/cli-reference.md)
 
 ## Install
@@ -178,3 +179,14 @@ Use the launcher's `Manage connections…` path to add, replace, or delete store
 fallbacks. See the [credentials guide](docs/credentials.md) for recognized
 variables, native record behavior, compiled-target support, platform
 prerequisites, and recovery when secure storage is unavailable.
+
+## Headless core package
+
+`@swartzrock/llm-now-core` exposes provider discovery, model listing,
+validation, generation, streaming, cancellation, safety, workspace checks, and
+generic transcript routing to trusted Node 20+ and Bun 1.3.14+ hosts. The host
+supplies credentials, approved CLI execution, routing candidates, timeouts, and
+voice behavior. The package does not read `llm-now` aliases or native vault
+records.
+
+Start with the [core API](docs/core-api.md) and [core security contract](docs/core-security.md).

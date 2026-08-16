@@ -9,12 +9,35 @@ const ciWorkflow = await Bun.file(new URL("../.github/workflows/ci.yml", import.
 const changesetsWorkflow = await Bun.file(
   new URL("../.github/workflows/changesets.yml", import.meta.url),
 ).text();
+const corePublishWorkflow = await Bun.file(
+  new URL("../.github/workflows/publish-core.yml", import.meta.url),
+).text();
+const corePackageVerifier = await Bun.file(
+  new URL("../scripts/verify-core-package.ts", import.meta.url),
+).text();
 const rootPackage = await Bun.file(new URL("../package.json", import.meta.url)).json();
 const releaseCoordinatorExists = await Bun.file(
   new URL("../.github/workflows/release-coordinator.yml", import.meta.url),
 ).exists();
 
 describe("release workflow policy", () => {
+  test("enforces the trusted-publishing toolchain floors lexicographically", () => {
+    const definition = corePublishWorkflow.match(/^\s+(const atLeast = .+;)$/m)?.[1];
+    expect(definition).toBeDefined();
+    const atLeast = new Function(`${definition}\nreturn atLeast;`)() as (
+      actual: string,
+      floor: readonly number[],
+    ) => boolean;
+
+    expect(atLeast("22.14.0", [22, 14, 0])).toBeTrue();
+    expect(atLeast("24.0.0", [22, 14, 0])).toBeTrue();
+    expect(atLeast("22.13.99", [22, 14, 0])).toBeFalse();
+    expect(atLeast("11.5.1", [11, 5, 1])).toBeTrue();
+    expect(atLeast("11.6.0", [11, 5, 1])).toBeTrue();
+    expect(atLeast("11.4.999", [11, 5, 1])).toBeFalse();
+    expect(atLeast("11.5.0", [11, 5, 1])).toBeFalse();
+  });
+
   test("gates every enabled native archive on its exact compiled credential lifecycle", () => {
     for (const workflow of [ciWorkflow, releaseWorkflow]) {
       const nativeJob = workflow.slice(workflow.indexOf("\n  native:"));
@@ -183,17 +206,270 @@ describe("release workflow policy", () => {
       "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6",
       "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
       "actions/checkout@v7.0.0",
+      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
       "actions/download-artifact@v8.0.1",
       "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405",
+      "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
       "actions/upload-artifact@v7.0.1",
+      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     ]);
-    for (const workflow of [ciWorkflow, releaseWorkflow, changesetsWorkflow]) {
+    for (const workflow of [ciWorkflow, releaseWorkflow, changesetsWorkflow, corePublishWorkflow]) {
       const actions = [...workflow.matchAll(/^\s+- uses:\s+([^\s#]+)/gm)].map((match) => match[1]!);
       expect(actions.length).toBeGreaterThan(0);
       expect(actions.every((action) => action.startsWith("actions/")
         ? githubActions.has(action)
         : /@[a-f0-9]{40}$/.test(action))).toBe(true);
     }
+  });
+
+  test("separates unprivileged core artifact construction from protected publication", () => {
+    const artifactJob = corePublishWorkflow.slice(
+      corePublishWorkflow.indexOf("\n  artifact:"),
+      corePublishWorkflow.indexOf("\n  publish:"),
+    );
+    const publishJob = corePublishWorkflow.slice(
+      corePublishWorkflow.indexOf("\n  publish:"),
+      corePublishWorkflow.indexOf("\n  registry-smoke:"),
+    );
+    const registrySmokeJob = corePublishWorkflow.slice(
+      corePublishWorkflow.indexOf("\n  registry-smoke:"),
+      corePublishWorkflow.indexOf("\n  promote:"),
+    );
+    const promoteJob = corePublishWorkflow.slice(corePublishWorkflow.indexOf("\n  promote:"));
+    const publishRegistryStep = publishJob.slice(
+      publishJob.indexOf("Inspect preserved artifact and registry state"),
+      publishJob.indexOf("Publish preserved artifact under next"),
+    );
+    const publishMutationStep = publishJob.slice(
+      publishJob.indexOf("Publish preserved artifact under next"),
+      publishJob.indexOf("Verify candidate under next"),
+    );
+    const promoteRegistryStep = promoteJob.slice(
+      promoteJob.indexOf("Re-verify candidate and registry state"),
+      promoteJob.indexOf("Verify exact npm provenance identity"),
+    );
+    const promoteProvenanceStep = promoteJob.slice(
+      promoteJob.indexOf("- id: provenance"),
+      promoteJob.indexOf("Contain a failed quarantined candidate"),
+    );
+    const containmentStep = promoteJob.slice(
+      promoteJob.indexOf("Contain a failed quarantined candidate"),
+      promoteJob.indexOf("Stop after registry verification failure"),
+    );
+
+    expect(artifactJob).toContain("permissions:\n      contents: read");
+    expect(artifactJob).toContain("bun scripts/release-plan.ts core");
+    expect(artifactJob).toContain("bun scripts/verify-core-package.ts dist/core-package");
+    expect(artifactJob).toContain("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e");
+    expect(artifactJob).toContain("node-version: 20");
+    expect([...artifactJob.matchAll(/node-version: (\d+)/g)].map((match) => match[1])).toEqual([
+      "20",
+    ]);
+    expect(artifactJob.indexOf("node-version: 20")).toBeLessThan(
+      artifactJob.indexOf("bun scripts/verify-core-package.ts dist/core-package"),
+    );
+    expect(artifactJob).toContain("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
+    expect(artifactJob).not.toContain("id-token: write");
+    expect(artifactJob).not.toContain("NPM_");
+    expect(artifactJob).not.toContain("npm publish");
+
+    const checkoutSteps = corePublishWorkflow.split(/(?=^\s+- uses: actions\/checkout@)/gm)
+      .filter((step) => step.includes("actions/checkout@"));
+    expect(checkoutSteps).toHaveLength(3);
+    expect(checkoutSteps.every((step) => step.includes("persist-credentials: false"))).toBe(true);
+    expect(corePublishWorkflow).toContain('test "$GITHUB_REF" = "refs/heads/main"');
+    expect(corePublishWorkflow).toContain('test "$(git rev-parse HEAD)" = "$RELEASE_SHA"');
+    expect(corePublishWorkflow).toContain('git merge-base --is-ancestor "$RELEASE_SHA" origin/main');
+
+    expect(publishJob).toContain("environment: npm-core-publish");
+    expect(publishJob).toContain("timeout-minutes: 15");
+    expect(publishJob).toContain("id-token: write");
+    expect(publishJob).toContain("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e");
+    expect(publishJob).toContain("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c");
+    expect(publishJob).toContain("sha256sum -c SHA256SUMS");
+    expect(publishJob.indexOf("sha256sum -c SHA256SUMS")).toBeLessThan(
+      publishJob.indexOf("NPM_BOOTSTRAP_TOKEN"),
+    );
+    expect(publishJob).not.toContain("actions/checkout@");
+    expect(publishJob).not.toMatch(/\b(?:bun|npm) install\b/);
+    expect(publishJob).not.toContain("core:build");
+    expect(publishJob).toContain("npm publish \"$TARBALL\" --access public --tag next --provenance");
+    expect(publishJob).toContain("existing registry version does not match preserved artifact");
+    expect(publishJob).toContain("registry provenance is absent");
+    expect(publishJob).toContain("Verify candidate under next");
+    expect(publishJob).not.toContain("dist-tag add");
+    expect(publishJob).toContain("package: ${{ steps.registry.outputs.package }}");
+    expect(publishJob).toContain("integrity: ${{ steps.registry.outputs.integrity }}");
+    expect(publishJob).toContain("new-candidate: ${{ steps.registry.outputs.publish }}");
+    expect(publishJob).toContain("package-absent: ${{ steps.registry.outputs.package-absent }}");
+    expect(publishRegistryStep).toContain('npm view "$package" versions --json');
+    expect(publishRegistryStep.indexOf("elif grep -q 'E404'")).toBeLessThan(
+      publishRegistryStep.indexOf('npm view "$package" versions --json'),
+    );
+    expect(publishRegistryStep.indexOf('npm view "$package" versions --json')).toBeLessThan(
+      publishRegistryStep.indexOf('echo "package-absent=$package_absent" >> "$GITHUB_OUTPUT"'),
+    );
+    expect(publishMutationStep).toContain(
+      "PACKAGE_ABSENT: ${{ steps.registry.outputs.package-absent }}",
+    );
+    expect(publishMutationStep).toContain('if [ "$PACKAGE_ABSENT" = "true" ]; then');
+    expect(publishMutationStep).toContain('test "$VERSION" = "0.1.0"');
+    expect(publishMutationStep).toContain('test -n "$NPM_BOOTSTRAP_TOKEN"');
+    expect(publishMutationStep).toContain('test -z "$NPM_BOOTSTRAP_TOKEN"');
+    expect(publishMutationStep).toContain(
+      "lingering bootstrap token must be removed before OIDC publication",
+    );
+    expect(publishMutationStep.indexOf('test "$VERSION" = "0.1.0"')).toBeLessThan(
+      publishMutationStep.indexOf('NODE_AUTH_TOKEN="$NPM_BOOTSTRAP_TOKEN" npm publish'),
+    );
+    expect(publishMutationStep.indexOf('test -z "$NPM_BOOTSTRAP_TOKEN"')).toBeLessThan(
+      publishMutationStep.lastIndexOf(
+        'npm publish "$TARBALL" --access public --tag next --provenance',
+      ),
+    );
+
+    expect(registrySmokeJob).toContain("permissions:\n      contents: read");
+    expect(registrySmokeJob).toContain("timeout-minutes: 20");
+    expect(registrySmokeJob).toContain("needs: [classify, artifact, publish]");
+    expect(registrySmokeJob).toContain("ref: ${{ needs.classify.outputs.release-sha }}");
+    expect(registrySmokeJob).toContain("persist-credentials: false");
+    expect(registrySmokeJob).toContain("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c");
+    expect(registrySmokeJob).toContain("bun-version: 1.3.14");
+    expect(registrySmokeJob).toContain("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e");
+    expect(registrySmokeJob).toContain("npm pack \"$PACKAGE@$VERSION\"");
+    expect(registrySmokeJob).toContain("npm install --ignore-scripts");
+    expect(registrySmokeJob).toContain('bun scripts/verify-core-package.ts --tarball "$fetched"');
+    expect(registrySmokeJob).not.toContain("cat > \"$cold/smoke.mjs\"");
+    expect(registrySmokeJob).toContain("npm audit signatures");
+    expect(registrySmokeJob.indexOf("npm audit signatures")).toBeLessThan(
+      registrySmokeJob.indexOf("Verify exact npm provenance identity"),
+    );
+    expect(corePackageVerifier).toContain('args[0] === "--tarball"');
+    expect(corePackageVerifier).toContain("await cp(inputTarball, tarball)");
+    expect(corePackageVerifier).toContain("await runtimeSmoke(nodeBinary");
+    expect(corePackageVerifier).toContain("await runtimeSmoke(bunBinary");
+    expect(registrySmokeJob).not.toContain("environment: npm-core-publish");
+    expect(registrySmokeJob).not.toMatch(/NPM_(?:BOOTSTRAP|DIST_TAG)_TOKEN/);
+    expect(registrySmokeJob).not.toContain("id-token: write");
+
+    expect(promoteJob).toContain("needs: [classify, artifact, publish, registry-smoke]");
+    expect(promoteJob).toContain("if: always()");
+    expect(promoteJob).toContain("environment: npm-core-publish");
+    expect(promoteJob).toContain("timeout-minutes: 15");
+    expect(promoteJob).toContain("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e");
+    expect(promoteJob).toContain("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c");
+    expect(promoteJob).toContain("sha256sum -c SHA256SUMS");
+    expect(promoteJob).not.toContain("actions/checkout@");
+    expect(promoteJob).not.toMatch(/\b(?:bun|npm) install\b/);
+    expect(promoteJob).not.toContain("core:build");
+    expect(promoteJob).toContain("needs.registry-smoke.result");
+    expect(promoteJob).toContain("needs.publish.outputs.new-candidate == 'true'");
+    expect(promoteJob).toContain("steps.registry.outputs.identity-verified == 'true'");
+    expect(promoteJob).toContain("steps.registry.outputs.quarantined == 'true'");
+    expect(promoteJob).toContain("steps.provenance.outputs.verified == 'true'");
+    expect(promoteJob).toContain("needs.publish.result == 'failure'");
+    expect(promoteJob).toContain("local_integrity=");
+    expect(promoteRegistryStep).toContain('if [ -z "$provenance" ]; then');
+    expect(promoteRegistryStep.indexOf("registry candidate identity or integrity mismatch"))
+      .toBeLessThan(promoteRegistryStep.indexOf("identity_verified=true"));
+    expect(promoteRegistryStep.indexOf('if [ -z "$provenance" ]; then')).toBeLessThan(
+      promoteRegistryStep.indexOf("continue"),
+    );
+    expect(promoteRegistryStep.indexOf("continue")).toBeLessThan(
+      promoteRegistryStep.indexOf("ready=true"),
+    );
+    expect(promoteRegistryStep).not.toContain(
+      'test -n "$(jq -r \'.dist.attestations.provenance.predicateType // empty\'',
+    );
+    expect(promoteRegistryStep).toContain('echo "present=$present" >> "$GITHUB_OUTPUT"');
+    expect(promoteRegistryStep).toContain(
+      'echo "identity-verified=$identity_verified" >> "$GITHUB_OUTPUT"',
+    );
+    expect(promoteRegistryStep).toContain('echo "ready=$ready" >> "$GITHUB_OUTPUT"');
+    expect(promoteRegistryStep).toContain(
+      'echo "quarantined=$quarantined" >> "$GITHUB_OUTPUT"',
+    );
+    expect(promoteProvenanceStep).toContain("id: provenance");
+    expect(promoteProvenanceStep.indexOf("digest.gitCommit == $commit")).toBeLessThan(
+      promoteProvenanceStep.indexOf('echo "verified=true" >> "$GITHUB_OUTPUT"'),
+    );
+    expect(containmentStep).toContain(
+      "if: always() && needs.registry-smoke.result != 'success' && steps.registry.outputs.identity-verified == 'true' && steps.registry.outputs.quarantined == 'true' && (needs.publish.outputs.new-candidate == 'true' || steps.provenance.outputs.verified == 'true')",
+    );
+    expect(containmentStep).toContain("npm dist-tag rm \"$PACKAGE\" next");
+    expect(containmentStep).toContain("npm deprecate \"$PACKAGE@$VERSION\"");
+    expect(containmentStep).toContain("fix-forward only");
+    expect(containmentStep).toContain("candidate is already latest; refusing containment");
+    expect(containmentStep).toContain("candidate is no longer quarantined under next");
+    expect(containmentStep.indexOf("candidate is already latest; refusing containment"))
+      .toBeLessThan(containmentStep.indexOf('npm deprecate "$PACKAGE@$VERSION"'));
+    expect(containmentStep.indexOf("candidate is no longer quarantined under next"))
+      .toBeLessThan(containmentStep.indexOf('npm deprecate "$PACKAGE@$VERSION"'));
+    expect(containmentStep.indexOf('if [ -z "$deprecated" ]; then')).toBeLessThan(
+      containmentStep.indexOf('npm deprecate "$PACKAGE@$VERSION"'),
+    );
+    expect(containmentStep.indexOf('npm deprecate "$PACKAGE@$VERSION"')).toBeLessThan(
+      containmentStep.indexOf('npm dist-tag rm "$PACKAGE" next'),
+    );
+    expect(containmentStep.indexOf('if [ "$next" = "$VERSION" ]; then')).toBeLessThan(
+      containmentStep.indexOf('npm dist-tag rm "$PACKAGE" next'),
+    );
+    expect(promoteJob).toContain("npm dist-tag add \"$PACKAGE@$VERSION\" latest");
+    expect(promoteJob).toContain(
+      "if: needs.registry-smoke.result == 'success' && steps.provenance.outputs.verified == 'true'",
+    );
+    expect(promoteJob.indexOf("Verify exact npm provenance identity")).toBeLessThan(
+      promoteJob.indexOf("npm dist-tag rm \"$PACKAGE\" next"),
+    );
+    expect(promoteJob.indexOf("Verify exact npm provenance identity")).toBeLessThan(
+      promoteJob.indexOf("npm dist-tag add \"$PACKAGE@$VERSION\" latest"),
+    );
+    expect(promoteJob.indexOf("sha256sum -c SHA256SUMS")).toBeLessThan(
+      promoteJob.indexOf("NPM_DIST_TAG_TOKEN"),
+    );
+    for (const job of [publishJob, promoteJob]) {
+      expect(job).not.toContain("actions/checkout@");
+      expect(job).not.toMatch(/\b(?:bun|npm) install\b/);
+      expect(job).not.toContain("core:build");
+      expect(job).not.toMatch(/\b(?:bun|node)\s+(?:run\s+)?(?:\.\/)?scripts\//);
+    }
+    for (const job of [publishJob, registrySmokeJob, promoteJob]) {
+      expect(job).toContain("node-version: 24");
+      expect(job).toContain("registry-url: https://registry.npmjs.org");
+      expect(job).toContain("package-manager-cache: false");
+      expect(job).toContain("Verify npm trusted publishing toolchain");
+      expect(job).toContain("[22, 14, 0]");
+      expect(job).toContain("[11, 5, 1]");
+    }
+
+    const provenanceChecks = [registrySmokeJob, promoteJob];
+    for (const job of provenanceChecks) {
+      expect(job).toContain("Verify exact npm provenance identity");
+      expect(job).toContain(".dist.attestations.url");
+      expect(job).toContain("https://slsa.dev/provenance/v1");
+      expect(job).toContain("bundle.dsseEnvelope.payload");
+      expect(job).toContain("application/vnd.in-toto+json");
+      expect(job).toContain("https://github.com/swartzrock/llm-now");
+      expect(job).toContain(".github/workflows/publish-core.yml");
+      expect(job).toContain("refs/heads/main");
+      expect(job).toContain("digest.gitCommit == $commit");
+      expect(job).toContain("pkg:npm/%40swartzrock/llm-now-core@");
+      expect(job).toContain(".subject[0].digest.sha512 == $sha512");
+      expect(job).toContain(
+        "curl --fail --silent --show-error --connect-timeout 10 --max-time 30 --retry 4 --retry-all-errors --retry-max-time 120",
+      );
+      expect(job).not.toMatch(/curl[^\n]+\|\s*(?:sh|bash|zsh)\b/);
+    }
+  });
+
+  test("keeps core publication separate from Changesets and native releases", () => {
+    expect(changesetsWorkflow).not.toContain("publish:");
+    expect(changesetsWorkflow).not.toContain("changeset publish");
+    expect(changesetsWorkflow).not.toContain("NPM_");
+    expect(corePublishWorkflow).not.toContain("gh release");
+    expect(corePublishWorkflow).not.toContain("build:native");
+    expect(corePublishWorkflow).not.toContain("packages/cli/CHANGELOG.md");
+    expect(releaseWorkflow).not.toContain("publish-core");
   });
 
   test("runs the locked macOS voice router suite in source CI only", () => {

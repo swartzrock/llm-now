@@ -1,0 +1,12 @@
+{
+  "name": "core-consumer-typescript-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@swartzrock/llm-now-core": "file:__CORE_TARBALL__"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3"
+  }
+}
