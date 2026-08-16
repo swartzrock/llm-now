@@ -9,6 +9,7 @@ const ciWorkflow = await Bun.file(new URL("../.github/workflows/ci.yml", import.
 const changesetsWorkflow = await Bun.file(
   new URL("../.github/workflows/changesets.yml", import.meta.url),
 ).text();
+const rootPackage = await Bun.file(new URL("../package.json", import.meta.url)).json();
 const releaseCoordinatorExists = await Bun.file(
   new URL("../.github/workflows/release-coordinator.yml", import.meta.url),
 ).exists();
@@ -195,6 +196,9 @@ describe("release workflow policy", () => {
     expect(sourceJob).toContain('python-version: "3.11"');
     expect(sourceJob).toContain('version: "0.11.16"');
     expect(sourceJob).toContain("run: bun run release:validate");
+    expect(rootPackage.scripts["release:validate"]).toBe(
+      "bun run core:build && bun scripts/release-validate.ts packages",
+    );
     expect(sourceJob).toContain("run: bun run check");
     expect(sourceJob).toContain(
       "run: uv run --project examples/macos-voice-router --locked python -m unittest discover -s examples/macos-voice-router/tests",
