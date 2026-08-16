@@ -85,11 +85,28 @@ jobs:
     if: needs.classify.outputs.should-release == 'true'
     runs-on: ubuntu-latest
     environment: npm-core-publish
+    outputs:
+      package: ${{ steps.registry.outputs.package }}
+      version: ${{ steps.registry.outputs.version }}
+      integrity: ${{ steps.registry.outputs.integrity }}
+      new-candidate: ${{ steps.registry.outputs.publish }}
     permissions:
       contents: read
       actions: read
       id-token: write
     steps:
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Verify npm trusted publishing toolchain
+        run: |
+          NODE_VERSION="$(node -p 'process.versions.node')" NPM_VERSION="$(npm --version)" node -e '
+            const atLeast = (actual, floor) => { const parts = actual.split(".").map(Number); const difference = floor.findIndex((part, index) => parts[index] !== part); return difference === -1 || parts[difference] > floor[difference]; };
+            if (!atLeast(process.env.NODE_VERSION, [22, 14, 0])) throw new Error("Node 22.14 or later is required");
+            if (!atLeast(process.env.NPM_VERSION, [11, 5, 1])) throw new Error("npm 11.5.1 or later is required");
+          '
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: llm-now-core-${{ needs.classify.outputs.release-sha }}
@@ -149,54 +166,274 @@ jobs:
           else
             npm publish "$TARBALL" --access public --tag next --provenance
           fi
-      - name: Verify cold-cache registry bytes and provenance
-        id: registry_smoke
-        continue-on-error: true
+      - name: Verify candidate under next
         env:
           PACKAGE: ${{ steps.registry.outputs.package }}
           VERSION: ${{ steps.registry.outputs.version }}
           EXPECTED_INTEGRITY: ${{ steps.registry.outputs.integrity }}
         run: |
           set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if registry="$(npm view "$PACKAGE@$VERSION" --json 2>/dev/null)"; then
+              integrity="$(jq -r .dist.integrity <<<"$registry")"
+              provenance="$(jq -r '.dist.attestations.provenance.predicateType // empty' <<<"$registry")"
+              next="$(npm view "$PACKAGE" dist-tags.next --json | jq -r '. // empty')"
+              if [ "$integrity" = "$EXPECTED_INTEGRITY" ] && [ -n "$provenance" ] && [ "$next" = "$VERSION" ]; then
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+          echo "candidate is not verifiably available under next" >&2
+          exit 1
+
+  registry-smoke:
+    needs: [classify, artifact, publish]
+    if: needs.classify.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ needs.classify.outputs.release-sha }}
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Verify npm trusted publishing toolchain
+        run: |
+          NODE_VERSION="$(node -p 'process.versions.node')" NPM_VERSION="$(npm --version)" node -e '
+            const atLeast = (actual, floor) => { const parts = actual.split(".").map(Number); const difference = floor.findIndex((part, index) => parts[index] !== part); return difference === -1 || parts[difference] > floor[difference]; };
+            if (!atLeast(process.env.NODE_VERSION, [22, 14, 0])) throw new Error("Node 22.14 or later is required");
+            if (!atLeast(process.env.NPM_VERSION, [11, 5, 1])) throw new Error("npm 11.5.1 or later is required");
+          '
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: llm-now-core-${{ needs.classify.outputs.release-sha }}
+          path: dist/core-package
+      - name: Cold-install and execute the exact registry version
+        env:
+          PACKAGE: ${{ needs.publish.outputs.package }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          EXPECTED_INTEGRITY: ${{ needs.publish.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          sha256sum -c dist/core-package/SHA256SUMS
+          tarball="$(find dist/core-package -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$tarball"
           cold="$(mktemp -d)"
           fetched=""
           for attempt in 1 2 3 4 5; do
-            if npm pack "$PACKAGE@$VERSION" --ignore-scripts --pack-destination "$cold" --cache "$cold/cache" >/dev/null; then
+            if npm pack "$PACKAGE@$VERSION" --ignore-scripts --pack-destination "$cold" --cache "$cold/npm-pack-cache" >/dev/null; then
               fetched="$(find "$cold" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
               break
             fi
             sleep 5
           done
           test -n "$fetched"
-          integrity="sha512-$(openssl dgst -sha512 -binary "$fetched" | openssl base64 -A)"
-          test "$integrity" = "$EXPECTED_INTEGRITY"
-          registry="$(npm view "$PACKAGE@$VERSION" --json --cache "$cold/cache")"
-          provenance="$(jq -r '.dist.attestations.provenance.predicateType // empty' <<<"$registry")"
-          test -n "$provenance" || { echo "registry provenance is absent" >&2; exit 1; }
-          next="$(npm view "$PACKAGE" dist-tags.next --json --cache "$cold/cache" | jq -r '. // empty')"
-          test "$next" = "$VERSION"
-      - name: Contain a failed new candidate
-        if: steps.registry_smoke.outcome == 'failure' && steps.registry.outputs.publish == 'true'
+          fetched_integrity="sha512-$(openssl dgst -sha512 -binary "$fetched" | openssl base64 -A)"
+          test "$fetched_integrity" = "$EXPECTED_INTEGRITY"
+          registry="$(npm view "$PACKAGE@$VERSION" --json --cache "$cold/npm-view-cache")"
+          test "$(jq -r .dist.integrity <<<"$registry")" = "$EXPECTED_INTEGRITY"
+          test -n "$(jq -r '.dist.attestations.provenance.predicateType // empty' <<<"$registry")"
+          test "$(npm view "$PACKAGE" dist-tags.next --json --cache "$cold/npm-view-cache" | jq -r '. // empty')" = "$VERSION"
+
+          mkdir -p "$cold/signature"
+          printf '{"private":true,"dependencies":{"%s":"%s"}}\n' "$PACKAGE" "$VERSION" > "$cold/signature/package.json"
+          npm install --ignore-scripts --cache "$cold/npm-install-cache" --prefix "$cold/signature"
+          npm audit signatures --include-attestations --prefix "$cold/signature"
+          bun scripts/verify-core-package.ts --tarball "$fetched"
+
+      - name: Verify exact npm provenance identity
         env:
-          PACKAGE: ${{ steps.registry.outputs.package }}
-          VERSION: ${{ steps.registry.outputs.version }}
+          PACKAGE: ${{ needs.publish.outputs.package }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          EXPECTED_INTEGRITY: ${{ needs.publish.outputs.integrity }}
+          RELEASE_SHA: ${{ needs.classify.outputs.release-sha }}
+        run: |
+          set -euo pipefail
+          test "$PACKAGE" = "@swartzrock/llm-now-core"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          case "$EXPECTED_INTEGRITY" in sha512-*) ;; *) echo "invalid preserved tarball integrity" >&2; exit 1 ;; esac
+          registry="$(npm view "$PACKAGE@$VERSION" --json)"
+          test "$(jq -r .name <<<"$registry")" = "$PACKAGE"
+          test "$(jq -r .version <<<"$registry")" = "$VERSION"
+          test "$(jq -r .dist.integrity <<<"$registry")" = "$EXPECTED_INTEGRITY"
+          attestations_url="$(jq -r '.dist.attestations.url // empty' <<<"$registry")"
+          case "$attestations_url" in
+            https://registry.npmjs.org/-/npm/v1/attestations/*) ;;
+            *) echo "invalid npm attestation endpoint" >&2; exit 1 ;;
+          esac
+          attestations="$(curl --fail --silent --show-error "$attestations_url")"
+          predicate="https://slsa.dev/provenance/v1"
+          test "$(jq --arg predicate "$predicate" '[.attestations[]? | select(.predicateType == $predicate)] | length' <<<"$attestations")" -eq 1
+          payload_type="$(jq -er --arg predicate "$predicate" '.attestations[] | select(.predicateType == $predicate) | .bundle.dsseEnvelope.payloadType' <<<"$attestations")"
+          test "$payload_type" = "application/vnd.in-toto+json"
+          payload="$(jq -er --arg predicate "$predicate" '.attestations[] | select(.predicateType == $predicate) | .bundle.dsseEnvelope.payload' <<<"$attestations")"
+          statement="$(printf '%s' "$payload" | openssl base64 -d -A)"
+          expected_sha512="$(printf '%s' "${EXPECTED_INTEGRITY#sha512-}" | openssl base64 -d -A | od -An -vtx1 | tr -d ' \n')"
+          test "${#expected_sha512}" -eq 128
+          expected_subject="pkg:npm/%40swartzrock/llm-now-core@$VERSION"
+          jq -e --arg predicate "$predicate" --arg subject "$expected_subject" --arg sha512 "$expected_sha512" --arg commit "$RELEASE_SHA" '
+            ._type == "https://in-toto.io/Statement/v1" and
+            .predicateType == $predicate and
+            (.subject | length == 1) and
+            .subject[0].name == $subject and
+            .subject[0].digest.sha512 == $sha512 and
+            .predicate.buildDefinition.externalParameters.workflow.repository == "https://github.com/swartzrock/llm-now" and
+            .predicate.buildDefinition.externalParameters.workflow.path == ".github/workflows/publish-core.yml" and
+            .predicate.buildDefinition.externalParameters.workflow.ref == "refs/heads/main" and
+            any(.predicate.buildDefinition.resolvedDependencies[]?;
+              .uri == "git+https://github.com/swartzrock/llm-now@refs/heads/main" and
+              .digest.gitCommit == $commit)
+          ' <<<"$statement" >/dev/null
+
+  promote:
+    needs: [classify, artifact, publish, registry-smoke]
+    if: always() && needs.classify.outputs.should-release == 'true' && needs.artifact.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'failure')
+    runs-on: ubuntu-latest
+    environment: npm-core-publish
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Verify npm trusted publishing toolchain
+        run: |
+          NODE_VERSION="$(node -p 'process.versions.node')" NPM_VERSION="$(npm --version)" node -e '
+            const atLeast = (actual, floor) => { const parts = actual.split(".").map(Number); const difference = floor.findIndex((part, index) => parts[index] !== part); return difference === -1 || parts[difference] > floor[difference]; };
+            if (!atLeast(process.env.NODE_VERSION, [22, 14, 0])) throw new Error("Node 22.14 or later is required");
+            if (!atLeast(process.env.NPM_VERSION, [11, 5, 1])) throw new Error("npm 11.5.1 or later is required");
+          '
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: llm-now-core-${{ needs.classify.outputs.release-sha }}
+          path: dist/core-package
+      - id: registry
+        name: Re-verify candidate and registry state
+        env:
+          EXPECTED_PACKAGE: ${{ needs.classify.outputs.package-name }}
+          EXPECTED_VERSION: ${{ needs.classify.outputs.version }}
+          EXPECTED_INTEGRITY: ${{ needs.publish.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          (cd dist/core-package && sha256sum -c SHA256SUMS)
+          tarball="$(find dist/core-package -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          manifest="$(tar -xOf "$tarball" package/package.json)"
+          test "$(jq -r .name <<<"$manifest")" = "$EXPECTED_PACKAGE"
+          test "$(jq -r .version <<<"$manifest")" = "$EXPECTED_VERSION"
+          local_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          if [ -n "$EXPECTED_INTEGRITY" ]; then
+            test "$local_integrity" = "$EXPECTED_INTEGRITY"
+          fi
+          present=false
+          for attempt in 1 2 3 4 5; do
+            error_file="$(mktemp)"
+            if registry="$(npm view "$EXPECTED_PACKAGE@$EXPECTED_VERSION" --json 2>"$error_file")"; then
+              test "$(jq -r .name <<<"$registry")" = "$EXPECTED_PACKAGE"
+              test "$(jq -r .version <<<"$registry")" = "$EXPECTED_VERSION"
+              test "$(jq -r .dist.integrity <<<"$registry")" = "$local_integrity"
+              present=true
+              echo "present=true" >> "$GITHUB_OUTPUT"
+              test -n "$(jq -r '.dist.attestations.provenance.predicateType // empty' <<<"$registry")"
+              break
+            elif ! grep -q 'E404' "$error_file"; then
+              cat "$error_file" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          if [ "$present" = "false" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${{ needs.registry-smoke.result }}" = "success" ]; then
+            test "$present" = "true"
+            test "$(npm view "$EXPECTED_PACKAGE" dist-tags.next --json | jq -r '. // empty')" = "$EXPECTED_VERSION"
+          fi
+      - name: Verify exact npm provenance identity
+        env:
+          PACKAGE: ${{ needs.classify.outputs.package-name }}
+          VERSION: ${{ needs.classify.outputs.version }}
+          PUBLISHED_INTEGRITY: ${{ needs.publish.outputs.integrity }}
+          RELEASE_SHA: ${{ needs.classify.outputs.release-sha }}
+        run: |
+          set -euo pipefail
+          test "$PACKAGE" = "@swartzrock/llm-now-core"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          tarball="$(find dist/core-package -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$tarball"
+          EXPECTED_INTEGRITY="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          if [ -n "$PUBLISHED_INTEGRITY" ]; then
+            test "$EXPECTED_INTEGRITY" = "$PUBLISHED_INTEGRITY"
+          fi
+          registry="$(npm view "$PACKAGE@$VERSION" --json)"
+          test "$(jq -r .name <<<"$registry")" = "$PACKAGE"
+          test "$(jq -r .version <<<"$registry")" = "$VERSION"
+          test "$(jq -r .dist.integrity <<<"$registry")" = "$EXPECTED_INTEGRITY"
+          attestations_url="$(jq -r '.dist.attestations.url // empty' <<<"$registry")"
+          case "$attestations_url" in
+            https://registry.npmjs.org/-/npm/v1/attestations/*) ;;
+            *) echo "invalid npm attestation endpoint" >&2; exit 1 ;;
+          esac
+          attestations="$(curl --fail --silent --show-error "$attestations_url")"
+          predicate="https://slsa.dev/provenance/v1"
+          test "$(jq --arg predicate "$predicate" '[.attestations[]? | select(.predicateType == $predicate)] | length' <<<"$attestations")" -eq 1
+          payload_type="$(jq -er --arg predicate "$predicate" '.attestations[] | select(.predicateType == $predicate) | .bundle.dsseEnvelope.payloadType' <<<"$attestations")"
+          test "$payload_type" = "application/vnd.in-toto+json"
+          payload="$(jq -er --arg predicate "$predicate" '.attestations[] | select(.predicateType == $predicate) | .bundle.dsseEnvelope.payload' <<<"$attestations")"
+          statement="$(printf '%s' "$payload" | openssl base64 -d -A)"
+          expected_sha512="$(printf '%s' "${EXPECTED_INTEGRITY#sha512-}" | openssl base64 -d -A | od -An -vtx1 | tr -d ' \n')"
+          test "${#expected_sha512}" -eq 128
+          expected_subject="pkg:npm/%40swartzrock/llm-now-core@$VERSION"
+          jq -e --arg predicate "$predicate" --arg subject "$expected_subject" --arg sha512 "$expected_sha512" --arg commit "$RELEASE_SHA" '
+            ._type == "https://in-toto.io/Statement/v1" and
+            .predicateType == $predicate and
+            (.subject | length == 1) and
+            .subject[0].name == $subject and
+            .subject[0].digest.sha512 == $sha512 and
+            .predicate.buildDefinition.externalParameters.workflow.repository == "https://github.com/swartzrock/llm-now" and
+            .predicate.buildDefinition.externalParameters.workflow.path == ".github/workflows/publish-core.yml" and
+            .predicate.buildDefinition.externalParameters.workflow.ref == "refs/heads/main" and
+            any(.predicate.buildDefinition.resolvedDependencies[]?;
+              .uri == "git+https://github.com/swartzrock/llm-now@refs/heads/main" and
+              .digest.gitCommit == $commit)
+          ' <<<"$statement" >/dev/null
+      - name: Contain a failed new candidate
+        if: always() && needs.registry-smoke.result != 'success' && needs.publish.outputs.new-candidate == 'true' && steps.registry.outputs.present == 'true'
+        env:
+          PACKAGE: ${{ needs.classify.outputs.package-name }}
+          VERSION: ${{ needs.classify.outputs.version }}
           NPM_DIST_TAG_TOKEN: ${{ secrets.NPM_DIST_TAG_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$NPM_DIST_TAG_TOKEN" || { echo "candidate containment authority is absent" >&2; exit 1; }
-          NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag rm "$PACKAGE" next
+          next="$(npm view "$PACKAGE" dist-tags.next --json | jq -r '. // empty')"
+          if [ "$next" = "$VERSION" ]; then
+            NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm dist-tag rm "$PACKAGE" next
+          fi
           NODE_AUTH_TOKEN="$NPM_DIST_TAG_TOKEN" npm deprecate "$PACKAGE@$VERSION" "Registry verification failed; fix-forward only to a later version."
           echo "Candidate contained; fix-forward only. Do not reuse the immutable version." >&2
       - name: Stop after registry verification failure
-        if: always() && steps.registry_smoke.outcome == 'failure'
+        if: always() && needs.registry-smoke.result != 'success'
         run: |
           echo "cold-cache registry verification failed; latest promotion is blocked" >&2
           exit 1
       - name: Promote the verified version to latest
-        if: steps.registry_smoke.outcome == 'success'
+        if: needs.registry-smoke.result == 'success'
         env:
-          PACKAGE: ${{ steps.registry.outputs.package }}
-          VERSION: ${{ steps.registry.outputs.version }}
+          PACKAGE: ${{ needs.classify.outputs.package-name }}
+          VERSION: ${{ needs.classify.outputs.version }}
           NPM_DIST_TAG_TOKEN: ${{ secrets.NPM_DIST_TAG_TOKEN }}
         run: |
           set -euo pipefail

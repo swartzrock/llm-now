@@ -8,7 +8,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 const repositoryRoot = join(import.meta.dir, "..");
@@ -144,9 +144,20 @@ async function runtimeSmoke(
 }
 
 async function main(): Promise<void> {
-  const [outputDirectory] = process.argv.slice(2);
-  if (process.argv.length > 3) {
-    throw new Error("usage: bun scripts/verify-core-package.ts [artifact-directory]");
+  const args = process.argv.slice(2);
+  const inputTarball = args[0] === "--tarball" && args.length === 2
+    ? resolve(args[1]!)
+    : undefined;
+  const outputDirectory = inputTarball === undefined && args.length <= 1
+    ? args[0]
+    : undefined;
+  if (
+    inputTarball === undefined
+    && (args.length > 1 || args[0] === "--tarball")
+  ) {
+    throw new Error(
+      "usage: bun scripts/verify-core-package.ts [artifact-directory] | --tarball <path>",
+    );
   }
   const sourceManifest = await Bun.file(join(coreRoot, "package.json")).json() as {
     name?: string;
@@ -167,24 +178,28 @@ async function main(): Promise<void> {
     await mkdir(installCache, { recursive: true });
     const npmBinary = Bun.which("npm");
     if (npmBinary === null) throw new Error("npm is required to reproduce registry pack semantics");
-    const packOutput = run([
-      npmBinary,
-      "pack",
-      "--ignore-scripts",
-      "--json",
-      "--pack-destination",
-      artifactDirectory,
-    ], coreRoot, {
-      ...process.env,
-      BUN_INSTALL_CACHE_DIR: installCache,
-      npm_config_cache: installCache,
-    });
-    const packed = JSON.parse(packOutput) as [{ filename?: string }];
-    if (packed.length !== 1 || typeof packed[0]?.filename !== "string") {
-      throw new Error("npm pack did not produce exactly one artifact");
-    }
     const tarball = join(artifactDirectory, "llm-now-core.tgz");
-    await rename(join(artifactDirectory, packed[0].filename), tarball);
+    if (inputTarball === undefined) {
+      const packOutput = run([
+        npmBinary,
+        "pack",
+        "--ignore-scripts",
+        "--json",
+        "--pack-destination",
+        artifactDirectory,
+      ], coreRoot, {
+        ...process.env,
+        BUN_INSTALL_CACHE_DIR: installCache,
+        npm_config_cache: installCache,
+      });
+      const packed = JSON.parse(packOutput) as [{ filename?: string }];
+      if (packed.length !== 1 || typeof packed[0]?.filename !== "string") {
+        throw new Error("npm pack did not produce exactly one artifact");
+      }
+      await rename(join(artifactDirectory, packed[0].filename), tarball);
+    } else {
+      await cp(inputTarball, tarball);
+    }
     const tarballBytes = new Uint8Array(await Bun.file(tarball).arrayBuffer());
     const digest = new Bun.CryptoHasher("sha256").update(tarballBytes).digest("hex");
     const entries = tarEntries(tarballBytes);
