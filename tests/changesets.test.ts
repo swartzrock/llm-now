@@ -80,10 +80,10 @@ describe("Changesets authoring", () => {
     expect(cliPackage).toMatchObject({ name: "llm-now", version: "2.7.0", private: true });
     expect(corePackage).toMatchObject({
       name: "@swartzrock/llm-now-core",
-      publishConfig: { access: "public" },
+      private: true,
     });
     expect(corePackage.version).toMatch(/^0\.\d+\.\d+$/);
-    expect(corePackage.private).toBeUndefined();
+    expect(corePackage.publishConfig).toBeUndefined();
     expect(cliPackage.devDependencies?.["@swartzrock/llm-now-core"]).toBe("workspace:^");
 
     const discovered = getPackagesSync(new URL("..", import.meta.url).pathname);
@@ -106,7 +106,8 @@ describe("Changesets authoring", () => {
     expect(changesetsConfig.linked).toEqual([]);
     expect(changesetsConfig.access).toBe("restricted");
     expect(changesetsConfig.privatePackages).toEqual({ version: true, tag: false });
-    expect(corePackage.publishConfig).toEqual({ access: "public" });
+    expect(corePackage.private).toBe(true);
+    expect(corePackage.publishConfig).toBeUndefined();
     expect(changesetsReadme).toContain("`llm-now` for CLI-only");
     expect(changesetsReadme).toContain("`@swartzrock/llm-now-core` for core-only");
     expect(changesetsReadme).toContain("both for shared");
@@ -233,7 +234,7 @@ describe("Changesets authoring", () => {
     await Bun.write(join(directory, "packages/core/package.json"), JSON.stringify({
       name: "@swartzrock/llm-now-core",
       version: "0.1.0",
-      publishConfig: { access: "public" },
+      private: true,
     }, null, 2));
     await Bun.write(
       join(directory, ".changeset", "config.json"),
@@ -286,7 +287,7 @@ describe("Changesets authoring", () => {
       .toBe("0.2.0");
   });
 
-  test("plans the first public core release without inducing a CLI bump", async () => {
+  test("plans the first private core version without inducing a CLI bump", async () => {
     const directory = await mkdtemp(join(process.cwd(), ".tmp-changesets-initial-core-"));
     fixtureDirectories.push(directory);
     await Bun.write(join(directory, "package.json"), JSON.stringify({
@@ -298,7 +299,7 @@ describe("Changesets authoring", () => {
     }));
     await Bun.write(join(directory, "packages/core/package.json"), JSON.stringify({
       name: "@swartzrock/llm-now-core", version: "0.0.0",
-      publishConfig: { access: "public" },
+      private: true,
     }));
     await Bun.write(join(directory, ".changeset/config.json"), JSON.stringify(changesetsConfig));
     await Bun.write(join(directory, ".changeset/README.md"), "# Changesets\n");
@@ -328,7 +329,7 @@ describe("Changesets authoring", () => {
       devDependencies: { "@swartzrock/llm-now-core": "workspace:^" },
     }));
     await Bun.write(join(directory, "packages/core/package.json"), JSON.stringify({
-      name: "@swartzrock/llm-now-core", version: "0.1.9", publishConfig: { access: "public" },
+      name: "@swartzrock/llm-now-core", version: "0.1.9", private: true,
     }));
     await Bun.write(join(directory, ".changeset/config.json"), JSON.stringify(changesetsConfig));
     await Bun.write(join(directory, ".changeset/README.md"), "# Changesets\n");

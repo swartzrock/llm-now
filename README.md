@@ -189,4 +189,19 @@ supplies credentials, approved CLI execution, routing candidates, timeouts, and
 voice behavior. The package does not read `llm-now` aliases or native vault
 records.
 
+Install an exact GitHub core Release asset and commit the lockfile:
+
+```bash
+npm install "https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz"
+# or: bun add "https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz"
+```
+
+Replace every `X.Y.Z` with one exact version; do not use a floating
+latest-Release URL. Before installing, follow the checksum and both attestation
+checks in the [package README](packages/core/README.md). The package's
+`private: true` prevents npm publication. It does not make this public
+repository private: source and GitHub Release assets remain public. Package
+managers may still fetch transitive dependencies from their configured
+registries.
+
 Start with the [core API](docs/core-api.md) and [core security contract](docs/core-security.md).

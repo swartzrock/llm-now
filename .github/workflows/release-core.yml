@@ -1,0 +1,348 @@
+name: Release core
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release-sha:
+        description: Exact protected-main commit to build
+        required: true
+        type: string
+      publish:
+        description: Publish a new core Release from that exact commit
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: core-release
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    outputs:
+      should-release: ${{ steps.plan.outputs.should-release || steps.manual.outputs.should-release }}
+      release-sha: ${{ steps.plan.outputs.release-sha || steps.manual.outputs.release-sha }}
+      package-name: ${{ steps.plan.outputs.package-name }}
+      version: ${{ steps.plan.outputs.version }}
+      publish: ${{ steps.plan.outputs.publish || steps.manual.outputs.publish }}
+    steps:
+      - if: github.event_name == 'push'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - if: github.event_name == 'push'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - if: github.event_name == 'push'
+        id: plan
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          bun scripts/release-plan.ts core "$BEFORE_SHA" "$RELEASE_SHA"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+      - if: github.event_name == 'workflow_dispatch'
+        id: manual
+        env:
+          RELEASE_SHA: ${{ inputs.release-sha }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          echo "should-release=true" >> "$GITHUB_OUTPUT"
+          echo "release-sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+
+  validate-ref:
+    needs: classify
+    if: needs.classify.outputs.should-release == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      release-sha: ${{ steps.metadata.outputs.release-sha }}
+      package-name: ${{ steps.metadata.outputs.package-name }}
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      asset: ${{ steps.metadata.outputs.asset }}
+      publish: ${{ steps.metadata.outputs.publish }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.classify.outputs.release-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - id: metadata
+        env:
+          RELEASE_SHA: ${{ needs.classify.outputs.release-sha }}
+          PLAN_PACKAGE_NAME: ${{ needs.classify.outputs.package-name }}
+          PLAN_VERSION: ${{ needs.classify.outputs.version }}
+          PUBLISH: ${{ needs.classify.outputs.publish }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]] || {
+            echo "release-sha must be a full lowercase commit SHA" >&2
+            exit 1
+          }
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          if [[ "$PUBLISH" == "true" ]]; then
+            test "$RELEASE_SHA" = "$GITHUB_SHA" || {
+              echo "publish runs must select the exact release SHA as the workflow ref" >&2
+              exit 1
+            }
+          fi
+
+          manifest_metadata="$(bun -e '
+            const manifest = await Bun.file("packages/core/package.json").json();
+            if (manifest.name !== "@swartzrock/llm-now-core") throw new Error("unexpected core package name");
+            if (manifest.private !== true) throw new Error("core release package must be private");
+            if (Object.hasOwn(manifest, "publishConfig")) throw new Error("core release package must not contain publishConfig");
+            if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(manifest.version)) {
+              throw new Error("core package version must be stable X.Y.Z");
+            }
+            console.log(`${manifest.name}\t${manifest.version}`);
+          ')"
+          IFS=$'\t' read -r PACKAGE_NAME VERSION <<< "$manifest_metadata"
+          if [[ -n "$PLAN_PACKAGE_NAME" ]]; then test "$PACKAGE_NAME" = "$PLAN_PACKAGE_NAME"; fi
+          if [[ -n "$PLAN_VERSION" ]]; then test "$VERSION" = "$PLAN_VERSION"; fi
+
+          echo "release-sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "package-name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=core-v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset=swartzrock-llm-now-core-$VERSION.tgz" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+
+  artifact:
+    needs: validate-ref
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      tarball-sha256: ${{ steps.candidate.outputs.tarball-sha256 }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 20
+          package-manager-cache: false
+      - run: bun install --frozen-lockfile
+      - if: needs.validate-ref.outputs.publish == 'true'
+        name: Revalidate the exact release transition
+        env:
+          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
+        run: |
+          set -euo pipefail
+          parent_sha="$(git rev-parse "${RELEASE_SHA}^1")"
+          output="$(mktemp)"
+          bun scripts/release-plan.ts core "$parent_sha" "$RELEASE_SHA" "$output"
+          grep -qx 'should-release=true' "$output"
+      - run: bun run core:build
+      - id: candidate
+        name: Build and verify the release candidate
+        env:
+          VERSION: ${{ needs.validate-ref.outputs.version }}
+        run: |
+          set -euo pipefail
+          verification="$(bun scripts/verify-core-package.ts dist/core-package)"
+          test "$(jq -r '.package' <<< "$verification")" = "@swartzrock/llm-now-core"
+          test "$(jq -r '.version' <<< "$verification")" = "$VERSION"
+          digest="$(jq -r '.sha256' <<< "$verification")"
+          [[ "$digest" =~ ^[a-f0-9]{64}$ ]]
+          echo "tarball-sha256=$digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Core candidate"
+            echo "- version=$VERSION"
+            echo "- tarball-sha256=$digest"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: core-release-${{ github.run_id }}-${{ needs.validate-ref.outputs.release-sha }}
+          path: |
+            dist/core-package/*.tgz
+            dist/core-package/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [validate-ref, artifact]
+    if: needs.validate-ref.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release-publication
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.validate-ref.outputs.release-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: core-release-${{ github.run_id }}-${{ needs.validate-ref.outputs.release-sha }}
+          path: dist
+      - id: candidate
+        name: Verify the preserved candidate
+        env:
+          ASSET: ${{ needs.validate-ref.outputs.asset }}
+          VERSION: ${{ needs.validate-ref.outputs.version }}
+          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
+          EXPECTED_SHA256: ${{ needs.artifact.outputs.tarball-sha256 }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          test -f "dist/$ASSET"
+          test -f dist/SHA256SUMS
+          expected_line="$(cd dist && sha256sum "$ASSET")"
+          test "$(wc -l < dist/SHA256SUMS)" -eq 1
+          test "$(cat dist/SHA256SUMS)" = "$expected_line"
+          test "${expected_line%% *}" = "$EXPECTED_SHA256"
+          (cd dist && sha256sum --check --strict --status SHA256SUMS)
+          manifest="$(tar -xOf "dist/$ASSET" package/package.json)"
+          jq -e --arg version "$VERSION" '
+            .name == "@swartzrock/llm-now-core" and
+            .version == $version and
+            .private == true and
+            (has("publishConfig") | not)
+          ' <<< "$manifest" >/dev/null
+          awk -v heading="## $VERSION" '
+            $0 == heading { matches += 1; printing = 1 }
+            printing && /^## / && $0 != heading { exit }
+            printing { print }
+            END { if (matches != 1) exit 1 }
+          ' packages/core/CHANGELOG.md > .core-release-notes.md
+          test "$(wc -l < .core-release-notes.md)" -gt 1
+      - name: Require a new immutable Release target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CORE_RELEASE_SETTINGS_TOKEN: ${{ secrets.CORE_RELEASE_SETTINGS_TOKEN }}
+          TAG: ${{ needs.validate-ref.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test -n "$CORE_RELEASE_SETTINGS_TOKEN" || {
+            echo "CORE_RELEASE_SETTINGS_TOKEN is required for immutable Release verification" >&2
+            exit 1
+          }
+          immutable_releases_enabled="$(GH_TOKEN="$CORE_RELEASE_SETTINGS_TOKEN" gh api \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')"
+          test "$immutable_releases_enabled" = "true" || {
+            echo "immutable Releases must be enabled before publication" >&2
+            exit 1
+          }
+          if git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>tag-probe-error; then
+            echo "Refusing to publish because tag $TAG already exists" >&2
+            exit 1
+          else
+            status=$?
+            if [[ "$status" -ne 2 ]]; then cat tag-probe-error >&2; exit "$status"; fi
+          fi
+          rm -f tag-probe-error
+      - uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - id: release
+        name: Publish and verify the immutable Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-ref.outputs.tag }}
+          ASSET: ${{ needs.validate-ref.outputs.asset }}
+          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
+          EXPECTED_SHA256: ${{ needs.artifact.outputs.tarball-sha256 }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" "dist/$ASSET" dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_SHA" \
+            --draft \
+            --prerelease=false \
+            --latest=false \
+            --title "$TAG" \
+            --notes-file .core-release-notes.md
+
+          git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
+          test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,name,isDraft,isPrerelease,assets > draft.json
+          jq -e --arg tag "$TAG" '
+            .tagName == $tag and
+            .name == $tag and
+            .isDraft == true and
+            .isPrerelease == false and
+            ([.assets[].name] | sort) == (["SHA256SUMS", env.ASSET] | sort)
+          ' draft.json >/dev/null
+
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease=false --latest=false --verify-tag
+          gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > release.json
+          jq -e --arg tag "$TAG" '
+            .tag_name == $tag and
+            .name == $tag and
+            .draft == false and
+            .prerelease == false and
+            .immutable == true and
+            ([.assets[].name] | sort) == (["SHA256SUMS", env.ASSET] | sort)
+          ' release.json >/dev/null
+
+          mkdir .published-release
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir .published-release
+          test "$(find .published-release -maxdepth 1 -type f | wc -l)" -eq 2
+          test -f ".published-release/$ASSET"
+          test -f .published-release/SHA256SUMS
+          (cd .published-release && sha256sum --check --strict --status SHA256SUMS)
+          published_sha256="$(sha256sum ".published-release/$ASSET" | cut -d ' ' -f 1)"
+          test "$published_sha256" = "$EXPECTED_SHA256"
+
+          verified=false
+          for attempt in 1 2 3 4 5; do
+            if gh attestation verify ".published-release/$ASSET" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml" \
+                --source-digest "$RELEASE_SHA" &&
+              gh release verify "$TAG" --repo "$GITHUB_REPOSITORY" &&
+              gh release verify-asset "$TAG" ".published-release/$ASSET" \
+                --repo "$GITHUB_REPOSITORY"; then
+              verified=true
+              break
+            fi
+            sleep 5
+          done
+          test "$verified" = "true" || {
+            echo "published Release attestations are absent or have the wrong identity" >&2
+            exit 1
+          }
+
+          {
+            echo "## Core Release"
+            echo "- release-sha=$RELEASE_SHA"
+            echo "- tag=$TAG"
+            echo "- asset=$ASSET"
+            echo "- tarball-sha256=$published_sha256"
+            echo "- outcome=published"
+          } >> "$GITHUB_STEP_SUMMARY"

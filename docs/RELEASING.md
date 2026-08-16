@@ -26,53 +26,47 @@ bun run changeset:status
 
 Select each package whose public contract changes, choose the semver impact, write a concise summary, and commit the generated `.changeset/*.md` file with the change. A CLI-only change selects `llm-now`. A core-only change selects `@swartzrock/llm-now-core`. A shared change must explicitly select both packages; the packages are not fixed or linked, so selecting one never induces a bump in the other. Documentation-only and orchestration-only pull requests do not need an empty Changeset.
 
-Core uses pre-1.0 semver: the first public release is `0.1.0`, compatible fixes bump `0.1.0` to `0.1.1`, and an incompatible public API change bumps `0.1.x` to `0.2.0`. The CLI remains on its independent stable `2.x` line.
+Core uses pre-1.0 semver. Its current `0.1.0` is the unreleased extracted
+version; a compatible fix bumps `0.1.0` to `0.1.1`, while an incompatible
+public API change bumps `0.1.x` to `0.2.0`. The CLI remains on its independent
+stable `2.x` line.
 
-The Changesets action is version-only. It creates the reviewed release pull request but does not publish npm bytes or create a native tag. Publication belongs to one of the separate release lanes below.
+The Changesets action is version-only. It creates the reviewed release pull
+request but does not publish bytes or create a tag. Publication belongs to one
+of the separate release lanes below.
 
 ## Two product release lanes
 
 ### Core package release lane
 
-A core version transition on `main` starts `.github/workflows/publish-core.yml`.
-Its classifier accepts only a first-parent transition that consumes a core
-Changeset and changes the core package version and changelog consistently. It
-must classify a CLI-only or orchestration-only transition as a no-op.
+A core version transition on protected `main` starts
+`.github/workflows/release-core.yml`. Its classifier accepts only the exact
+first-parent transition that consumes a core Changeset and changes the core
+package version and changelog consistently. A CLI-only, orchestration-only, or
+ordinary push is a no-op.
 
-The **unprivileged artifact** job checks out the exact release SHA, installs
-locked dependencies, builds the core, runs the package verifier, and uploads
-one `@swartzrock/llm-now-core` tarball plus `SHA256SUMS`. It has read-only
-repository permission, no npm token, and no OIDC permission.
+The **unprivileged artifact** job checks out the exact release SHA, performs a
+frozen install, builds the core, and runs the maintained package verifier. It
+preserves exactly two files: `swartzrock-llm-now-core-X.Y.Z.tgz` and
+`SHA256SUMS`. The one-line checksum must validate, and the tarball must retain
+the private package identity, exact version, export surface, Node 20 floor, Bun
+1.3.14 floor, and TypeScript NodeNext declarations.
 
-The separate **protected publisher** runs in the `npm-core-publish` environment.
-It downloads only that preserved artifact, verifies its digest before
-credential access, and has no checkout, dependency install, or build step. It
-publishes the exact tarball with public access, the `next` tag, and npm
-provenance, then verifies the registry digest, `next` tag, and provenance.
-The npm CLI jobs use the SHA-pinned setup action with Node 24, npm's required
-registry URL, and package-manager caching disabled. Node 24 supplies the Node
-22.14+ and npm 11.5.1+ floor required by
-[npm trusted publishing](https://docs.npmjs.com/trusted-publishers/). This is a
-release-tool floor; the published package still supports Node 20 or later.
+The **protected publisher** runs in `release-publication`. It downloads only
+the current run's preserved artifact, repeats the checksum and manifest checks,
+and creates the action artifact attestation. It then owns only the exact
+`core-vX.Y.Z` tag, a draft Release titled `core-vX.Y.Z`, and the exact two-asset
+allowlist. It publishes the non-prerelease Release with `--latest=false`, then
+downloads the public assets and verifies their checksum, the action attestation,
+and the repository's immutable-Release attestations. It never builds a native
+archive, runs signing, changes Homebrew, or claims the repository's latest
+Release.
 
-An unprivileged registry-smoke job cold-installs that exact version with scripts
-disabled and exercises Node and Bun imports, construction, routing, and
-pre-aborted generation. Only after it succeeds does a separate protected
-promoter download the preserved artifact, recheck its digest and registry
-identity, and move that same immutable version to `latest`. Neither protected
-job checks out source, installs dependencies, or builds. No core job builds a
-native executable, creates a GitHub Release, or updates Homebrew.
-
-After `npm audit signatures`, the unprivileged smoke job fetches the exact
-version's `.dist.attestations.url`. Before any tag or deprecation mutation, the
-protected promoter repeats the same identity check. Both require one
-`https://slsa.dev/provenance/v1` DSSE statement whose decoded payload names
-repository `https://github.com/swartzrock/llm-now`, workflow
-`.github/workflows/publish-core.yml`, ref `refs/heads/main`, and a resolved
-`gitCommit` equal to the classified release SHA. Its sole subject must be
-`pkg:npm/%40swartzrock/llm-now-core@VERSION`, with the SHA-512 digest derived
-from the preserved tarball. Signature validity or provenance presence alone is
-not enough. See [npm provenance](https://docs.npmjs.com/generating-provenance-statements/).
+The package manifest's `private: true` prevents npm publication; it does not
+make a public repository private. Source and GitHub Release assets remain
+public. `npm pack` is artifact construction only, used by the maintained
+verifier to build the npm-format tarball. A downstream install may still fetch
+transitive dependencies from configured package registries.
 
 ### Native CLI release lane
 
@@ -80,71 +74,102 @@ A CLI version transition on `main` starts `.github/workflows/release.yml`. The
 native lane reads version and changelog identity only from `packages/cli`, then
 builds, signs, attests, publishes, and projects the five native archives as
 documented below. A core-only release cannot trigger this lane. Existing CLI
-manual tests and distribution behavior are unchanged.
+manual tests and distribution behavior are unchanged. Native owns `vX.Y.Z`
+tags and the repository's latest Release. Core owns `core-vX.Y.Z` and always
+publishes with `--latest=false`; a core Release can neither satisfy nor replace
+native latest-Release state.
 
-## First core publication and bootstrap
+## First GitHub core Release
 
-The first publish is an explicit maintainer go/no-go operation. A read-only
-check during implementation found the package endpoint for
-`@swartzrock/llm-now-core` returned 404 and the `@swartzrock` scope endpoint
-returned 200. `bun pm whoami` reported missing authentication. That observation
-is not evidence of current name availability, ownership, 2FA, or publish
-authority. Repeat all checks immediately before approval.
+The first GitHub core Release is an explicit maintainer go/no-go operation.
 
-1. Sign in with the intended npm owner and run `npm whoami`. Verify the identity
-   is an owner or authorized publisher for the `@swartzrock` scope.
-2. Run `npm profile get --json` and inspect the current npm account settings.
-   Require 2FA for authorization and writes. Verify scope membership and the
-   exact package owner policy in npm's web settings; do not infer authority
-   from a public scope endpoint.
-3. Run `npm view @swartzrock/llm-now-core --json`. For the bootstrap release,
-   require a confirmed not-found result. If the name exists unexpectedly, stop
-   and investigate its owners, versions, tags, and integrity.
-4. Create the protected `npm-core-publish` GitHub environment. Restrict it to
-   protected `main`, add the named required reviewers, and confirm fork and
-   feature-branch runs cannot receive publication authority.
-5. For bootstrap only, add a short-lived automation token as
-   `NPM_BOOTSTRAP_TOKEN`. Keep it step-scoped to the single `npm publish`
-   command. Give `NPM_DIST_TAG_TOKEN` only the authority needed for `next`
-   containment and `latest` promotion.
-6. Review the exact release SHA, Changeset, `0.1.0` manifest, allowlist, external
-   Node and Bun smokes, NodeNext declaration check, and recorded tarball digest.
-7. Approve publication under `next`. Verify the registry returns the identical
-   integrity and the exact DSSE repository, workflow, ref, release commit,
-   package-version subject, and tarball SHA-512 above. Complete the cold-cache
-   exact-version checks in MT-43 before accepting `latest` as commissioned.
-8. Configure npm trusted publisher for `swartzrock/llm-now`, workflow
-   `publish-core.yml`, environment `npm-core-publish`, and protected `main`.
-   Revoke the bootstrap token and remove `NPM_BOOTSTRAP_TOKEN` before the next
-   release; the workflow fails closed if that secret remains after the package
-   exists. Then prove an OIDC publication on a later test release. Keep OIDC
-   permission confined to the protected publisher job. Confirm it uses Node 24,
-   npm 11.5.1 or later, and `https://registry.npmjs.org` through the pinned setup
-   action.
+1. Merge the ordinary Changesets version pull request that advances core
+   `0.1.0` to `0.1.1`, consumes the core-only patch Changeset, adds the matching
+   changelog section, and leaves the CLI version unchanged unless separate
+   release intent selects it. Its merge is the first GitHub core Release
+   transition.
+2. In repository settings, enable repository-level immutable Releases. Accept
+   that this repository-wide setting applies to future native and core
+   Releases and does not retroactively change existing Releases.
+3. Configure the protected `release-publication` environment to admit protected
+   `main`. Deny feature branches and pull-request refs. Add the intended
+   required reviewers if publication should require approval. Add an environment secret named
+   `CORE_RELEASE_SETTINGS_TOKEN` containing a fine-grained GitHub token limited
+   to this repository with only **Administration: read** permission. The
+   publisher uses it only to fail closed when checking that immutable Releases
+   are enabled; keep Contents and every write permission disabled, set an
+   expiry, and rotate it before expiry.
+4. Confirm repository rules let the publication actor create `core-v*` tags but
+   prevent unauthorized movement or deletion. Keep native `v*` ownership and
+   latest-Release behavior unchanged.
+5. Record the version pull request's merge SHA, first parent, and the current
+   native latest tag. Confirm no `core-v0.1.1` tag or Release exists.
+6. Confirm the unprivileged artifact contains the exact two-asset set, its
+   checksum validates, its pack allowlist and private manifest are correct, and
+   the maintained Node, Bun, and NodeNext smokes pass.
+7. Before approving `release-publication`, confirm the candidate digest, source
+   SHA, tag, changelog notes, signer workflow, draft Release plan, and
+   `--latest=false` all agree. This is the last safe stop.
+8. After publication, verify `core-v0.1.1` targets the recorded merge SHA, is
+   immutable, non-draft, non-prerelease, and contains only the tarball plus
+   `SHA256SUMS`. Verify both attestations and confirm the repository's latest
+   Release is still a stable native tag, either unchanged or advanced.
 
-**No-go:** stop before publication if authentication is absent; the package
-name, scope owner, or 2FA policy is unverified; the release environment or
-reviewers differ from the checklist; the candidate digest changes; the version
-already exists with different integrity; the registry cannot prove the exact
-provenance identity above; or the run would enter the native lane. Do not
-broaden a credential to bypass a failed check.
+**No-go:** stop if any protected setting or recorded identity is unknown; the
+tag or Release already exists; the candidate, checksum, changelog, tag SHA,
+asset set, or attestation differs; the Release would be mutable, prerelease, or
+latest; or the native lane would be entered without explicit CLI release
+intent.
 
-If a new `next` candidate fails registry verification, deprecate that immutable
-version, remove its `next` tag, and fix-forward to a new version. This order lets
-an interrupted containment rerun complete either mutation idempotently. Never
-unpublish, overwrite, or reuse the failed version. If publication status is
-uncertain, query the exact version and integrity before taking another action.
-An exact existing version with identical integrity and provenance is a no-op;
-any mismatch is a hard stop.
+### Core publication and failure handling
 
-For every core publication, keep a durable release record containing the
-commit and workflow run, package and version, candidate SHA-256 and registry
-integrity, pack allowlist, Node/Bun/NodeNext results, `next` and `latest` state,
-provenance subject and source identity, trusted-publisher state,
-bootstrap-token revocation, and confirmation that the native lane did not run.
-Recheck the exact version,
-integrity, provenance, tags, and absence of native artifacts immediately and
-after 24 hours.
+An automatic `main` push publishes only a release-shaped first-parent core
+version transition. Manual `workflow_dispatch` defaults to `publish: false`,
+which builds and verifies the selected full lowercase `release-sha` without
+creating an attestation, tag, or Release. Manual publication requires the
+selected workflow ref and `release-sha` to identify the same exact commit.
+
+Core publication is forward-only. The publisher requires a new tag, creates one
+draft with the exact two assets, publishes it once, and verifies the resulting
+immutable Release. If the tag or Release already exists, automation refuses
+publication instead of trying to infer or repair previous state.
+
+Manual publication remains an exact-SHA escape hatch while protected `main`
+still resolves to that commit:
+
+```bash
+RELEASE_SHA="$(git rev-parse origin/main)"
+gh workflow run release-core.yml --ref main \
+  -f release-sha="$RELEASE_SHA" \
+  -f publish=true
+```
+
+Use this only when the selected workflow ref and `release-sha` identify the
+same release-shaped commit and no tag or Release exists.
+
+Failure handling is intentionally operational instead of another release state
+machine:
+
+- If the run fails before creating a tag or draft, rerun the original automatic
+  workflow run at the recorded release SHA.
+- If it stops after creating a tag or draft but before publication, preserve
+  evidence and inspect the remote state. Manual cleanup may delete that
+  unpublished draft and then its exact tag before rerunning the original run.
+  Never clean up state whose identity or publication status is uncertain.
+- If publication completed or may have completed, do not delete or replace it.
+  Verify the public bytes. If they are incomplete or wrong, use a reviewed
+  higher patch Changeset to fix-forward.
+
+An existing immutable Release is verified with the documented checksum and
+attestation commands, not by rerunning the publishing workflow.
+
+Never rerun the historical `publish-core` npm workflow and never add credentials to make it pass.
+
+For every core Release, retain the source SHA, tag, Release URL, tarball digest,
+two-asset allowlist, checksum result, action and immutable-Release attestation
+identities, Node/Bun/NodeNext results, protected-environment approval, and
+native latest result. Recheck the exact public bytes and identities
+immediately and after 24 hours.
 
 ## Native CLI reviewed release train
 

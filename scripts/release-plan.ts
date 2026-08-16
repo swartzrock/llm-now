@@ -4,6 +4,7 @@ export interface PackageIdentity {
   name: string;
   version: string;
   private?: boolean;
+  publishConfig?: unknown;
 }
 
 export interface ChangedFile {
@@ -151,7 +152,10 @@ export function classifyCoreReleaseTransition(
   if (input.afterPackage.name !== corePackageName) {
     throw new Error(`core release package name must be ${corePackageName}`);
   }
-  if (input.afterPackage.private === true) throw new Error("core release package must be public");
+  if (input.afterPackage.private !== true) throw new Error("core release package must be private");
+  if (Object.hasOwn(input.afterPackage, "publishConfig")) {
+    throw new Error("core release package must not contain publishConfig");
+  }
   if (input.beforeCliPackage.name !== input.afterCliPackage.name) {
     throw new Error("CLI package name must not change during a core release transition");
   }
@@ -338,6 +342,7 @@ function packageAtPath(
     name: record.name,
     version: record.version,
     ...(typeof record.private === "boolean" ? { private: record.private } : {}),
+    ...(Object.hasOwn(record, "publishConfig") ? { publishConfig: record.publishConfig } : {}),
   };
 }
 

@@ -6,5 +6,7 @@
 
 - 1447c3b: Publish the headless core API for trusted Node and Bun hosts.
 
-This package is versioned independently with Changesets. The first public
-release will be `0.1.0`.
+This `0.1.0` entry records the unreleased extracted version of the core. The
+package is versioned independently with Changesets; the patch Changeset and
+subsequent Changesets version pull request advance it to `0.1.1`, the first
+GitHub core Release.

@@ -2,14 +2,29 @@ import { describe, expect, test } from "bun:test";
 
 const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
 
-const [rootReadme, packageReadme, api, security, releasing, manualTesting] = await Promise.all([
+const [
+  rootReadme,
+  packageReadme,
+  changelog,
+  api,
+  security,
+  releasing,
+  manualTesting,
+  changesetReadme,
+] = await Promise.all([
   read("../README.md"),
   read("../packages/core/README.md"),
+  read("../packages/core/CHANGELOG.md"),
   read("../docs/core-api.md"),
   read("../docs/core-security.md"),
   read("../docs/RELEASING.md"),
   read("../docs/manual-testing.md"),
+  read("../.changeset/README.md"),
 ]);
+
+const coreAssetUrl = "https://github.com/swartzrock/llm-now/releases/download/core-vX.Y.Z/swartzrock-llm-now-core-X.Y.Z.tgz";
+const coreWorkflow = ".github/workflows/release-core.yml";
+const coreDocs = [rootReadme, packageReadme, api].join("\n");
 
 describe("headless core documentation", () => {
   test("links the public package, API, and security contracts", async () => {
@@ -89,37 +104,122 @@ describe("headless core documentation", () => {
     expect(security).not.toMatch(/webview.{0,80}(?:api key|credential|secret) input/is);
   });
 
-  test("documents the independent release lanes and bootstrap stop conditions", () => {
+  test("documents exact GitHub Release installation and public visibility", () => {
+    for (const document of [rootReadme, packageReadme, api]) {
+      expect(document).toContain(coreAssetUrl);
+      expect(document).toMatch(/exact version/i);
+      expect(document).toMatch(/commit (?:the|your)\s+lockfile/i);
+    }
+    expect(packageReadme).toContain("npm install");
+    expect(packageReadme).toContain("bun add");
+    expect(coreDocs).not.toContain("npm install @swartzrock/llm-now-core");
+    expect(coreDocs).not.toContain("bun add @swartzrock/llm-now-core");
+    expect(coreDocs).toContain("private: true");
+    expect(coreDocs).toMatch(/prevents npm publication/i);
+    expect(coreDocs).toMatch(/source and GitHub Release assets remain public/i);
+    expect(coreDocs).toMatch(/transitive dependencies.*registr/is);
+    expect(coreDocs).not.toContain("releases/latest/download/swartzrock-llm-now-core");
+  });
+
+  test("documents checksum, attestation, and maintained consumer smokes", () => {
+    for (const command of [
+      "sha256sum --check --strict --status SHA256SUMS",
+      "gh attestation verify",
+      "--signer-workflow swartzrock/llm-now/.github/workflows/release-core.yml",
+      "--source-digest <SHA>",
+      "gh release verify core-vX.Y.Z --repo swartzrock/llm-now",
+      "gh release verify-asset core-vX.Y.Z swartzrock-llm-now-core-X.Y.Z.tgz --repo swartzrock/llm-now",
+    ]) expect(packageReadme).toContain(command);
+    expect(manualTesting).toContain("Node 20 or later");
+    expect(manualTesting).toContain("Bun 1.3.14 or later");
+    expect(manualTesting).toContain("TypeScript NodeNext");
+    expect(manualTesting).toContain(coreAssetUrl);
+  });
+
+  test("documents the independent GitHub core and native release lanes", () => {
     expect(releasing).toContain("Core package release lane");
     expect(releasing).toContain("Native CLI release lane");
     expect(releasing).toContain("pre-1.0");
     expect(releasing).toContain("shared change");
     expect(releasing).toContain("unprivileged artifact");
     expect(releasing).toContain("protected publisher");
+    expect(releasing).toContain("CORE_RELEASE_SETTINGS_TOKEN");
+    expect(releasing).toContain("Administration: read");
     expect(releasing).toContain("@swartzrock/llm-now-core");
-    expect(releasing).toContain("2FA");
+    expect(releasing).toContain(coreWorkflow);
+    expect(releasing).toContain("core-vX.Y.Z");
+    expect(releasing).toContain("swartzrock-llm-now-core-X.Y.Z.tgz");
+    expect(releasing).toContain("SHA256SUMS");
+    expect(releasing).toContain("private: true");
+    expect(releasing).toContain("npm pack");
+    expect(releasing).toMatch(/artifact construction only/i);
     expect(releasing).toContain("No-go");
-    expect(releasing).toContain("next");
-    expect(releasing).toContain("latest");
+    expect(releasing).toContain("--latest=false");
+    expect(releasing).toMatch(/native.*`vX\.Y\.Z`/is);
+    expect(releasing).toMatch(/core.*`core-vX\.Y\.Z`/is);
+    expect(releasing).toMatch(/latest Release.*native/is);
     expect(releasing).toContain("fix-forward");
-    expect(releasing).toContain("trusted publisher");
-    expect(releasing).toContain("npm 11.5.1+");
-    expect(releasing).toContain("https://docs.npmjs.com/trusted-publishers/");
     expect(releasing).toContain("24 hours");
-    expect(releasing).toContain("https://slsa.dev/provenance/v1");
-    expect(releasing).toContain("https://github.com/swartzrock/llm-now");
-    expect(releasing).toContain(".github/workflows/publish-core.yml");
-    expect(releasing).toContain("refs/heads/main");
-    expect(releasing).toContain("gitCommit");
-    expect(releasing).toContain("pkg:npm/%40swartzrock/llm-now-core@VERSION");
-    expect(releasing).toContain("SHA-512");
-    expect(releasing).toContain("missing authentication");
-    expect(manualTesting).toContain("MT-43: First core package publication");
-    expect(manualTesting).toContain("Cold-cache Node and Bun consumers");
-    expect(manualTesting).toContain("DSSE payload");
-    expect(manualTesting).toContain("pkg:npm/%40swartzrock/llm-now-core@VERSION");
+    expect(changesetReadme).toMatch(/GitHub core Release/i);
+    expect(changesetReadme).toMatch(/independent/i);
+    expect(changesetReadme).toContain("core-vX.Y.Z");
+  });
+
+  test("documents first core Release setup and forward-only failure handling", () => {
+    for (const phrase of [
+      "repository-level immutable Releases",
+      "release-publication",
+      "protected `main`",
+      "feature branches and pull-request refs",
+      "draft Release",
+      "exact two-asset",
+      "--latest=false",
+      "selected workflow ref and `release-sha`",
+      "fix-forward",
+    ]) expect(releasing).toContain(phrase);
+    expect(releasing).toMatch(/manual cleanup/i);
+    expect(releasing).toMatch(/core\s+`0\.1\.0` to `0\.1\.1`/i);
+    expect(releasing).toMatch(/first GitHub core Release/i);
+    expect(releasing).toContain("gh workflow run release-core.yml --ref main");
+    expect(releasing).toContain("-f release-sha=\"$RELEASE_SHA\"");
+    expect(releasing).toContain("-f publish=true");
+    expect(releasing).toMatch(/rerun the original automatic workflow run/i);
+    expect(releasing).toMatch(/preserv(?:e|ing)\s+evidence/i);
+    expect(releasing).toMatch(/already exists.*refuses\s+publication/is);
+    expect(releasing).not.toContain("verification-only no-op");
+    expect(releasing).not.toContain("stable `core-v*` recovery tags");
+    expect(releasing).toMatch(/never rerun.*historical.*publish-core/i);
+
+    expect(manualTesting).toContain("MT-43: First GitHub core Release");
+    expect(manualTesting).toContain("MT-44: Core Release record and 24-hour check");
+    expect(manualTesting).toContain("core-v0.1.1");
     expect(manualTesting).toContain("release SHA");
+    expect(manualTesting).toContain("no native archive or `vX.Y.Z` tag");
+    expect(manualTesting).not.toContain(
+      "must produce no native archive, tag, GitHub Release",
+    );
     expect(manualTesting).toContain("The native manual-test matrix above is unchanged");
     expect(manualTesting).toContain("[CLI argument contract](../packages/cli/src/args.ts)");
+  });
+
+  test("records 0.1.0 as unreleased and removes historical npm release instructions", () => {
+    expect(changelog).toContain("unreleased extracted version");
+    expect(changelog).toMatch(/`0\.1\.1`.*first\s+GitHub core Release/is);
+
+    const retiredInstructions = [
+      "NPM_BOOTSTRAP_TOKEN",
+      "NPM_DIST_TAG_TOKEN",
+      "npm-core-publish",
+      "trusted publisher",
+      ".github/workflows/publish-core.yml",
+      "pkg:npm/%40swartzrock/llm-now-core@VERSION",
+      "https://registry.npmjs.org",
+    ];
+    for (const instruction of retiredInstructions) {
+      expect(releasing).not.toContain(instruction);
+      expect(manualTesting).not.toContain(instruction);
+    }
+    expect(releasing).not.toMatch(/(?:^|[`$ ])npm publish(?:\s|`|$)/m);
+    expect(manualTesting).not.toMatch(/(?:^|[`$ ])npm publish(?:\s|`|$)/m);
   });
 });
