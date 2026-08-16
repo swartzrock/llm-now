@@ -76,7 +76,7 @@ function tarEntries(compressed: Uint8Array<ArrayBuffer>): readonly TarEntry[] {
     const contentEnd = contentStart + size;
     if (contentEnd > archive.length) throw new Error("truncated tar entry");
     if (type === "\0" || type === "0") {
-      entries.push({ name: fullName, bytes: archive.slice(contentStart, contentEnd) });
+      entries.push({ name: fullName, bytes: archive.subarray(contentStart, contentEnd) });
     }
     offset = contentStart + Math.ceil(size / 512) * 512;
   }
