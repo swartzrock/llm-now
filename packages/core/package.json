@@ -1,6 +1,6 @@
 {
   "name": "@swartzrock/llm-now-core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Headless provider, generation, streaming, cancellation, safety, and transcript routing for trusted Node and Bun hosts",
   "type": "module",
   "sideEffects": false,
