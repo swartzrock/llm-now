@@ -285,20 +285,21 @@ jobs:
             --title "$TAG" \
             --notes-file .core-release-notes.md
 
-          git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
-          test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --json tagName,name,isDraft,isPrerelease,assets > draft.json
+            --json tagName,name,isDraft,isPrerelease,targetCommitish,assets > draft.json
           jq -e --arg tag "$TAG" '
             .tagName == $tag and
             .name == $tag and
             .isDraft == true and
             .isPrerelease == false and
+            .targetCommitish == env.RELEASE_SHA and
             ([.assets[].name] | sort) == (["SHA256SUMS", env.ASSET] | sort)
           ' draft.json >/dev/null
 
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --draft=false --prerelease=false --latest=false --verify-tag
+            --draft=false --prerelease=false --latest=false --target "$RELEASE_SHA"
+          git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
+          test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA"
           gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
             "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > release.json
           jq -e --arg tag "$TAG" '
