@@ -27,6 +27,22 @@ describe("release workflow policy", () => {
     }
   });
 
+  test("builds the core workspace before native credential gates import the CLI", () => {
+    for (const workflow of [ciWorkflow, releaseWorkflow]) {
+      const nativeJob = workflow.slice(
+        workflow.indexOf("\n  native:"),
+        workflow.indexOf(workflow === ciWorkflow ? "\n  release-assets:" : "\n  unsigned-assets:"),
+      );
+      const install = nativeJob.indexOf("run: bun install --frozen-lockfile");
+      const coreBuild = nativeJob.indexOf("run: bun run core:build");
+      const credentialGate = nativeJob.indexOf("bun scripts/release-validate.ts secrets");
+
+      expect(install).toBeGreaterThan(-1);
+      expect(coreBuild).toBeGreaterThan(install);
+      expect(credentialGate).toBeGreaterThan(coreBuild);
+    }
+  });
+
   test("keeps all target IDs buildable and enabled IDs in gate parity", () => {
     const enabled = NATIVE_VAULT_COMPATIBILITY
       .filter((target) => target.enabled)
