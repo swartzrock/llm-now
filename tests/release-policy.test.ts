@@ -27,19 +27,22 @@ describe("release workflow policy", () => {
     }
   });
 
-  test("builds the core workspace before native credential gates import the CLI", () => {
+  test("builds the core workspace before every direct release-validation job", () => {
     for (const workflow of [ciWorkflow, releaseWorkflow]) {
-      const nativeJob = workflow.slice(
-        workflow.indexOf("\n  native:"),
-        workflow.indexOf(workflow === ciWorkflow ? "\n  release-assets:" : "\n  unsigned-assets:"),
-      );
-      const install = nativeJob.indexOf("run: bun install --frozen-lockfile");
-      const coreBuild = nativeJob.indexOf("run: bun run core:build");
-      const credentialGate = nativeJob.indexOf("bun scripts/release-validate.ts secrets");
+      const validationJobs = workflow
+        .split(/(?=^  [a-zA-Z0-9_-]+:\n)/m)
+        .filter((job) => job.includes("bun scripts/release-validate.ts"));
 
-      expect(install).toBeGreaterThan(-1);
-      expect(coreBuild).toBeGreaterThan(install);
-      expect(credentialGate).toBeGreaterThan(coreBuild);
+      expect(validationJobs.length).toBeGreaterThan(0);
+      for (const job of validationJobs) {
+        const install = job.indexOf("run: bun install --frozen-lockfile");
+        const coreBuild = job.indexOf("run: bun run core:build");
+        const validation = job.indexOf("bun scripts/release-validate.ts");
+
+        expect(install).toBeGreaterThan(-1);
+        expect(coreBuild).toBeGreaterThan(install);
+        expect(validation).toBeGreaterThan(coreBuild);
+      }
     }
   });
 
