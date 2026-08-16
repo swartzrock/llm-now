@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       publish:
-        description: Attest and publish the exact preserved core tarball
+        description: Publish a new core Release from that exact commit
         required: true
         default: false
         type: boolean
@@ -29,6 +29,8 @@ jobs:
     outputs:
       should-release: ${{ steps.plan.outputs.should-release || steps.manual.outputs.should-release }}
       release-sha: ${{ steps.plan.outputs.release-sha || steps.manual.outputs.release-sha }}
+      package-name: ${{ steps.plan.outputs.package-name }}
+      version: ${{ steps.plan.outputs.version }}
       publish: ${{ steps.plan.outputs.publish || steps.manual.outputs.publish }}
     steps:
       - if: github.event_name == 'push'
@@ -72,10 +74,6 @@ jobs:
       tag: ${{ steps.metadata.outputs.tag }}
       asset: ${{ steps.metadata.outputs.asset }}
       publish: ${{ steps.metadata.outputs.publish }}
-      should-build: ${{ steps.state.outputs.should-build }}
-      release-state: ${{ steps.state.outputs.release-state }}
-      native-latest-baseline: ${{ steps.state.outputs.native-latest-baseline }}
-      tarball-sha256: ${{ steps.state.outputs.tarball-sha256 }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -88,6 +86,8 @@ jobs:
       - id: metadata
         env:
           RELEASE_SHA: ${{ needs.classify.outputs.release-sha }}
+          PLAN_PACKAGE_NAME: ${{ needs.classify.outputs.package-name }}
+          PLAN_VERSION: ${{ needs.classify.outputs.version }}
           PUBLISH: ${{ needs.classify.outputs.publish }}
         run: |
           set -euo pipefail
@@ -104,229 +104,30 @@ jobs:
               exit 1
             }
           fi
+
           manifest_metadata="$(bun -e '
             const manifest = await Bun.file("packages/core/package.json").json();
+            if (manifest.name !== "@swartzrock/llm-now-core") throw new Error("unexpected core package name");
             if (manifest.private !== true) throw new Error("core release package must be private");
             if (Object.hasOwn(manifest, "publishConfig")) throw new Error("core release package must not contain publishConfig");
+            if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(manifest.version)) {
+              throw new Error("core package version must be stable X.Y.Z");
+            }
             console.log(`${manifest.name}\t${manifest.version}`);
           ')"
           IFS=$'\t' read -r PACKAGE_NAME VERSION <<< "$manifest_metadata"
-          test "$PACKAGE_NAME" = "@swartzrock/llm-now-core"
-          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
-            echo "core package version must be stable X.Y.Z" >&2
-            exit 1
-          }
-          TAG="core-v$VERSION"
-          ASSET="swartzrock-llm-now-core-$VERSION.tgz"
+          if [[ -n "$PLAN_PACKAGE_NAME" ]]; then test "$PACKAGE_NAME" = "$PLAN_PACKAGE_NAME"; fi
+          if [[ -n "$PLAN_VERSION" ]]; then test "$VERSION" = "$PLAN_VERSION"; fi
+
           echo "release-sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
           echo "package-name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+          echo "tag=core-v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset=swartzrock-llm-now-core-$VERSION.tgz" >> "$GITHUB_OUTPUT"
           echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
-      - id: state
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PUBLISH: ${{ steps.metadata.outputs.publish }}
-          RELEASE_SHA: ${{ steps.metadata.outputs.release-sha }}
-          VERSION: ${{ steps.metadata.outputs.version }}
-          TAG: ${{ steps.metadata.outputs.tag }}
-          ASSET: ${{ steps.metadata.outputs.asset }}
-          RELEASE_NOTES_FILE: .core-release-notes.md
-        run: |
-          set -euo pipefail
-
-          if [[ "$PUBLISH" != "true" ]]; then
-            echo "should-build=true" >> "$GITHUB_OUTPUT"
-            echo "release-state=build-only" >> "$GITHUB_OUTPUT"
-            echo "native-latest-baseline=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          awk -v heading="## $VERSION" '
-            $0 == heading { matches += 1; printing = 1 }
-            printing && /^## / && $0 != heading { exit }
-            printing { print }
-            END { if (matches != 1) exit 1 }
-          ' packages/core/CHANGELOG.md > "$RELEASE_NOTES_FILE"
-          test "$(wc -l < "$RELEASE_NOTES_FILE")" -gt 1
-
-          expected_assets() {
-            printf '%s\n' "$ASSET" "SHA256SUMS" | sort
-          }
-          fetch_release() {
-            if ! gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
-                "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-                jq -s '[.[][]]' > releases.json; then
-              echo "failed to fetch GitHub Releases" >&2
-              exit 1
-            fi
-            if ! jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
-                releases.json > release-matches.json; then
-              echo "failed to select the target GitHub Release" >&2
-              exit 1
-            fi
-            test "$(jq 'length' release-matches.json)" -le 1 || {
-              echo "multiple Releases exist for $TAG" >&2
-              exit 1
-            }
-            if [[ "$(jq 'length' release-matches.json)" -eq 1 ]]; then
-              jq '.[0]' release-matches.json > release.json
-              return 0
-            fi
-            : > release.json
-            return 1
-          }
-          tag_state() {
-            local status=0
-            git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>tag-probe-error || status=$?
-            case "$status" in
-              0)
-                git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
-                test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA" || {
-                  echo "$TAG already points to another commit" >&2
-                  exit 1
-                }
-                echo true
-                ;;
-              2) echo false ;;
-              *) cat tag-probe-error >&2; exit "$status" ;;
-            esac
-            rm -f tag-probe-error
-          }
-          reject_older_missing_release() {
-            local published_tags published_tag candidate newest
-            published_tags="$(jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
-              releases.json)"
-            while IFS= read -r published_tag; do
-              [[ "$published_tag" =~ ^core-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || continue
-              candidate="${published_tag#core-v}"
-              newest="$(printf '%s\n%s\n' "$VERSION" "$candidate" | sort -V | tail -n 1)"
-              if [[ "$newest" == "$candidate" && "$candidate" != "$VERSION" ]]; then
-                echo "Refusing to create $TAG because higher stable core Release $published_tag is already public" >&2
-                exit 1
-              fi
-            done <<< "$published_tags"
-          }
-          current_native_latest() {
-            local latest
-            latest="$(gh release view --json tagName,isDraft,isPrerelease \
-              --jq 'select(.isDraft == false and .isPrerelease == false) | .tagName')"
-            [[ "$latest" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
-              echo "latest Release must remain a stable native vX.Y.Z Release" >&2
-              exit 1
-            }
-            test "$latest" != "$TAG" || {
-              echo "latest Release must never be the core Release" >&2
-              exit 1
-            }
-            printf '%s\n' "$latest"
-          }
-          verify_native_latest() {
-            local baseline="$1" after newest
-            after="$(current_native_latest)"
-            newest="$(printf '%s\n%s\n' "${baseline#v}" "${after#v}" | sort -V | tail -n 1)"
-            test "$newest" = "${after#v}" || {
-              echo "latest Release moved backward during core publication" >&2
-              exit 1
-            }
-          }
-          verify_public_release() {
-            local baseline="$1" expected_line expected_notes attempt verified
-            if [[ "$(jq -r '.draft' release.json)" != "false" ]] ||
-              [[ "$(jq -r '.prerelease' release.json)" != "false" ]] ||
-              [[ "$(jq -r '.immutable' release.json)" != "true" ]] ||
-              ! diff -u <(expected_assets) <(jq -r '.assets[].name' release.json | sort); then
-              echo "incomplete or mutable published Release $TAG" >&2
-              exit 1
-            fi
-            test "$(jq -r '.name' release.json)" = "$TAG"
-            expected_notes="$(jq -Rs . < "$RELEASE_NOTES_FILE")"
-            test "$(jq -c '.body' release.json)" = "$expected_notes"
-            rm -rf .published-release
-            mkdir .published-release
-            gh release download "$TAG" --dir .published-release
-            test "$(find .published-release -maxdepth 1 -type f | wc -l)" -eq 2
-            expected_line="$(sha256sum ".published-release/$ASSET")"
-            test "$(wc -l < .published-release/SHA256SUMS)" -eq 1
-            test "$(cat .published-release/SHA256SUMS)" = "$expected_line"
-            (cd .published-release && sha256sum --check --strict --status SHA256SUMS)
-            echo "tarball-sha256=${expected_line%% *}" >> "$GITHUB_OUTPUT"
-            verified=false
-            for attempt in 1 2 3 4 5; do
-              if gh attestation verify ".published-release/$ASSET" \
-                  --repo "$GITHUB_REPOSITORY" \
-                  --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml" \
-                  --source-digest "$RELEASE_SHA" &&
-                gh release verify "$TAG" --repo "$GITHUB_REPOSITORY" &&
-                gh release verify-asset "$TAG" ".published-release/$ASSET" \
-                  --repo "$GITHUB_REPOSITORY"; then
-                verified=true
-                break
-              fi
-              sleep 5
-            done
-            test "$verified" = "true" || {
-              echo "published Release attestations are absent or have the wrong identity" >&2
-              exit 1
-            }
-            verify_native_latest "$baseline"
-          }
-
-          native_latest_baseline="$(current_native_latest)"
-          echo "native-latest-baseline=$native_latest_baseline" >> "$GITHUB_OUTPUT"
-          tag_exists="$(tag_state)"
-          release_exists=false
-          if fetch_release; then release_exists=true; fi
-
-          if [[ "$release_exists" == "true" && "$tag_exists" != "true" ]]; then
-            echo "Release $TAG exists without its tag" >&2
-            exit 1
-          fi
-
-          if [[ "$release_exists" == "true" ]]; then
-            if [[ "$(jq -r '.draft' release.json)" == "true" ]]; then
-              test "$(jq -r '.prerelease' release.json)" = "false" || {
-                echo "draft Release must not be a prerelease" >&2
-                exit 1
-              }
-              test "$(jq -r '.name' release.json)" = "$TAG"
-              expected_notes="$(jq -Rs . < "$RELEASE_NOTES_FILE")"
-              test "$(jq -c '.body' release.json)" = "$expected_notes"
-              unexpected="$(comm -13 <(expected_assets) <(jq -r '.assets[].name' release.json | sort))"
-              test -z "$unexpected" || {
-                echo "draft Release contains unexpected assets" >&2
-                exit 1
-              }
-              reject_older_missing_release
-              echo "should-build=true" >> "$GITHUB_OUTPUT"
-              echo "release-state=draft" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            verify_public_release "$native_latest_baseline"
-            echo "should-build=false" >> "$GITHUB_OUTPUT"
-            echo "release-state=exact-complete" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          reject_older_missing_release
-          if [[ "$tag_exists" == "false" ]]; then
-            parent_sha="$(git rev-parse "${RELEASE_SHA}^1")"
-            output="$(mktemp)"
-            bun scripts/release-plan.ts core "$parent_sha" "$RELEASE_SHA" "$output"
-            grep -qx 'should-release=true' "$output" || {
-              echo "untagged publication requires a release-shaped first-parent transition" >&2
-              exit 1
-            }
-            echo "release-state=absent" >> "$GITHUB_OUTPUT"
-          else
-            echo "release-state=tag-only" >> "$GITHUB_OUTPUT"
-          fi
-          echo "should-build=true" >> "$GITHUB_OUTPUT"
 
   artifact:
     needs: validate-ref
-    if: needs.validate-ref.outputs.should-build == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -346,35 +147,34 @@ jobs:
           node-version: 20
           package-manager-cache: false
       - run: bun install --frozen-lockfile
-      - name: Revalidate the exact release transition
+      - if: needs.validate-ref.outputs.publish == 'true'
+        name: Revalidate the exact release transition
         env:
-          PUBLISH: ${{ needs.validate-ref.outputs.publish }}
           RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
         run: |
           set -euo pipefail
           parent_sha="$(git rev-parse "${RELEASE_SHA}^1")"
           output="$(mktemp)"
           bun scripts/release-plan.ts core "$parent_sha" "$RELEASE_SHA" "$output"
-          if [[ "$PUBLISH" == "true" ]]; then
-            grep -qx 'should-release=true' "$output"
-          fi
+          grep -qx 'should-release=true' "$output"
       - run: bun run core:build
-      - name: Build and verify the one release candidate
-        run: bun scripts/verify-core-package.ts dist/core-package
       - id: candidate
-        working-directory: dist/core-package
+        name: Build and verify the release candidate
         env:
-          ASSET: ${{ needs.validate-ref.outputs.asset }}
+          VERSION: ${{ needs.validate-ref.outputs.version }}
         run: |
           set -euo pipefail
-          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 2
-          test -f "$ASSET"
-          test -f SHA256SUMS
-          expected_line="$(sha256sum "$ASSET")"
-          test "$(wc -l < SHA256SUMS)" -eq 1
-          test "$(cat SHA256SUMS)" = "$expected_line"
-          sha256sum --check --strict --status SHA256SUMS
-          echo "tarball-sha256=${expected_line%% *}" >> "$GITHUB_OUTPUT"
+          verification="$(bun scripts/verify-core-package.ts dist/core-package)"
+          test "$(jq -r '.package' <<< "$verification")" = "@swartzrock/llm-now-core"
+          test "$(jq -r '.version' <<< "$verification")" = "$VERSION"
+          digest="$(jq -r '.sha256' <<< "$verification")"
+          [[ "$digest" =~ ^[a-f0-9]{64}$ ]]
+          echo "tarball-sha256=$digest" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Core candidate"
+            echo "- version=$VERSION"
+            echo "- tarball-sha256=$digest"
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: core-release-${{ github.run_id }}-${{ needs.validate-ref.outputs.release-sha }}
@@ -386,13 +186,10 @@ jobs:
 
   publish:
     needs: [validate-ref, artifact]
-    if: ${{ needs.validate-ref.outputs.publish == 'true' && needs.validate-ref.outputs.should-build == 'true' }}
+    if: needs.validate-ref.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: release-publication
-    outputs:
-      release-outcome: ${{ steps.reconcile.outputs.release-outcome || steps.remote-state.outputs.release-outcome }}
-      tarball-sha256: ${{ steps.candidate.outputs.tarball-sha256 }}
     permissions:
       contents: write
       id-token: write
@@ -409,10 +206,12 @@ jobs:
           name: core-release-${{ github.run_id }}-${{ needs.validate-ref.outputs.release-sha }}
           path: dist
       - id: candidate
+        name: Verify the preserved candidate
         env:
           ASSET: ${{ needs.validate-ref.outputs.asset }}
           VERSION: ${{ needs.validate-ref.outputs.version }}
           RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
+          EXPECTED_SHA256: ${{ needs.artifact.outputs.tarball-sha256 }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
@@ -422,6 +221,7 @@ jobs:
           expected_line="$(cd dist && sha256sum "$ASSET")"
           test "$(wc -l < dist/SHA256SUMS)" -eq 1
           test "$(cat dist/SHA256SUMS)" = "$expected_line"
+          test "${expected_line%% *}" = "$EXPECTED_SHA256"
           (cd dist && sha256sum --check --strict --status SHA256SUMS)
           manifest="$(tar -xOf "dist/$ASSET" package/package.json)"
           jq -e --arg version "$VERSION" '
@@ -437,474 +237,112 @@ jobs:
             END { if (matches != 1) exit 1 }
           ' packages/core/CHANGELOG.md > .core-release-notes.md
           test "$(wc -l < .core-release-notes.md)" -gt 1
-          echo "tarball-sha256=${expected_line%% *}" >> "$GITHUB_OUTPUT"
-      - id: remote-state
+      - name: Require a new immutable Release target
         env:
           GH_TOKEN: ${{ github.token }}
           CORE_RELEASE_SETTINGS_TOKEN: ${{ secrets.CORE_RELEASE_SETTINGS_TOKEN }}
           TAG: ${{ needs.validate-ref.outputs.tag }}
-          ASSET: ${{ needs.validate-ref.outputs.asset }}
-          VERSION: ${{ needs.validate-ref.outputs.version }}
-          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
-          NATIVE_LATEST_BASELINE: ${{ needs.validate-ref.outputs.native-latest-baseline }}
-          NOTES_FILE: .core-release-notes.md
         run: |
           set -euo pipefail
-
           test -n "$CORE_RELEASE_SETTINGS_TOKEN" || {
             echo "CORE_RELEASE_SETTINGS_TOKEN is required for immutable Release verification" >&2
             exit 1
           }
-          if ! immutable_releases_enabled="$(GH_TOKEN="$CORE_RELEASE_SETTINGS_TOKEN" gh api \
-              -H 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')"; then
-            echo "failed to read immutable Release settings" >&2
-            exit 1
-          fi
+          immutable_releases_enabled="$(GH_TOKEN="$CORE_RELEASE_SETTINGS_TOKEN" gh api \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')"
           test "$immutable_releases_enabled" = "true" || {
             echo "immutable Releases must be enabled before publication" >&2
             exit 1
           }
-
-          expected_assets() {
-            printf '%s\n' "$ASSET" "SHA256SUMS" | sort
-          }
-          fetch_release() {
-            if ! gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
-                "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-                jq -s '[.[][]]' > releases.json; then
-              echo "failed to fetch GitHub Releases" >&2
-              exit 1
-            fi
-            if ! jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
-                releases.json > release-matches.json; then
-              echo "failed to select the target GitHub Release" >&2
-              exit 1
-            fi
-            test "$(jq 'length' release-matches.json)" -le 1 || {
-              echo "multiple Releases exist for $TAG" >&2
-              exit 1
-            }
-            if [[ "$(jq 'length' release-matches.json)" -eq 1 ]]; then
-              jq '.[0]' release-matches.json > release.json
-              return 0
-            fi
-            : > release.json
-            return 1
-          }
-          tag_state() {
-            local status=0
-            git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>tag-probe-error || status=$?
-            case "$status" in
-              0)
-                git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
-                test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA" || {
-                  echo "$TAG already points to another commit" >&2
-                  exit 1
-                }
-                echo true
-                ;;
-              2) echo false ;;
-              *) cat tag-probe-error >&2; exit "$status" ;;
-            esac
-            rm -f tag-probe-error
-          }
-          reject_older_missing_release() {
-            local published_tags published_tag candidate newest
-            published_tags="$(jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
-              releases.json)"
-            while IFS= read -r published_tag; do
-              [[ "$published_tag" =~ ^core-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || continue
-              candidate="${published_tag#core-v}"
-              newest="$(printf '%s\n%s\n' "$VERSION" "$candidate" | sort -V | tail -n 1)"
-              if [[ "$newest" == "$candidate" && "$candidate" != "$VERSION" ]]; then
-                echo "Refusing to create $TAG because higher stable core Release $published_tag is already public" >&2
-                exit 1
-              fi
-            done <<< "$published_tags"
-          }
-          current_native_latest() {
-            local latest
-            latest="$(gh release view --json tagName,isDraft,isPrerelease \
-              --jq 'select(.isDraft == false and .isPrerelease == false) | .tagName')"
-            [[ "$latest" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
-              echo "latest Release must remain a stable native vX.Y.Z Release" >&2
-              exit 1
-            }
-            test "$latest" != "$TAG" || {
-              echo "latest Release must never be the core Release" >&2
-              exit 1
-            }
-            printf '%s\n' "$latest"
-          }
-          verify_native_latest() {
-            local after="${1:-}" newest
-            if [[ -z "$after" ]]; then after="$(current_native_latest)"; fi
-            newest="$(printf '%s\n%s\n' "${NATIVE_LATEST_BASELINE#v}" "${after#v}" | sort -V | tail -n 1)"
-            test "$newest" = "${after#v}" || {
-              echo "latest Release moved backward during core publication" >&2
-              exit 1
-            }
-          }
-          download_draft_assets() {
-            local directory="$1" id name
-            rm -rf "$directory"
-            mkdir "$directory"
-            while IFS=$'\t' read -r id name; do
-              test -n "$id"
-              gh api -H 'Accept: application/octet-stream' \
-                "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "$directory/$name"
-            done < <(jq -r '.assets[] | [.id, .name] | @tsv' release.json)
-          }
-          verify_draft() {
-            local require_complete="$1" unexpected name local_digest staged_digest expected_notes
-            test "$(jq -r '.draft' release.json)" = "true"
-            test "$(jq -r '.prerelease' release.json)" = "false"
-            test "$(jq -r '.name' release.json)" = "$TAG"
-            expected_notes="$(jq -Rs . < "$NOTES_FILE")"
-            test "$(jq -c '.body' release.json)" = "$expected_notes"
-            unexpected="$(comm -13 <(expected_assets) <(jq -r '.assets[].name' release.json | sort))"
-            test -z "$unexpected" || {
-              echo "draft Release contains unexpected assets" >&2
-              exit 1
-            }
-            if [[ "$require_complete" == "true" ]]; then
-              diff -u <(expected_assets) <(jq -r '.assets[].name' release.json | sort)
-            fi
-            download_draft_assets .staged-draft
-            while IFS= read -r name; do
-              test -f "dist/$name"
-              local_digest="$(sha256sum "dist/$name" | cut -d ' ' -f 1)"
-              staged_digest="$(sha256sum ".staged-draft/$name" | cut -d ' ' -f 1)"
-              test "$local_digest" = "$staged_digest" || {
-                echo "draft asset digest does not match preserved artifact" >&2
-                exit 1
-              }
-            done < <(jq -r '.assets[].name' release.json | sort)
-          }
-          verify_public_release() {
-            local expected_line expected_notes attempt verified
-            if [[ "$(jq -r '.draft' release.json)" != "false" ]] ||
-              [[ "$(jq -r '.prerelease' release.json)" != "false" ]] ||
-              [[ "$(jq -r '.immutable' release.json)" != "true" ]] ||
-              ! diff -u <(expected_assets) <(jq -r '.assets[].name' release.json | sort); then
-              echo "incomplete or mutable published Release $TAG" >&2
-              exit 1
-            fi
-            test "$(jq -r '.name' release.json)" = "$TAG"
-            expected_notes="$(jq -Rs . < "$NOTES_FILE")"
-            test "$(jq -c '.body' release.json)" = "$expected_notes"
-            rm -rf .published-release
-            mkdir .published-release
-            gh release download "$TAG" --dir .published-release
-            test "$(find .published-release -maxdepth 1 -type f | wc -l)" -eq 2
-            expected_line="$(sha256sum ".published-release/$ASSET")"
-            test "$(wc -l < .published-release/SHA256SUMS)" -eq 1
-            test "$(cat .published-release/SHA256SUMS)" = "$expected_line"
-            (cd .published-release && sha256sum --check --strict --status SHA256SUMS)
-            verified=false
-            for attempt in 1 2 3 4 5; do
-              if gh attestation verify ".published-release/$ASSET" \
-                  --repo "$GITHUB_REPOSITORY" \
-                  --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml" \
-                  --source-digest "$RELEASE_SHA" &&
-                gh release verify "$TAG" --repo "$GITHUB_REPOSITORY" &&
-                gh release verify-asset "$TAG" ".published-release/$ASSET" \
-                  --repo "$GITHUB_REPOSITORY"; then
-                verified=true
-                break
-              fi
-              sleep 5
-            done
-            test "$verified" = "true" || {
-              echo "published Release attestations are absent or have the wrong identity" >&2
-              exit 1
-            }
-            verify_native_latest
-          }
-
-          native_latest="$(current_native_latest)"
-          test "$native_latest" = "$NATIVE_LATEST_BASELINE" || verify_native_latest "$native_latest"
-          tag_exists="$(tag_state)"
-          release_exists=false
-          if fetch_release; then release_exists=true; fi
-          if [[ "$release_exists" == "true" && "$tag_exists" != "true" ]]; then
-            echo "Release $TAG exists without its tag" >&2
+          if git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>tag-probe-error; then
+            echo "Refusing to publish because tag $TAG already exists" >&2
             exit 1
+          else
+            status=$?
+            if [[ "$status" -ne 2 ]]; then cat tag-probe-error >&2; exit "$status"; fi
           fi
-          if [[ "$release_exists" == "true" && "$(jq -r '.draft' release.json)" != "true" ]]; then
-            verify_public_release
-            echo "should-attest=false" >> "$GITHUB_OUTPUT"
-            echo "release-outcome=verified-existing" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          reject_older_missing_release
-          if [[ "$release_exists" == "true" ]]; then verify_draft false; fi
-          echo "should-attest=true" >> "$GITHUB_OUTPUT"
-          echo "release-outcome=pending-publication" >> "$GITHUB_OUTPUT"
-      - if: steps.remote-state.outputs.should-attest == 'true'
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+          rm -f tag-probe-error
+      - uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
         with:
           subject-checksums: dist/SHA256SUMS
-      - if: steps.remote-state.outputs.should-attest == 'true'
-        id: reconcile
+      - id: release
+        name: Publish and verify the immutable Release
         env:
           GH_TOKEN: ${{ github.token }}
-          CORE_RELEASE_SETTINGS_TOKEN: ${{ secrets.CORE_RELEASE_SETTINGS_TOKEN }}
           TAG: ${{ needs.validate-ref.outputs.tag }}
           ASSET: ${{ needs.validate-ref.outputs.asset }}
-          VERSION: ${{ needs.validate-ref.outputs.version }}
           RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
-          NATIVE_LATEST_BASELINE: ${{ needs.validate-ref.outputs.native-latest-baseline }}
-          NOTES_FILE: .core-release-notes.md
+          EXPECTED_SHA256: ${{ needs.artifact.outputs.tarball-sha256 }}
         run: |
           set -euo pipefail
+          gh release create "$TAG" "dist/$ASSET" dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_SHA" \
+            --draft \
+            --prerelease=false \
+            --latest=false \
+            --title "$TAG" \
+            --notes-file .core-release-notes.md
 
-          expected_assets() {
-            printf '%s\n' "$ASSET" "SHA256SUMS" | sort
-          }
-          fetch_release() {
-            if ! gh api -H 'X-GitHub-Api-Version: 2026-03-10' --paginate \
-                "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
-                jq -s '[.[][]]' > releases.json; then
-              echo "failed to fetch GitHub Releases" >&2
-              exit 1
-            fi
-            if ! jq --arg tag "$TAG" '[.[] | select(.tag_name == $tag)]' \
-                releases.json > release-matches.json; then
-              echo "failed to select the target GitHub Release" >&2
-              exit 1
-            fi
-            test "$(jq 'length' release-matches.json)" -le 1 || {
-              echo "multiple Releases exist for $TAG" >&2
-              exit 1
-            }
-            if [[ "$(jq 'length' release-matches.json)" -eq 1 ]]; then
-              jq '.[0]' release-matches.json > release.json
-              return 0
-            fi
-            : > release.json
-            return 1
-          }
-          tag_state() {
-            local status=0
-            git ls-remote --exit-code --refs origin "refs/tags/$TAG" >/dev/null 2>tag-probe-error || status=$?
-            case "$status" in
-              0)
-                git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
-                test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA" || {
-                  echo "$TAG already points to another commit" >&2
-                  exit 1
-                }
-                echo true
-                ;;
-              2) echo false ;;
-              *) cat tag-probe-error >&2; exit "$status" ;;
-            esac
-            rm -f tag-probe-error
-          }
-          reject_older_missing_release() {
-            local published_tags published_tag candidate newest
-            published_tags="$(jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
-              releases.json)"
-            while IFS= read -r published_tag; do
-              [[ "$published_tag" =~ ^core-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || continue
-              candidate="${published_tag#core-v}"
-              newest="$(printf '%s\n%s\n' "$VERSION" "$candidate" | sort -V | tail -n 1)"
-              if [[ "$newest" == "$candidate" && "$candidate" != "$VERSION" ]]; then
-                echo "Refusing to create $TAG because higher stable core Release $published_tag is already public" >&2
-                exit 1
-              fi
-            done <<< "$published_tags"
-          }
-          current_native_latest() {
-            local latest
-            latest="$(gh release view --json tagName,isDraft,isPrerelease \
-              --jq 'select(.isDraft == false and .isPrerelease == false) | .tagName')"
-            [[ "$latest" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
-              echo "latest Release must remain a stable native vX.Y.Z Release" >&2
-              exit 1
-            }
-            test "$latest" != "$TAG" || {
-              echo "latest Release must never be the core Release" >&2
-              exit 1
-            }
-            printf '%s\n' "$latest"
-          }
-          verify_native_latest() {
-            local after newest
-            after="$(current_native_latest)"
-            newest="$(printf '%s\n%s\n' "${NATIVE_LATEST_BASELINE#v}" "${after#v}" | sort -V | tail -n 1)"
-            test "$newest" = "${after#v}" || {
-              echo "latest Release moved backward during core publication" >&2
-              exit 1
-            }
-          }
-          download_draft_assets() {
-            local directory="$1" id name
-            rm -rf "$directory"
-            mkdir "$directory"
-            while IFS=$'\t' read -r id name; do
-              test -n "$id"
-              gh api -H 'Accept: application/octet-stream' \
-                "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "$directory/$name"
-            done < <(jq -r '.assets[] | [.id, .name] | @tsv' release.json)
-          }
-          verify_draft() {
-            local require_complete="$1" unexpected name local_digest staged_digest expected_notes
-            test "$(jq -r '.draft' release.json)" = "true"
-            test "$(jq -r '.prerelease' release.json)" = "false"
-            test "$(jq -r '.name' release.json)" = "$TAG"
-            expected_notes="$(jq -Rs . < "$NOTES_FILE")"
-            test "$(jq -c '.body' release.json)" = "$expected_notes"
-            unexpected="$(comm -13 <(expected_assets) <(jq -r '.assets[].name' release.json | sort))"
-            test -z "$unexpected" || {
-              echo "draft Release contains unexpected assets" >&2
-              exit 1
-            }
-            if [[ "$require_complete" == "true" ]]; then
-              diff -u <(expected_assets) <(jq -r '.assets[].name' release.json | sort)
-            fi
-            download_draft_assets .staged-draft
-            while IFS= read -r name; do
-              test -f "dist/$name"
-              local_digest="$(sha256sum "dist/$name" | cut -d ' ' -f 1)"
-              staged_digest="$(sha256sum ".staged-draft/$name" | cut -d ' ' -f 1)"
-              test "$local_digest" = "$staged_digest" || {
-                echo "draft asset digest does not match preserved artifact" >&2
-                exit 1
-              }
-            done < <(jq -r '.assets[].name' release.json | sort)
-          }
-          verify_public_release() {
-            local expected_line expected_notes attempt verified
-            gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > release.json
-            if [[ "$(jq -r '.draft' release.json)" != "false" ]] ||
-              [[ "$(jq -r '.prerelease' release.json)" != "false" ]] ||
-              [[ "$(jq -r '.immutable' release.json)" != "true" ]] ||
-              ! diff -u <(expected_assets) <(jq -r '.assets[].name' release.json | sort); then
-              echo "incomplete or mutable published Release $TAG" >&2
-              exit 1
-            fi
-            test "$(jq -r '.name' release.json)" = "$TAG"
-            expected_notes="$(jq -Rs . < "$NOTES_FILE")"
-            test "$(jq -c '.body' release.json)" = "$expected_notes"
-            rm -rf .published-release
-            mkdir .published-release
-            gh release download "$TAG" --dir .published-release
-            test "$(find .published-release -maxdepth 1 -type f | wc -l)" -eq 2
-            expected_line="$(sha256sum ".published-release/$ASSET")"
-            test "$(wc -l < .published-release/SHA256SUMS)" -eq 1
-            test "$(cat .published-release/SHA256SUMS)" = "$expected_line"
-            (cd .published-release && sha256sum --check --strict --status SHA256SUMS)
-            verified=false
-            for attempt in 1 2 3 4 5; do
-              if gh attestation verify ".published-release/$ASSET" \
-                  --repo "$GITHUB_REPOSITORY" \
-                  --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml" \
-                  --source-digest "$RELEASE_SHA" &&
-                gh release verify "$TAG" --repo "$GITHUB_REPOSITORY" &&
-                gh release verify-asset "$TAG" ".published-release/$ASSET" \
-                  --repo "$GITHUB_REPOSITORY"; then
-                verified=true
-                break
-              fi
-              sleep 5
-            done
-            test "$verified" = "true" || {
-              echo "published Release attestations are absent or have the wrong identity" >&2
-              exit 1
-            }
-            verify_native_latest
-          }
-
-          test -n "$CORE_RELEASE_SETTINGS_TOKEN" || {
-            echo "CORE_RELEASE_SETTINGS_TOKEN is required for immutable Release verification" >&2
-            exit 1
-          }
-          if ! immutable_releases_enabled="$(GH_TOKEN="$CORE_RELEASE_SETTINGS_TOKEN" gh api \
-              -H 'X-GitHub-Api-Version: 2026-03-10' \
-              "repos/$GITHUB_REPOSITORY/immutable-releases" --jq '.enabled')"; then
-            echo "failed to read immutable Release settings" >&2
-            exit 1
-          fi
-          test "$immutable_releases_enabled" = "true" || {
-            echo "immutable Releases must be enabled before publication" >&2
-            exit 1
-          }
-
-          tag_exists="$(tag_state)"
-          release_exists=false
-          if fetch_release; then release_exists=true; fi
-          if [[ "$release_exists" == "true" && "$tag_exists" != "true" ]]; then
-            echo "Release $TAG exists without its tag" >&2
-            exit 1
-          fi
-          if [[ "$release_exists" == "true" && "$(jq -r '.draft' release.json)" != "true" ]]; then
-            verify_public_release
-            echo "release-outcome=verified-existing" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          reject_older_missing_release
-          if [[ "$tag_exists" == "false" ]]; then
-            GIT_AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w 0)"
-            export GIT_AUTH_HEADER
-            git tag "$TAG" "$RELEASE_SHA"
-            git --config-env=http.https://github.com/.extraheader=GIT_AUTH_HEADER push origin "refs/tags/$TAG"
-            git --config-env=http.https://github.com/.extraheader=GIT_AUTH_HEADER fetch origin \
-              "refs/tags/$TAG:refs/tags/$TAG"
-          fi
+          git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
           test "$(git rev-parse "refs/tags/${TAG}^{commit}")" = "$RELEASE_SHA"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,name,isDraft,isPrerelease,assets > draft.json
+          jq -e --arg tag "$TAG" '
+            .tagName == $tag and
+            .name == $tag and
+            .isDraft == true and
+            .isPrerelease == false and
+            ([.assets[].name] | sort) == (["SHA256SUMS", env.ASSET] | sort)
+          ' draft.json >/dev/null
 
-          if [[ "$release_exists" == "false" ]]; then
-            gh release create "$TAG" --draft --prerelease=false --latest=false --verify-tag \
-              --title "$TAG" --notes-file "$NOTES_FILE"
-            fetch_release
-          fi
-          verify_draft false
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease=false --latest=false --verify-tag
+          gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > release.json
+          jq -e --arg tag "$TAG" '
+            .tag_name == $tag and
+            .name == $tag and
+            .draft == false and
+            .prerelease == false and
+            .immutable == true and
+            ([.assets[].name] | sort) == (["SHA256SUMS", env.ASSET] | sort)
+          ' release.json >/dev/null
 
-          while IFS= read -r asset; do
-            if ! jq -e --arg asset "$asset" 'any(.assets[]; .name == $asset)' release.json >/dev/null; then
-              gh release upload "$TAG" "dist/$asset"
+          mkdir .published-release
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir .published-release
+          test "$(find .published-release -maxdepth 1 -type f | wc -l)" -eq 2
+          test -f ".published-release/$ASSET"
+          test -f .published-release/SHA256SUMS
+          (cd .published-release && sha256sum --check --strict --status SHA256SUMS)
+          published_sha256="$(sha256sum ".published-release/$ASSET" | cut -d ' ' -f 1)"
+          test "$published_sha256" = "$EXPECTED_SHA256"
+
+          verified=false
+          for attempt in 1 2 3 4 5; do
+            if gh attestation verify ".published-release/$ASSET" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml" \
+                --source-digest "$RELEASE_SHA" &&
+              gh release verify "$TAG" --repo "$GITHUB_REPOSITORY" &&
+              gh release verify-asset "$TAG" ".published-release/$ASSET" \
+                --repo "$GITHUB_REPOSITORY"; then
+              verified=true
+              break
             fi
-          done < <(expected_assets)
+            sleep 5
+          done
+          test "$verified" = "true" || {
+            echo "published Release attestations are absent or have the wrong identity" >&2
+            exit 1
+          }
 
-          fetch_release
-          verify_draft true
-          gh release edit "$TAG" --draft=false --prerelease=false --latest=false --verify-tag
-          verify_public_release
-          echo "release-outcome=published" >> "$GITHUB_OUTPUT"
-
-  summarize:
-    needs: [classify, validate-ref, artifact, publish]
-    if: always()
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - env:
-          SHOULD_RELEASE: ${{ needs.classify.outputs.should-release }}
-          RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
-          VERSION: ${{ needs.validate-ref.outputs.version }}
-          TAG: ${{ needs.validate-ref.outputs.tag }}
-          ASSET: ${{ needs.validate-ref.outputs.asset }}
-          RELEASE_STATE: ${{ needs.validate-ref.outputs.release-state }}
-          NATIVE_LATEST_BASELINE: ${{ needs.validate-ref.outputs.native-latest-baseline }}
-          TARBALL_SHA256: ${{ needs.publish.outputs.tarball-sha256 || needs.artifact.outputs.tarball-sha256 || needs.validate-ref.outputs.tarball-sha256 }}
-          RELEASE_OUTCOME: ${{ needs.publish.outputs.release-outcome || needs.validate-ref.outputs.release-state }}
-        run: |
-          set -euo pipefail
           {
-            echo "## Core release"
-            echo "- should-release=$SHOULD_RELEASE"
+            echo "## Core Release"
             echo "- release-sha=$RELEASE_SHA"
-            echo "- version=$VERSION"
             echo "- tag=$TAG"
             echo "- asset=$ASSET"
-            echo "- tarball-sha256=$TARBALL_SHA256"
-            echo "- initial-release-state=$RELEASE_STATE"
-            echo "- release-outcome=$RELEASE_OUTCOME"
-            echo "- native-latest-baseline=$NATIVE_LATEST_BASELINE"
+            echo "- tarball-sha256=$published_sha256"
+            echo "- outcome=published"
           } >> "$GITHUB_STEP_SUMMARY"

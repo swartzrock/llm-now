@@ -56,10 +56,11 @@ The **protected publisher** runs in `release-publication`. It downloads only
 the current run's preserved artifact, repeats the checksum and manifest checks,
 and creates the action artifact attestation. It then owns only the exact
 `core-vX.Y.Z` tag, a draft Release titled `core-vX.Y.Z`, and the exact two-asset
-allowlist. After every staged digest matches, it publishes the non-prerelease
-Release with `--latest=false`, then verifies the action attestation and the
-repository's immutable-Release attestations. It never builds a native archive,
-runs signing, changes Homebrew, or claims the repository's latest Release.
+allowlist. It publishes the non-prerelease Release with `--latest=false`, then
+downloads the public assets and verifies their checksum, the action attestation,
+and the repository's immutable-Release attestations. It never builds a native
+archive, runs signing, changes Homebrew, or claims the repository's latest
+Release.
 
 The package manifest's `private: true` prevents npm publication; it does not
 make a public repository private. Source and GitHub Release assets remain
@@ -91,9 +92,8 @@ The first GitHub core Release is an explicit maintainer go/no-go operation.
    that this repository-wide setting applies to future native and core
    Releases and does not retroactively change existing Releases.
 3. Configure the protected `release-publication` environment to admit protected
-   `main` and stable `core-v*` recovery tags. Deny feature branches and
-   pull-request refs. Add the intended required reviewers if publication should
-   require approval. Add an environment secret named
+   `main`. Deny feature branches and pull-request refs. Add the intended
+   required reviewers if publication should require approval. Add an environment secret named
    `CORE_RELEASE_SETTINGS_TOKEN` containing a fine-grained GitHub token limited
    to this repository with only **Administration: read** permission. The
    publisher uses it only to fail closed when checking that immutable Releases
@@ -103,8 +103,7 @@ The first GitHub core Release is an explicit maintainer go/no-go operation.
    prevent unauthorized movement or deletion. Keep native `v*` ownership and
    latest-Release behavior unchanged.
 5. Record the version pull request's merge SHA, first parent, and the current
-   native latest tag. Confirm no `core-v0.1.1` tag or Release and no higher
-   stable `core-v*` Release exists.
+   native latest tag. Confirm no `core-v0.1.1` tag or Release exists.
 6. Confirm the unprivileged artifact contains the exact two-asset set, its
    checksum validates, its pack allowlist and private manifest are correct, and
    the maintained Node, Bun, and NodeNext smokes pass.
@@ -117,12 +116,12 @@ The first GitHub core Release is an explicit maintainer go/no-go operation.
    Release is still a stable native tag, either unchanged or advanced.
 
 **No-go:** stop if any protected setting or recorded identity is unknown; the
-tag or Release already exists unexpectedly; a higher core Release is public;
-the candidate, checksum, changelog, tag SHA, asset set, or attestation differs;
-the Release would be mutable, prerelease, or latest; or the native lane would
-be entered without explicit CLI release intent.
+tag or Release already exists; the candidate, checksum, changelog, tag SHA,
+asset set, or attestation differs; the Release would be mutable, prerelease, or
+latest; or the native lane would be entered without explicit CLI release
+intent.
 
-### Core publication and recovery
+### Core publication and failure handling
 
 An automatic `main` push publishes only a release-shaped first-parent core
 version transition. Manual `workflow_dispatch` defaults to `publish: false`,
@@ -130,42 +129,46 @@ which builds and verifies the selected full lowercase `release-sha` without
 creating an attestation, tag, or Release. Manual publication requires the
 selected workflow ref and `release-sha` to identify the same exact commit.
 
-The workflow reconciles these states without deleting, moving, overwriting, or
-replacing public state:
+Core publication is forward-only. The publisher requires a new tag, creates one
+draft with the exact two assets, publishes it once, and verifies the resulting
+immutable Release. If the tag or Release already exists, automation refuses
+publication instead of trying to infer or repair previous state.
 
-An exact tag without a Release is resumable only at its recorded source SHA.
-An exact complete immutable Release is always a verification-only no-op.
-
-| Existing state for `core-vX.Y.Z` | Result |
-| --- | --- |
-| No tag and no Release | Publish only from the exact release-shaped transition. If the automatic run failed before tag creation and public state is still absent, rerun the original automatic workflow run at that release SHA; never rebuild it from newer `main`. |
-| Exact tag without a Release | Run exact-ref recovery at that tag and peeled source SHA. Rebuild, verify, attest, create the draft Release, and publish only if every identity matches. |
-| Exact draft Release | Accept only missing expected assets from the preserved candidate; never clobber. Verify the complete exact two-asset draft before publication. |
-| Exact complete immutable Release | Perform checksum and both attestation checks as a verification-only no-op. Do not rebuild or mutate GitHub state. |
-| Conflicting or ambiguous public state | Refuse mutation and preserve evidence. Use a reviewed higher patch Changeset to fix-forward; never repair by deleting, editing, moving, overwriting, or replacing public state. |
-
-For exact tag-without-Release recovery, select the tag as the workflow ref and
-pass its peeled full commit SHA:
+Manual publication remains an exact-SHA escape hatch while protected `main`
+still resolves to that commit:
 
 ```bash
-TAG=core-vX.Y.Z
-RELEASE_SHA="$(git rev-parse "${TAG}^{commit}")"
-gh workflow run release-core.yml --ref "$TAG" \
+RELEASE_SHA="$(git rev-parse origin/main)"
+gh workflow run release-core.yml --ref main \
   -f release-sha="$RELEASE_SHA" \
   -f publish=true
 ```
 
-The `release-publication` environment must admit the stable `core-v*` tag ref
-for that command. A dispatch from a newer `main`, a mismatched SHA, an untagged
-non-release transition, an older missing core version after a higher public
-Release, or any conflicting asset or attestation fails closed.
+Use this only when the selected workflow ref and `release-sha` identify the
+same release-shaped commit and no tag or Release exists.
+
+Failure handling is intentionally operational instead of another release state
+machine:
+
+- If the run fails before creating a tag or draft, rerun the original automatic
+  workflow run at the recorded release SHA.
+- If it stops after creating a tag or draft but before publication, preserve
+  evidence and inspect the remote state. Manual cleanup may delete that
+  unpublished draft and then its exact tag before rerunning the original run.
+  Never clean up state whose identity or publication status is uncertain.
+- If publication completed or may have completed, do not delete or replace it.
+  Verify the public bytes. If they are incomplete or wrong, use a reviewed
+  higher patch Changeset to fix-forward.
+
+An existing immutable Release is verified with the documented checksum and
+attestation commands, not by rerunning the publishing workflow.
 
 Never rerun the historical `publish-core` npm workflow and never add credentials to make it pass.
 
 For every core Release, retain the source SHA, tag, Release URL, tarball digest,
 two-asset allowlist, checksum result, action and immutable-Release attestation
 identities, Node/Bun/NodeNext results, protected-environment approval, and
-native latest baseline/result. Recheck the exact public bytes and identities
+native latest result. Recheck the exact public bytes and identities
 immediately and after 24 hours.
 
 ## Native CLI reviewed release train

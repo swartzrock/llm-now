@@ -1307,13 +1307,12 @@ Release, protected-environment, tag-rule, and exact-state checks in
    changelog section, and leaves the CLI version unchanged unless independent
    CLI intent is present. Record its merge SHA and first parent.
 2. Confirm repository-level immutable Releases are enabled. Confirm
-   `release-publication` admits protected `main` and stable `core-v*` recovery
-   tags but denies feature branches and pull-request refs. Confirm its
+   `release-publication` admits protected `main` but denies feature branches and
+   pull-request refs. Confirm its
    `CORE_RELEASE_SETTINGS_TOKEN` environment secret is a fine-grained GitHub
    token limited to this repository with only **Administration: read**
    permission and a current expiry. Record the current stable native latest
-   tag; there must be no `core-v0.1.1` tag or Release and no higher public
-   stable core Release.
+   tag; there must be no `core-v0.1.1` tag or Release.
 3. Observe the merge push start `Release core` from
    `.github/workflows/release-core.yml`. Confirm classification reports the
    recorded release SHA, version `0.1.1`, tag `core-v0.1.1`, and asset
@@ -1327,8 +1326,9 @@ Release, protected-environment, tag-rule, and exact-state checks in
    current run's preserved artifact, repeats checksum and package-identity
    checks, and creates the action artifact attestation before any tag. It must
    create `core-v0.1.1` at the release SHA, stage a draft Release with the exact
-   two-asset allowlist, verify staged digests, and publish it immutable with
-   `--latest=false`. No upload may clobber an existing draft asset.
+   two-asset allowlist, and publish it immutable with `--latest=false`. The
+   workflow must refuse an existing tag instead of moving it or resuming prior
+   state.
 6. Download the public assets and repeat the checksum. Verify the action
    attestation against the exact release SHA and
    `swartzrock/llm-now/.github/workflows/release-core.yml`, then run
@@ -1360,30 +1360,21 @@ checksum result, action and immutable-Release attestation identities,
 Node/Bun/NodeNext evidence, `release-publication` approval, and native-lane
 baseline/result to the durable release record.
 
-Re-run the exact tag and peeled SHA with `publish: true`. An exact complete
-immutable Release must be a verification-only no-op: no rebuild, attestation,
-tag movement, asset upload, Release edit, native build, or Homebrew update.
+Do not rerun publication for an existing tag or Release. Verify the public
+Release directly with the checksum and attestation commands from MT-43.
 
-```bash
-TAG=core-v0.1.1
-RELEASE_SHA="$(git rev-parse "${TAG}^{commit}")"
-gh workflow run release-core.yml --ref "$TAG" \
-  -f release-sha="$RELEASE_SHA" \
-  -f publish=true
-```
-
-For recovery before publication:
+For failure handling:
 
 - if no tag or Release exists, rerun the original automatic workflow run at
   the recorded release SHA rather than dispatching from newer `main`;
-- if the exact tag exists without a Release, use the exact tag-ref command
-  above with its peeled SHA;
-- if an exact draft exists, accept only missing expected assets whose bytes
-  match the preserved candidate; and
-- on any wrong tag SHA, unexpected or changed asset, incomplete published
-  Release, attestation mismatch, newer public core version, or ambiguous public
-  state, stop and preserve evidence. Fix-forward through a reviewed higher
-  patch Changeset; never delete, edit, move, overwrite, or replace public state.
+- if an unpublished draft or its exact tag remains, stop and preserve evidence.
+  Manual cleanup may delete the draft and then the tag only after confirming
+  that publication never completed and every identity matches the recorded
+  candidate; then rerun the original automatic run; and
+- on any published Release, wrong tag SHA, unexpected or changed asset,
+  attestation mismatch, or ambiguous state, preserve evidence and fix-forward
+  through a reviewed higher patch Changeset. Never delete, edit, move,
+  overwrite, or replace published state.
 
 Never rerun the historical `publish-core` npm workflow and never add credentials to make it pass.
 

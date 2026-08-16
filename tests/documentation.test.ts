@@ -165,29 +165,29 @@ describe("headless core documentation", () => {
     expect(changesetReadme).toContain("core-vX.Y.Z");
   });
 
-  test("documents first core Release setup, publication, and fail-closed recovery", () => {
+  test("documents first core Release setup and forward-only failure handling", () => {
     for (const phrase of [
       "repository-level immutable Releases",
       "release-publication",
       "protected `main`",
-      "stable `core-v*` recovery tags",
       "feature branches and pull-request refs",
       "draft Release",
       "exact two-asset",
       "--latest=false",
-      "exact complete immutable Release",
-      "verification-only no-op",
-      "exact tag without a Release",
       "selected workflow ref and `release-sha`",
       "fix-forward",
     ]) expect(releasing).toContain(phrase);
+    expect(releasing).toMatch(/manual cleanup/i);
     expect(releasing).toMatch(/core\s+`0\.1\.0` to `0\.1\.1`/i);
     expect(releasing).toMatch(/first GitHub core Release/i);
-    expect(releasing).toContain("gh workflow run release-core.yml --ref \"$TAG\"");
+    expect(releasing).toContain("gh workflow run release-core.yml --ref main");
     expect(releasing).toContain("-f release-sha=\"$RELEASE_SHA\"");
     expect(releasing).toContain("-f publish=true");
     expect(releasing).toMatch(/rerun the original automatic workflow run/i);
-    expect(releasing).toMatch(/preserve evidence/i);
+    expect(releasing).toMatch(/preserv(?:e|ing)\s+evidence/i);
+    expect(releasing).toMatch(/already exists.*refuses\s+publication/is);
+    expect(releasing).not.toContain("verification-only no-op");
+    expect(releasing).not.toContain("stable `core-v*` recovery tags");
     expect(releasing).toMatch(/never rerun.*historical.*publish-core/i);
 
     expect(manualTesting).toContain("MT-43: First GitHub core Release");

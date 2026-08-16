@@ -308,59 +308,53 @@ describe("release workflow policy", () => {
     expect(publishJob).not.toMatch(/\bbun\s+(?:run\s+)?scripts\//);
     expect(legacyCorePublishWorkflowExists).toBe(false);
     for (const pattern of forbiddenNpmAuthority) expect(activeWorkflowSource).not.toMatch(pattern);
-    expect(validateJob).toContain('awk -v heading="## $VERSION"');
-    expect(validateJob).toContain('expected_notes="$(jq -Rs . < "$RELEASE_NOTES_FILE")"');
-    expect(validateJob).toContain(
-      'test "$(jq -c \'.body\' release.json)" = "$expected_notes"',
-    );
+    expect(validateJob).not.toContain("gh release");
+    expect(publishJob).toContain('awk -v heading="## $VERSION"');
+    expect(publishJob).toContain("--notes-file .core-release-notes.md");
   });
 
-  test("reconciles only exact absent, tag-only, draft, or immutable public state", () => {
+  test("publishes only a new exact immutable Release", () => {
     const immutableSettingChecks = coreReleaseWorkflow.match(
       /repos\/\$GITHUB_REPOSITORY\/immutable-releases/g,
     ) ?? [];
     const settingsSecretBindings = coreReleaseWorkflow.match(
       /CORE_RELEASE_SETTINGS_TOKEN: \$\{\{ secrets\.CORE_RELEASE_SETTINGS_TOKEN \}\}/g,
     ) ?? [];
-    expect(immutableSettingChecks).toHaveLength(2);
-    expect(settingsSecretBindings).toHaveLength(2);
+    expect(immutableSettingChecks).toHaveLength(1);
+    expect(settingsSecretBindings).toHaveLength(1);
     expect(coreReleaseWorkflow).toContain('test -n "$CORE_RELEASE_SETTINGS_TOKEN"');
     expect(coreReleaseWorkflow).toContain('GH_TOKEN="$CORE_RELEASE_SETTINGS_TOKEN" gh api');
     expect(coreReleaseWorkflow.indexOf("repos/$GITHUB_REPOSITORY/immutable-releases"))
       .toBeGreaterThan(coreReleaseWorkflow.indexOf("environment: release-publication"));
     expect(coreReleaseWorkflow).toContain("immutable Releases must be enabled before publication");
-    expect(coreReleaseWorkflow).toContain('TAG="core-v$VERSION"');
-    expect(coreReleaseWorkflow).toContain('ASSET="swartzrock-llm-now-core-$VERSION.tgz"');
-    expect(coreReleaseWorkflow).toContain('printf \'%s\\n\' "$ASSET" "SHA256SUMS" | sort');
-    expect(coreReleaseWorkflow).toContain("Release $TAG exists without its tag");
-    expect(coreReleaseWorkflow).toContain("$TAG already points to another commit");
-    expect(coreReleaseWorkflow).toContain(
-      "untagged publication requires a release-shaped first-parent transition",
-    );
-    expect(coreReleaseWorkflow).toContain("^core-v(0|[1-9][0-9]*)");
-    expect(coreReleaseWorkflow).toContain(
-      "higher stable core Release $published_tag is already public",
-    );
-    expect(coreReleaseWorkflow).toContain('"$(jq -r \'.draft\' release.json)" != "false"');
-    expect(coreReleaseWorkflow).toContain('"$(jq -r \'.prerelease\' release.json)" != "false"');
-    expect(coreReleaseWorkflow).toContain('"$(jq -r \'.immutable\' release.json)" != "true"');
-    expect(coreReleaseWorkflow).toContain("incomplete or mutable published Release");
-    expect(coreReleaseWorkflow).toContain("draft Release contains unexpected assets");
-    expect(coreReleaseWorkflow).toContain("draft asset digest does not match preserved artifact");
-    expect(coreReleaseWorkflow).toContain('gh release create "$TAG" --draft');
-    expect(coreReleaseWorkflow).toContain('gh release upload "$TAG" "dist/$asset"');
+    expect(coreReleaseWorkflow).toContain('echo "tag=core-v$VERSION"');
+    expect(coreReleaseWorkflow).toContain('echo "asset=swartzrock-llm-now-core-$VERSION.tgz"');
+    expect(coreReleaseWorkflow).toContain('git ls-remote --exit-code --refs origin "refs/tags/$TAG"');
+    expect(coreReleaseWorkflow).toContain("Refusing to publish because tag $TAG already exists");
+    expect(coreReleaseWorkflow).toContain('gh release create "$TAG" "dist/$ASSET" dist/SHA256SUMS');
+    expect(coreReleaseWorkflow).toContain('--target "$RELEASE_SHA"');
+    expect(coreReleaseWorkflow).toContain("--draft");
+    expect(coreReleaseWorkflow).toContain(".isDraft == true");
+    expect(coreReleaseWorkflow).toContain(".immutable == true");
+    expect(coreReleaseWorkflow).toContain('([.assets[].name] | sort) == (["SHA256SUMS", env.ASSET] | sort)');
     expect(coreReleaseWorkflow).not.toContain("--clobber");
-    expect(coreReleaseWorkflow).toContain(
-      'gh release edit "$TAG" --draft=false --prerelease=false --latest=false --verify-tag',
+    expect(coreReleaseWorkflow).toMatch(
+      /gh release edit "\$TAG" --repo "\$GITHUB_REPOSITORY"\s+\\?\s*--draft=false --prerelease=false --latest=false --verify-tag/,
     );
     expect(coreReleaseWorkflow).not.toContain("gh release delete");
     expect(coreReleaseWorkflow).not.toContain("gh release delete-asset");
     expect(coreReleaseWorkflow).not.toContain("git tag -f");
     expect(coreReleaseWorkflow).not.toMatch(/git push[^\n]*(?:--force|-f\b)/);
+    expect(coreReleaseWorkflow).not.toContain("fetch_release()");
+    expect(coreReleaseWorkflow).not.toContain("tag-only");
+    expect(coreReleaseWorkflow).not.toContain("exact-complete");
+    expect(coreReleaseWorkflow).not.toContain("native-latest-baseline");
   });
 
-  test("verifies both attestations, exact assets, and native latest isolation", () => {
-    expect(coreReleaseWorkflow).toContain('gh release download "$TAG" --dir .published-release');
+  test("verifies the published checksum and both attestations", () => {
+    expect(coreReleaseWorkflow).toContain(
+      'gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir .published-release',
+    );
     expect(coreReleaseWorkflow).toContain('gh attestation verify ".published-release/$ASSET"');
     expect(coreReleaseWorkflow).toContain(
       '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-core.yml"',
@@ -372,37 +366,19 @@ describe("release workflow policy", () => {
     expect(coreReleaseWorkflow).toMatch(
       /gh release verify-asset "\$TAG" "\.published-release\/\$ASSET"\s+\\?\s*--repo "\$GITHUB_REPOSITORY"/,
     );
-    expect(coreReleaseWorkflow).toContain("native-latest-baseline=");
-    expect(coreReleaseWorkflow).toContain(
-      "latest Release must remain a stable native vX.Y.Z Release",
-    );
-    expect(coreReleaseWorkflow).toContain("latest Release moved backward during core publication");
-    expect(coreReleaseWorkflow).toContain("latest Release must never be the core Release");
-    expect(coreReleaseWorkflow).toContain("release-outcome=");
+    expect(coreReleaseWorkflow).toContain("--latest=false");
+    expect(coreReleaseWorkflow).toContain('test "$published_sha256" = "$EXPECTED_SHA256"');
     expect(coreReleaseWorkflow).toContain("tarball-sha256=");
-    expect(coreReleaseWorkflow).toContain(
-      "release-outcome: ${{ steps.reconcile.outputs.release-outcome || steps.remote-state.outputs.release-outcome }}",
-    );
-    expect(coreReleaseWorkflow).toContain(
-      "tarball-sha256: ${{ steps.state.outputs.tarball-sha256 }}",
-    );
-    expect(coreReleaseWorkflow).toContain(
-      'echo "tarball-sha256=${expected_line%% *}" >> "$GITHUB_OUTPUT"',
-    );
-    expect(coreReleaseWorkflow).toContain(
-      "needs.validate-ref.outputs.tarball-sha256",
-    );
+    expect(coreReleaseWorkflow).toContain("needs.artifact.outputs.tarball-sha256");
   });
 
-  test("fails closed when the GitHub release inventory cannot be read", () => {
-    const fetchFunctions = coreReleaseWorkflow.match(/fetch_release\(\) \{[\s\S]*?^          \}/gm) ?? [];
-    expect(fetchFunctions).toHaveLength(3);
-    for (const source of fetchFunctions) {
-      expect(source).toContain("if ! gh api");
-      expect(source).toContain("failed to fetch GitHub Releases");
-      expect(source).toContain("if ! jq --arg tag");
-      expect(source).toContain("failed to select the target GitHub Release");
-    }
+  test("uses a forward-only publication path", () => {
+    expect(coreReleaseWorkflow.match(/gh release create/g)).toHaveLength(1);
+    expect(coreReleaseWorkflow.match(/gh release edit/g)).toHaveLength(1);
+    expect(coreReleaseWorkflow.match(/repos\/\$GITHUB_REPOSITORY\/releases\?per_page/g)).toBeNull();
+    expect(coreReleaseWorkflow).not.toContain("higher stable core Release");
+    expect(coreReleaseWorkflow).not.toContain("verified-existing");
+    expect(coreReleaseWorkflow).not.toContain("release-outcome");
   });
 
   test("keeps core publication separate from Changesets and native releases", () => {
