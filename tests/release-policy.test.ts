@@ -29,13 +29,17 @@ const rootPackage = await Bun.file(new URL("../package.json", import.meta.url)).
 const releaseCoordinatorExists = await Bun.file(
   new URL("../.github/workflows/release-coordinator.yml", import.meta.url),
 ).exists();
+const dependabotConfig = await Bun.file(
+  new URL("../.github/dependabot.yml", import.meta.url),
+).text();
+const codeowners = await Bun.file(new URL("../.github/CODEOWNERS", import.meta.url)).text();
 
 describe("release workflow policy", () => {
   test("gates every enabled native archive on its exact compiled credential lifecycle", () => {
     for (const workflow of [ciWorkflow, releaseWorkflow]) {
       const nativeJob = workflow.slice(workflow.indexOf("\n  native:"));
       const gate = nativeJob.indexOf("bun scripts/release-validate.ts secrets");
-      const upload = nativeJob.indexOf("uses: actions/upload-artifact@v7.0.1");
+      const upload = nativeJob.indexOf("uses: actions/upload-artifact@");
       expect(gate).toBeGreaterThan(-1);
       expect(upload).toBeGreaterThan(gate);
       expect(workflow.match(/bun scripts\/release-validate\.ts secrets/g)).toHaveLength(2);
@@ -194,25 +198,20 @@ describe("release workflow policy", () => {
     }
   });
 
-  test("uses current release tags for GitHub actions and pins third-party actions", () => {
-    const githubActions = new Set([
-      "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6",
-      "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
-      "actions/checkout@v7.0.0",
-      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-      "actions/download-artifact@v8.0.1",
-      "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405",
-      "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
-      "actions/upload-artifact@v7.0.1",
-      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    ]);
+  test("pins every external GitHub action to a full commit SHA", () => {
     for (const workflow of [ciWorkflow, releaseWorkflow, changesetsWorkflow, coreReleaseWorkflow]) {
-      const actions = [...workflow.matchAll(/^\s+- uses:\s+([^\s#]+)/gm)].map((match) => match[1]!);
+      const actions = [...workflow.matchAll(/^\s+(?:-\s+)?uses:\s+([^\s#]+)/gm)]
+        .map((match) => match[1]!)
+        .filter((action) => !action.startsWith("./") && !action.startsWith("docker://"));
       expect(actions.length).toBeGreaterThan(0);
-      expect(actions.every((action) => action.startsWith("actions/")
-        ? githubActions.has(action)
-        : /@[a-f0-9]{40}$/.test(action))).toBe(true);
+      expect(actions.every((action) => /@[a-f0-9]{40}$/.test(action))).toBe(true);
     }
+  });
+
+  test("keeps GitHub Actions dependencies owned and automatically maintained", () => {
+    expect(dependabotConfig).toContain("package-ecosystem: github-actions");
+    expect(dependabotConfig).toContain('directory: "/"');
+    expect(codeowners).toMatch(/^\/\.github\/\s+@swartzrock$/m);
   });
 
   test("classifies automatic transitions and makes manual publication exact-SHA opt-in", () => {
