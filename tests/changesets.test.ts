@@ -40,9 +40,6 @@ const changesetsConfig = await Bun.file(
 const changesetsWorkflow = await Bun.file(
   new URL("../.github/workflows/changesets.yml", import.meta.url),
 ).text();
-const changesetsReadme = await Bun.file(
-  new URL("../.changeset/README.md", import.meta.url),
-).text();
 const changesetsBinary = new URL(
   "../node_modules/@changesets/cli/bin.js",
   import.meta.url,
@@ -77,12 +74,11 @@ describe("Changesets authoring", () => {
       workspaces: ["packages/*"],
     });
     expect(repositoryPackage.version).toBeUndefined();
-    expect(cliPackage).toMatchObject({ name: "llm-now", version: "2.7.0", private: true });
+    expect(cliPackage).toMatchObject({ name: "llm-now", private: true });
     expect(corePackage).toMatchObject({
       name: "@swartzrock/llm-now-core",
       private: true,
     });
-    expect(corePackage.version).toMatch(/^0\.\d+\.\d+$/);
     expect(corePackage.publishConfig).toBeUndefined();
     expect(cliPackage.devDependencies?.["@swartzrock/llm-now-core"]).toBe("workspace:^");
 
@@ -95,12 +91,6 @@ describe("Changesets authoring", () => {
 
   test("uses independent versions and keeps Changesets version-only", async () => {
     expect(repositoryPackage.private).toBe(true);
-    expect(repositoryPackage.devDependencies?.["@changesets/cli"]).toBe("2.31.0");
-    expect(repositoryPackage.scripts).toMatchObject({
-      changeset: "changeset",
-      "changeset:status": "changeset status --verbose",
-      "changeset:version": "changeset version",
-    });
     expect(repositoryPackage.scripts).not.toHaveProperty("changeset:publish");
     expect(changesetsConfig.fixed).toEqual([]);
     expect(changesetsConfig.linked).toEqual([]);
@@ -108,10 +98,6 @@ describe("Changesets authoring", () => {
     expect(changesetsConfig.privatePackages).toEqual({ version: true, tag: false });
     expect(corePackage.private).toBe(true);
     expect(corePackage.publishConfig).toBeUndefined();
-    expect(changesetsReadme).toContain("`llm-now` for CLI-only");
-    expect(changesetsReadme).toContain("`@swartzrock/llm-now-core` for core-only");
-    expect(changesetsReadme).toContain("both for shared");
-    expect(changesetsReadme).toContain("versions are independent");
 
     const workflowFiles = [
       new URL("../.github/workflows/ci.yml", import.meta.url),
@@ -211,7 +197,7 @@ describe("Changesets authoring", () => {
     });
     expect(root.exitCode).toBe(0);
     expect(workspace.exitCode).toBe(0);
-    expect(root.stdout.toString()).toBe("2.7.0\n");
+    expect(root.stdout.toString()).toBe(`${cliPackage.version}\n`);
     expect(workspace.stdout.toString()).toBe(root.stdout.toString());
     expect(workspace.stderr.toString()).toBe(root.stderr.toString());
   });

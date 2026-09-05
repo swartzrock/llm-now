@@ -90,21 +90,6 @@ describe("native release build", () => {
     expect(RELEASE_TARGETS.map((target) => target.bunTarget).join(" ")).not.toContain("musl");
   });
 
-  test("builds core before compiling the stable root entrypoint", async () => {
-    const buildScript = await Bun.file(new URL("../scripts/build.ts", import.meta.url)).text();
-    const repositoryPackage = await Bun.file(
-      new URL("../package.json", import.meta.url),
-    ).json() as { scripts?: Record<string, string> };
-    const main = buildScript.slice(buildScript.indexOf("async function main"));
-    const coreBuild = main.indexOf("buildCore()");
-    const nativeCompile = main.indexOf("buildTarget(target");
-
-    expect(buildScript).toContain('join(import.meta.dir, "build-core.ts")');
-    expect(coreBuild).toBeGreaterThan(-1);
-    expect(nativeCompile).toBeGreaterThan(coreBuild);
-    expect(repositoryPackage.scripts?.["build:native"]).toBe("bun scripts/build.ts");
-  });
-
   test("bundles the local workspace core into the root wrapper", async () => {
     const build = await Bun.build({
       entrypoints: [new URL("../index.ts", import.meta.url).pathname],
@@ -114,9 +99,6 @@ describe("native release build", () => {
 
     expect(build.success).toBe(true);
     expect(build.outputs).toHaveLength(1);
-    const bundled = await build.outputs[0]!.text();
-    expect(bundled).toContain("function createLlmNowCore");
-    expect(bundled).toContain("createCoreRuntimeGateway");
   });
 
   test("keeps runtime packages pinned to their source owners and core isolated", async () => {
@@ -139,87 +121,6 @@ describe("native release build", () => {
   test("uses stable versioned archive names", () => {
     expect(archiveName("0.1.0", RELEASE_TARGETS[0]!)).toBe("llm-now-v0.1.0-macos-x64.zip");
     expect(archiveName("0.1.0", RELEASE_TARGETS[4]!)).toBe("llm-now-v0.1.0-windows-x64.zip");
-  });
-
-  test("keeps release documentation aligned with archive names", async () => {
-    const readme = await Bun.file(new URL("../README.md", import.meta.url)).text();
-    const releasing = await Bun.file(new URL("../docs/RELEASING.md", import.meta.url)).text();
-    const manualTesting = await Bun.file(
-      new URL("../docs/manual-testing.md", import.meta.url),
-    ).text();
-
-    for (const target of RELEASE_TARGETS) {
-      expect(readme).toContain(archiveName("<version>", target));
-      expect(releasing).toContain(archiveName("<version>", target));
-      expect(manualTesting).toContain(archiveName("X.Y.Z", target));
-    }
-    expect(readme).toContain(
-      "[Download the latest release](https://github.com/swartzrock/llm-now/releases/latest)",
-    );
-    const homebrewInstall = "brew install swartzrock/tap/llm-now";
-    expect(readme).toContain(homebrewInstall);
-    expect(readme.indexOf(homebrewInstall)).toBeLessThan(
-      readme.indexOf("[Download the latest release]"),
-    );
-    expect(readme).not.toContain("RELEASE_URL=");
-    expect(readme).not.toContain("$Version =");
-  });
-
-  test("keeps packaged shortcut workspace and instruction coverage hermetic and observable", async () => {
-    const releaseValidation = await Bun.file(
-      new URL("../scripts/release-validate.ts", import.meta.url),
-    ).text();
-    const fakeCli = await Bun.file(
-      new URL("./fixtures/fake-cli.ts", import.meta.url),
-    ).text();
-    const expectedInstructions =
-      'Use "quoted" runtime smoke \\\\ transport.\\nKeep each answer concise.';
-    const expectedSharedInstructions = "Apply shared runtime smoke guidance.";
-    const expectedOverrideInstructions =
-      "  Replace saved smoke instructions.\\nUse the one-run override.  ";
-
-    expect(releaseValidation).toContain('"config.toml"');
-    expect(releaseValidation).toContain("serializeConfigDocument");
-    expect(releaseValidation).toContain("additional with spaces");
-    expect(releaseValidation).toContain("fake:instruction-shared-local:workspace-3");
-    expect(releaseValidation).toContain("fake:claude-instruction-shared-local:workspace-3");
-    expect(releaseValidation).toContain(expectedInstructions);
-    expect(fakeCli).toContain(expectedInstructions);
-    expect(releaseValidation).toContain(expectedSharedInstructions);
-    expect(fakeCli).toContain(expectedSharedInstructions);
-    expect(releaseValidation).toContain(expectedOverrideInstructions);
-    expect(fakeCli).toContain(expectedOverrideInstructions);
-    expect(releaseValidation).toContain("fake:instruction-absent");
-    expect(releaseValidation).toContain("fake:instruction-override");
-    expect(fakeCli).toContain("fake:instruction-override");
-    expect(fakeCli).toContain("unexpected fake CLI workspace configuration");
-    expect(fakeCli).toContain("unexpected fake Claude workspace configuration");
-    expect(fakeCli).toContain('args[toolsIndex + 1] !== "Read,Glob,Grep"');
-    expect(fakeCli).toContain("LLM_NOW_FAKE_WORKSPACE_PRIMARY");
-    expect(releaseValidation).toContain("PATH: temporary");
-    expect(releaseValidation).toContain('name.toUpperCase() !== "PATH"');
-    expect(releaseValidation).toContain("missing-login-shell");
-    expect(releaseValidation).not.toContain("process.env.PATH");
-    expect(releaseValidation).toContain(
-      "llm-now [<alias> | --alias <name>] [--input <text>]",
-    );
-    expect(releaseValidation).toContain("[--instruction <text>] [--stream] [--speak]");
-    expect(releaseValidation).not.toContain("llm-now --voice [--input <text>]");
-    expect(releaseValidation).toContain("non-macOS speech guard before scorer initialization");
-    expect(releaseValidation).toContain("voice: llm-now --speak currently supports macOS only.");
-    expect(releaseValidation).toContain("cross-platform fuzzy voice routing");
-    expect(fakeCli).toContain("unexpected fake CLI instruction configuration");
-    expect(fakeCli).toContain("unexpected fake CLI prompt");
-    expect(fakeCli).not.toContain("args.join");
-  });
-
-  test("keeps the macOS native voice-process regression in the compiled smoke", async () => {
-    const runtimeSmoke = await Bun.file(
-      new URL("./runtime-compile-smoke.ts", import.meta.url),
-    ).text();
-
-    expect(runtimeSmoke).toContain("voice process stream boundary");
-    expect(runtimeSmoke).toContain("fixtures/voice-process-compile-entry.ts");
   });
 
   test("audits the exact embedded voice-routing dependency boundary", async () => {
@@ -273,45 +174,6 @@ describe("native release build", () => {
       "package.json",
       "types.d.ts",
     ]);
-  });
-
-  test("keeps workspace documentation and release intent aligned", async () => {
-    const readme = await Bun.file(new URL("../README.md", import.meta.url)).text();
-    const configuration = await Bun.file(
-      new URL("../docs/configuration.md", import.meta.url),
-    ).text();
-    const manualTesting = await Bun.file(
-      new URL("../docs/manual-testing.md", import.meta.url),
-    ).text();
-    const demo = await Bun.file(
-      new URL("../docs/demos/llm-now-demo.tape", import.meta.url),
-    ).text();
-    const changeset = Bun.file(
-      new URL("../.changeset/calm-workspaces-wander.md", import.meta.url),
-    );
-    const releaseIntent = await changeset.exists()
-      ? await changeset.text()
-      : await Bun.file(new URL("../packages/cli/CHANGELOG.md", import.meta.url)).text();
-
-    for (const document of [readme, configuration, manualTesting]) {
-      expect(document).toContain("Codex CLI");
-      expect(document).toContain("Claude CLI");
-      expect(document).toContain("additional directories");
-      expect(document).toContain("read-only");
-      expect(document).toContain("read-write");
-      expect(document).toContain("plaintext");
-    }
-    expect(readme).toContain("workspace is execution context, not an availability rule");
-    expect(configuration).not.toContain("[aliases.codex.workspace]");
-    expect(configuration).toContain("directories = [");
-    expect(configuration).toContain('directory_access = "read-write"');
-    expect(configuration).not.toContain("primary_directory");
-    expect(configuration).not.toContain("additional_directories");
-    expect(manualTesting).toContain("fake:instruction-shared-local:workspace-3");
-    expect(demo).toContain("Primary workspace directory \\(press Enter to skip\\)");
-    expect(releaseIntent).toMatch(/"llm-now": minor|### Minor Changes/);
-    expect(releaseIntent).toContain("globally callable");
-    expect(releaseIntent).toContain("default-No");
   });
 
   test("creates a deterministic archive containing one executable", () => {

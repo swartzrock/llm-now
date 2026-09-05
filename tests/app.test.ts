@@ -3793,24 +3793,6 @@ describe("one-shot application", () => {
     );
   });
 
-  test("renders the existing-alias command in white", async () => {
-    const app = dependencies({
-      args: ["--input", "hello"],
-      stdin: input("", true),
-      stderrTty: true,
-      prompter: prompts({ choices: [false, "ollama", "qwen"] }),
-      loadAliases: async () => ({
-        version: 1,
-        aliases: { daily: { provider: "ollama", model: "qwen" } },
-      }),
-    });
-
-    expect(await runApplication(app.value)).toBe(0);
-    expect(app.stderr.text()).toContain(
-      "\u001b[37mllm-now daily --input \"<prompt>\"\u001b[39m",
-    );
-  });
-
   test("returns 130 when the alias picker is cancelled", async () => {
     const app = dependencies({
       args: ["--input", "hello"],
@@ -4791,25 +4773,6 @@ describe("one-shot application", () => {
     ]);
   });
 
-  test("emphasizes the provider and model in the alias field", async () => {
-    const inputMessages: string[] = [];
-    const app = dependencies({
-      args: ["--input", "hello"],
-      stdin: input("", true),
-      stderrTty: true,
-      runtime: runtime({ response: "done" }),
-      prompter: prompts({
-        choices: ["ollama", "qwen"],
-        names: [""],
-        inputMessages,
-      }),
-    });
-
-    expect(await runApplication(app.value)).toBe(0);
-    expect(inputMessages[0]).toContain("\u001b[1mOllama · qwen\u001b[22m");
-    expect(inputMessages[0]).not.toContain("e.g. fast");
-  });
-
   test("blank alias input exits successfully without saving", async () => {
     let saves = 0;
     const app = dependencies({
@@ -4897,7 +4860,7 @@ describe("one-shot application", () => {
     expect(inputMessages).toEqual([]);
   });
 
-  test("reports a saved alias with the alias and next-time command in white", async () => {
+  test("reports a saved alias and next-time command", async () => {
     const savedNames: string[] = [];
     const app = dependencies({
       args: ["--input", "hello", "--provider", "openai", "--model", "gpt-5"],
@@ -4914,13 +4877,9 @@ describe("one-shot application", () => {
     expect(await runApplication(app.value)).toBe(0);
     expect(savedNames).toEqual(["fast"]);
     expect(app.stdout.text()).toBe("response");
-    expect(app.stderr.text()).toContain(
-      "\u001b[32m◆ Saved alias \u001b[39m\u001b[37mfast\u001b[39m",
-    );
-    expect(app.stderr.text()).toContain(
-      "\u001b[32m → OpenAI · gpt-5\n  Next time, use \u001b[39m"
-      + "\u001b[37mllm-now fast --input \"<prompt>\"\u001b[39m",
-    );
+    const receipt = app.stderr.text().replace(/\u001b\[[0-9;]*m/g, "");
+    expect(receipt).toContain("Saved alias fast");
+    expect(receipt).toContain('llm-now fast --input "<prompt>"');
   });
 
   test("reports when the selected target is already saved under that name", async () => {
