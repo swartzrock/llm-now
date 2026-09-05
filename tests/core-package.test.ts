@@ -32,11 +32,6 @@ describe("private core package", () => {
           default: "./dist/index.js",
         },
       },
-      dependencies: {
-        "@3leaps/string-metrics-wasm": "0.3.11",
-        "@swartzrock/byok-runtime": "2.4.1",
-        "unicode-case-folding": "1.1.1",
-      },
     });
     expect(corePackage.publishConfig).toBeUndefined();
     expect(corePackage.scripts).toBeUndefined();
