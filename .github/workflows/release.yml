@@ -253,7 +253,7 @@ jobs:
       - run: bun scripts/build.ts --target ${{ matrix.target }} --outdir dist
       - shell: bash
         run: bun scripts/release-validate.ts smoke dist/*.zip
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-${{ matrix.target }}
           path: dist/*.zip
@@ -278,7 +278,7 @@ jobs:
           path: .release-artifacts
           merge-multiple: true
       - run: bun scripts/release-validate.ts assemble .release-artifacts dist
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-assets
           path: |
@@ -352,7 +352,7 @@ jobs:
           codesign -vvvv -R="notarized" --check-notarization signed/llm-now
       - shell: bash
         run: bun scripts/release-validate.ts smoke .release-artifacts/*.zip
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.target }}
           path: .release-artifacts/*.zip
@@ -389,7 +389,7 @@ jobs:
         env:
           VERSION: ${{ needs.validate-ref.outputs.version }}
           RELEASE_SHA: ${{ needs.validate-ref.outputs.release-sha }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-assets
           path: |
