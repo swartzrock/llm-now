@@ -30,6 +30,8 @@ $ llm-now local --input "Explain this error in plain English: ECONNREFUSED 127.0
 - [Headless core package](#headless-core-package)
 - [CLI reference](docs/cli-reference.md)
 
+Want something to try? Open the [cookbook of 20 reusable examples](examples/README.md).
+
 ## Install
 
 ### Homebrew (macOS and Linux)
